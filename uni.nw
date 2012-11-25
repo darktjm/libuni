@@ -2,7 +2,7 @@
 % Build with noweb:
 %  notangle -t8 build.nw > makefile
 %  make
-\documentclass[twoside,english]{report}
+\documentclass[twoside,english]{article}
 \usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
 %%% latex preamble
 \RCS $Id$
@@ -40,17 +40,17 @@ $Id$
 
 \begin{abstract}
 
-This document describes and implements a library which exports the
-Unicode Character Database in a convenient manner.  Libraries already
-exist that do this:  GLib, ICU, and others.  However, this library
-does things my way, which allows me to e.g. build a regular expression
-library and a compiler using these routines.
+This document describes and implements a library which provides
+basic Unicode (\url{http://www.unicode.org}) support in a convenient
+manner.  Libraries already exist that do this:  GLib, ICU, and others.
+However, this library does things my way, which allows me to e.g.
+build a regular expression library and a compiler using these routines.
 
 \end{abstract}
 
 \tableofcontents
 
-\chapter{Introduction}
+\section{Introduction}
 
 I do a lot of simple memory allocations, and it's easy to forget to
 include the sizeof(element) scale factor.  To make this easier, here
@@ -92,7 +92,7 @@ EXTRA_CFLAGS += -Wall -Wmissing-prototypes -Wno-unused-result -Wshadow \
 EXTRA_CXXFLAGS += -Wall -Wmissing-prototypes -Wno-unused-result -Wshadow
 @
 
-\chapter{File Input}
+\section{File Input}
 
 Input is in the form of normalized Unicode.  First, the raw input
 needs to be converted into integer code points.  Output may need to be
@@ -971,6 +971,808 @@ while(1) {
 }
 @
 
+\section{Unicode Tables}
+
+The Unicode standard, being the truly open standard that it is, freely
+supplies not only human-readable documents describing the standard,
+but machine-readable data files covering nearly all information about
+the characters.  The UCD (Unicode Character
+Database)\footnote{\url{http://www.unicode.org/Public/6.2.0/ucd}}
+contains text files with relatively stable formats for parsing.  Some
+Linux distributions package this information up as well.  This package
+was tested with version 6.0.0 and 6.2.0.  The name database in
+particular is more useful with versions 6.1.0 and later, where the
+name comment field is replaced with usable aliases for control
+characters.
+
+\lstset{language=make}
+<<makefile.config>>=
+# The location of the Unicode Character Database
+#UCD_LOC = /usr/share/unicode-data
+UCD_LOC = /home/darktjm/unicode/6.2/ucd
+@
+
+This library's primary purpose is to preparse this information and
+query it efficiently.  Unicode covers a lot of attributes regarding a
+lot of characters, and even some sequences of characters.  The size of
+a straight lookup table would end up in the multi-megabyte range
+\emph{for each attribute}.  Not only does this bloat the library, but
+it also guarantees that nothing will ever be in the cache.  Instead,
+several other strategies are used by this library.
+
+One of the simplest strategies is to store keyword-value pairs in a
+table, in order.  The keyword is usually the code point in this case.
+The table can be pre-generated, so there is no issue with insertion or
+deletion.  Lookup times are logarithmic with regard to the number of
+table entries.  If the number is large, this can be quite slow.
+Binary search is a trivial algorithm to (re)implement, but using
+[[bsearch]] can keep code cleaner.  Of course the following is just
+one example of implementation; other forms of data could be used as
+well.
+
+\lstset{language=C}
+<<Common data structures>>=
+typedef struct {
+  int32_t cp; /* can use sign bit for extra storage */
+              /* could also add a byte by making this :24 or smaller */
+  uint32_t data; /* have whole word available here */
+} uni_cp_dat_t;
+@
+
+<<Compare [[cp_dat]]>>=
+static int cmp_cp_dat(const void *a, const void *b)
+{
+    return ((uni_cp_dat_t *)a)->cp - ((uni_cp_dat_t *)b)->cp;
+}
+@
+
+<<Search [[cp_dat]] table>>=
+uni_cp_dat_t d = {cp}, *ret;
+ret = (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
+                              cmp_cp_dat);
+@
+
+One step above this strategy is to merge contiguous like-valued
+entries as ranges.  This doubles the amount of work at every step of
+the search, but often reduces the space requirements, and therefore
+also the number of steps, by orders of magnitude.  Most of my early
+work with this library used the sorted range table almost exclusively.
+The most common table where all entries are guaranteed to be
+like-valued are boolean tables; they do not even need a data field
+because presence of an element indicates truth.  Classification tables
+often have large contiguous blocks as well, but they need an extra
+data field.
+
+<<Common data structures>>=
+typedef struct {
+    int low, high;
+} uni_chrrng_t;
+@
+
+<<Compare [[chrrng]]>>=
+int cmprng(const void *a, const void *b)
+{
+    const uni_chrrng_t *_a = a, *_b = b;
+
+    if(_a->high < _b->low)
+        return -1;
+    else if(_b->high < _a->low)
+        return 1;
+    else
+        return 0;
+}
+@
+
+<<Search [[chrrng]] table>>=
+uni_chrrng_t cr = {cp, cp};
+int ret = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_t), cmprng) ? 1 : 0;
+@
+
+<<Common data structures>>=
+typedef struct {
+    int low, high, dat;
+} uni_chrrng_dat_t;
+@
+
+<<Compare [[chrrng_dat]]>>=
+int cmprng_dat(const void *a, const void *b)
+{
+    const uni_chrrng_dat_t *_a = a, *_b = b;
+
+    if(_a->high < _b->low)
+        return -1;
+    else if(_b->high < _a->low)
+        return 1;
+    else
+        return 0;
+}
+@
+
+<<Search [[chrrng_dat]] table>>=
+uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
+uint32_t ret;
+tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), cmprng_dat);
+ret = tab_el ? tab_el->dat : def;
+@
+
+One advantage of the above two approaches is that the algorithms for
+generating them from the text files is trivial, and can be implemented
+with simple shell scripts.  The files are already in code point order,
+so entries simply need to be read in and merged if they are adjacent.
+For example, UnicodeData.txt only lists a single code point per entry,
+except for certain specially named ranges.  The named ranges are all
+in angle brackets, with First and Last as the last word of the start
+and end of the range, respectively.  A simple shell script can be used
+to generate ranges into a data table.  The script can be used
+to generate the table directly (giving it a name), or it can be
+post-processed to add a data field, running it multiple time for each
+unique value of the data field and then sorting the results.  The data
+file's contents are filtered to the desired code points and passed in
+to this script's standard input.
+
+\lstset{language=make}
+<<makefile.vars>>=
+UNIDATA = $(UCD_LOC)/UnicodeData.txt
+@
+
+\lstset{language=sh}
+<<Build Script Executables>>=
+ud-ranges \
+@
+
+<<ud-ranges>>=
+#!/bin/sh
+<<Common NoWeb Warning>>
+test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
+cut -d\; -f1-2 | (
+  prevcp=-2
+  while IFS=\; read cp n; do
+    # if this cp doesn't follow prevcp, start new range
+    prevcp=$((prevcp+1))
+    if test $prevcp -lt $((0x$cp)); then
+      # end prev. range if it exists
+      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
+      # start new range
+      prevcp=$((0x$cp))
+      printf '\t{0x%06X, ' $prevcp
+    fi
+    # for range start entries, read range end and jump to end
+    case "$n" in *" First>") IFS=\; read cp n; prevcp=$((0x$cp));; esac
+  done
+  if [ $prevcp -ne -2 ]; then
+    # finish off last range
+    if [ -n "$1" ]; then
+      printf '0x%06X}\n' $prevcp
+    else
+      printf '0x%06X},\n' $prevcp
+    fi
+  fi
+)
+test -n "$1" && echo "};"
+test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
+@
+
+Most of the other data files, such as the property lists and alias
+files, specify ranges directly rather than using special names.  The
+only difference between this script and the one above is in how ranges
+are detected.
+
+\lstset{language=make}
+<<makefile.vars>>=
+UNIPROP = $(UCD_LOC)/PropList.txt
+UNIPROPALIAS = $(UCD_LOC)/PropertyAliases.txt
+UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
+UNIDER = $(UCD_LOC)/DerivedCoreProperties.txt
+@
+
+\lstset{language=sh}
+<<Build Script Executables>>=
+der-ranges \
+@
+
+<<der-ranges>>=
+#!/bin/sh
+<<Common NoWeb Warning>>
+test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
+cut -d\; -f1 | (
+  prevcp=-2
+  while read cpr; do
+    # if this cp doesn't follow prevcp, start new range
+    prevcp=$((prevcp+1))
+    cp=${cpr%%..*}
+    if test $prevcp -lt $((0x$cp)); then
+      # end prev. range if it exists
+      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
+      # start new range
+      prevcp=$((0x$cp))
+      printf '\t{0x%06X, ' $prevcp
+    fi
+    # for range entries, jump to end
+    case "$cpr" in *..*) cp=${cpr#*..}; prevcp=$((0x$cp));; esac
+  done
+  if [ $prevcp -ne -2 ]; then
+    # finish off last range
+    if [ -n "$1" ]; then
+      printf '0x%06X}\n' $prevcp
+    else
+      printf '0x%06X},\n' $prevcp
+    fi
+  fi
+)
+test -n "$1" && echo "};"
+test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
+@
+
+Of course nothing says that these need to be parsed by shell scripts.
+In fact, a C program could produce the same results, and even provide
+other features, such as merging multiple attributes into a single
+table, or specifying the search pattern and source files directly
+instead of relying on pre-filtered standard input.
+
+\lstset{language=make}
+<<C Build Executables>>=
+mktab \
+@
+
+<<makefile.rules>>=
+mktab: mktab.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+@
+
+\lstset{language=C}
+<<mktab.c>>=
+<<Common C Header>>
+
+<<[[mktab]] globals>>
+
+int main(int argc, const char **argv)
+{
+  FILE *inf;
+  <<[[mktab]] option variables>>
+  while(argc > 0) {
+    const char *arg = *++argv;
+    if(*arg != '-')
+      break;
+    argc--;
+    if(arg[1] == '-') {
+      argv++;
+      break;
+    }
+    switch(arg[1]) {
+      <<Process [[mktab]] option>>
+    }
+  }
+  if(argc > 0) {
+    inf = fopen(*argv, "r");
+    if(!inf) {
+      perror(*argv);
+      exit(1);
+    }
+  } else
+    inf = stdin;
+  <<Convert [[inf]] to range table>>
+  return 0;
+}
+@
+
+Another possibility would be to use multi-level tables with sharing at
+the lower levels.  This is effectively an optimized prefix tree.  The
+multi-level table approach requires fewer lookups (just as many table
+lookups as there are levels, vs. a binary search against a long range
+list that might take, say, 10 or more table probes), but even when
+using space-saving measures will likely still produce larger tables
+than even unoptimized range tables (range tables could be optimized
+for space by using only 24 bits per code point, for example, and
+storing the data byte in the upper byte).  The sharing requires
+additional management of a list of unique lower-level tables at each
+level, along with their users.  Making a change of any kind is a
+non-trivial operation.  This additional storage and computational
+expense makes these more suited to static one-time generation.  On the
+other hand, their straight lookup performance benefit over ranged
+tables is three-fold or more for many Unicode tables, without a need
+to do any special optimizations.
+
+There are probably very efficient algorithms to generate multi-level
+tables, but I am not aware of them.  The optimal number of levels and
+level size is difficult to find, but a pretty good number can be found
+by taking each level in turn, and finding the size which produces the
+minimum total length taking into account all uniques and the length of
+the array at the next level.  While it is possible to store the
+pointers in less memory, the next level is always assumed to store
+32-bit pointers for this computation.
+
+The [[split_data]] routine takes an array of bytes, and splits it into
+blocks of at least 4 bytes (there is no point in having a 4-byte
+pointer to 4 bytes of data).  It returns the size of each block, an
+array of pointers into the byte array to be used as the next level and
+the number of unique blocks, and may also modify the byte array to
+place the unique blocks at the start.
+
+<<Split data into multi-level table>>=
+<<[[split_data]] prereq>>
+
+static uint32_t split_data(uint8_t *data, uint32_t len, uint32_t **arr,
+                           uint32_t *nent, int moveit)
+{
+    /* track minimum size in minwidth (the block size) */
+    /* default is no blocking, indicated by block size 4 */
+    uint32_t minsize = len, minlen = 4;
+    /* NULL means no pointers (block size 4) */
+    *arr = NULL;
+    uint32_t curlen = 8; /* start at block larger than raw */
+    <<Variables saved from [[split_data]] loop>>
+
+    while(curlen < len) {
+        uint32_t blks = (len + curlen - 1) / curlen;
+        <<Create multi-level array of size [[curlen]]>>
+	<<Save multi-level array only if smaller than [[minsize]]>>
+	curlen *= 2;
+    }
+    if(moveit && minlen > 4) {
+      <<Shift unique array blocks down>>
+    }
+    *nent = minsize / minlen;
+    return minlen;
+}
+@
+
+For each pass, a new array for the index return is created.  In
+addition, a side array is created to store only the unique block
+indices.  This alone prevents having to scan the entire return array
+for block matches, speeding things up orders of magnitude with sparse
+data.  Additionally, this array is kept sorted, allowing binary
+searching to further reduce the number of comparisons needed.  Using a
+hash table for this would require extra storage, and may speed things
+up further.  In any case, each block is simply added to the return
+array, checking first for duplicates.  Only unique blocks are added to
+the total size.
+
+<<Create multi-level array of size [[curlen]]>>=
+uint32_t i, j;
+uint32_t size = 0;
+uint32_t *ret, *ublocks, nublocks = 0;
+
+ret = malloc(blks * sizeof(*ret));
+ublocks = malloc(blks * sizeof(*ublocks));
+for(i = 0; i < blks; i++) {
+  int h = nublocks - 1, l = 0;
+  while(l <= h) {
+    j = (l + h) / 2;
+    int c = memcmp(data + curlen * i, data + curlen * ublocks[j], curlen);
+    if(!c)
+      break;
+    if(c < 0)
+      h = j - 1;
+    else
+      l = j + 1;
+  }
+  if(l > h) {
+    if(++h == nublocks)
+      ublocks[nublocks++] = i;
+    else {
+      memmove(ublocks + h + 1, ublocks + h,
+              (nublocks - h) * sizeof(*ublocks));
+      ++nublocks;
+      ublocks[h] = i;
+    }
+    j = h;
+    size += curlen;
+  }
+  ret[i] = ublocks[j];
+}
+@
+
+If the array is to be saved, it is saved directly in the result
+pointer.  Otherwise, it is freed.  The binary search array only needs
+to be saved if blocks will be moved down.
+
+<<Variables saved from [[split_data]] loop>>=
+uint32_t *min_ublocks = NULL, min_nublocks = 0;
+@
+
+<<Save multi-level array only if smaller than [[minsize]]>>=
+if(size + (len / curlen) * 4 < minsize + (len / minlen) * 4) {
+  minsize = size;
+  minlen = curlen;
+  if(*arr)
+    free(*arr);
+  *arr = ret;
+  if(moveit) {
+    if(min_ublocks)
+      free(min_ublocks);
+    min_ublocks = ublocks;
+    min_nublocks = nublocks;
+  } else
+    free(ublocks);
+} else {
+  free(ret);
+  free(ublocks);
+}
+@
+
+Finally, to actually shift the data down, we need to re-sort the
+unique index array in numerical order, and then just copy them in that
+order.
+
+<<[[split_data]] prereq>>=
+static int cmp_i32(const void *a, const void *b)
+{
+  return *(int32_t *)a - *(int32_t *)b;
+}
+@
+
+<<Shift unique array blocks down>>=
+uint32_t i;
+qsort(min_ublocks, min_nublocks, sizeof(uint32_t), cmp_i32);
+for(i = 0; i < min_nublocks; i++)
+  if(min_ublocks[i] != i)
+    memcpy(data + minlen * i, data + minlen * min_ublocks[i], minlen);
+for(i = 0; i < (len + minlen - 1) / minlen; i++) {
+  uint32_t *p = bsearch(*arr + i, min_ublocks, min_nublocks,
+                        sizeof(uint32_t), cmp_i32);
+  (*arr)[i] = p - min_ublocks;
+}
+@
+
+To actually create a multi-level table, the [[split_data]] routine
+must be called on each level of the table, until there are no benefits
+to splitting any more.
+
+<<Split data into multi-level table>>=
+static void doit(const char *name, uint8_t *dat, uint32_t dlen,
+                 uint32_t low, uint32_t high)
+{
+  /* 32 bits, minimum 3 bits per level -> max 11 levels */
+  uint32_t *lev[11], levlen[11], levents[11];
+
+  <<Split data into optimal tables>>
+  /* now that the table has been built, spit it out */
+  printf("const uint8_t unitab_%s[] = {\n", name);
+  <<Print optimal multi-level table>>
+  puts("};");
+}
+@
+
+<<Split data into optimal tables>>=
+int32_t i;
+uint32_t nlev, levent;
+uint32_t levsz;
+uint8_t *levdat;
+
+/* first, optimize the raw data */
+for(nlev = 0, levent = levsz = dlen, levdat = dat; levdat; nlev++) {
+  uint32_t nptr;
+  levlen[nlev] = split_data(levdat, levsz, &lev[nlev], &levents[nlev], 1);
+  /* then, optimize the level's pointers */
+  levdat = (uint8_t *)lev[nlev];
+  levent = (levent + levlen[nlev] - 1) / levlen[nlev];
+  /* but first, compress to as few bytes as needed */
+  if(lev[nlev]) {
+    /* for simplicity, limit to 8/16/32, leaving out 24 */
+    nptr = levents[nlev];
+    if(nptr <= (1 << 8)) {
+      uint32_t *sp = lev[nlev];
+      uint8_t *dp = (uint8_t *)sp;
+
+      for(i = 0; i < levent; i++)
+        *dp++ = *sp++;
+      levsz = levent;
+    } else if(nptr <= (1 << 16)) {
+      uint32_t *sp = lev[nlev];
+      uint16_t *dp = (uint16_t *)sp;
+
+      for(i = 0; i < nptr; i++)
+        *dp++ = *sp++;
+      levsz = levent * 2;
+    } else
+      levsz = levent * 4;
+  } else {
+    /* if this is the last one, enure numbers are correct */
+    levents[nlev] = levsz;
+    levlen[nlev] = 1;
+  }
+}
+@
+
+<<Print optimal multi-level table>>=
+/* first, the low and high characters */
+/* this is endian-specific, so don't expect to save to file */
+puts("  /* low, high, # of entries in top-level table (32-bit) */");
+printf("  %d, %d, %d, %d,", ((uint8_t *)&low)[0],
+       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
+printf(" %d, %d, %d, %d,", ((uint8_t *)&high)[0],
+       ((uint8_t *)&high)[1], ((uint8_t *)&high)[2], ((uint8_t *)&high)[3]);
+/* next, the number of bytes in the first level, so it can be skipped */
+low = levents[nlev - 1];
+printf(" %d, %d, %d, %d,\n", ((uint8_t *)&low)[0],
+       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
+/* now, print each table, in reverse order (i.e., lookup order) */
+for(i = nlev - 1; i >= 0; i--) {
+  printf("  /** level %d **/\n", nlev - 1 - i);
+  <<Print optimal table level [[i]]>>
+}
+@
+
+<<Print optimal table level [[i]]>>=
+/* the first byte is the number of bits to mask off the bottom */
+/* assuming byte addressing */
+/* at lowest level, this is always 0 */
+uint32_t mbits = 0;
+uint32_t j;
+for(j = 0; j < i; j++)
+  mbits += lg2(levlen[j]);
+puts("  /* header: shift bits [, pwidth, twidth, tlen] */");
+printf("  %d,", mbits);
+if(i) {
+  /* for pointer levels, next is the pointer width. */
+  uint32_t nptr = levents[i - 1];
+  int nbytes = nptr > (1 << 16) ? 4 : nptr > (1 << 8) ? 2 : 1;
+  printf("  %d,", nbytes);
+  /* and the width of the target entries */
+  printf(" %d,", lg2(levlen[i - 1]));
+  /* and the first pointer, which is a pointer past the end of the next level */
+  /* or 0 if the next level has as many entries as the pointer width */
+  switch(nbytes) {
+    case 1:
+      printf(" %d,", nptr & 0xff);
+      break;
+    case 2: {
+      uint16_t p = nptr;
+      printf(" %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1]);
+      break;
+    }
+    case 4: {
+      uint32_t p = nptr;
+      printf(" %d, %d, %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1],
+             ((uint8_t *)&p)[2], ((uint8_t *)&p)[3]);
+      break;
+    }
+      
+  }
+}
+putchar('\n');
+/* then, the raw data */
+puts("  /* raw data */");
+putchar(' ');
+for(j = 0; j < levents[i] * levlen[i]; j++) {
+  if(j) {
+    putchar(',');
+    if(j > 1 && !((j - 1) % 16)) {
+      putchar('\n');
+      putchar(' ');
+    }
+  }
+  if(i)
+    printf(" %d", (int)((uint8_t *)lev[i - 1])[j]);
+  else
+    printf(" %d", (int)dat[j]);
+}
+if(i)
+  putchar(',');
+putchar('\n');
+@
+
+<<[[split_data]] prereq>>=
+static uint32_t bsz(uint32_t l)
+{
+    l |= l >> 1;
+    l |= l >> 2;
+    l |= l >> 4;
+    l |= l >> 8;
+    l |= l >> 16;
+    return l + 1;
+}
+
+static uint32_t lg2(uint32_t l)
+{
+    l = bsz(l - 1) - 1;
+    l = ((l & 0xaaaaaaaa) >> 1) + (l & 0x55555555);
+    l = ((l & 0xcccccccc) >> 2) + (l & 0x33333333);
+    l = ((l & 0xf0f0f0f0) >> 4) + (l & 0x0f0f0f0f);
+    l = ((l & 0xff00ff00) >> 8) + (l & 0x00ff00ff);
+    l = ((l & 0xffff0000) >> 16) + (l & 0x0000ffff);
+    return l;
+}
+@
+
+Consider the character type table: 2710 table entries in the range
+table, for a total of 32520 bytes and 12 lookups maximum (11 average).
+In comparison, the table produced by the above code, with pointers
+reduced to the minimum required (e.g. 1 byte to address 256 or fewer
+uniques), takes up 36747 bytes, but only requires 4 lookups. This is
+actually a relative win for the table approach.  However, consider the
+deprecated flag: 9 range entries for a total of 72 bytes and 4 lookups
+maximum (3 average), versus 2615 bytes and 4 lookups every time.  In
+fact, storage requirements are always greater for the table, unless
+there are a large number of relatively short ranges.  While the number
+of lookups is lower (unless there are only a few large ranges), the
+chance for cache thrashing is higher.  It's hard to say which is best.
+
+<<C Test Executables>>=
+tsttab \
+@
+
+<<makefile.rules>>=
+tsttab.o: chartypes.gen.h
+@
+
+<<tsttab.c>>=
+<<Common C Header>>
+
+#include "chartypes.h"
+// static_proto
+
+static uint8_t mtab_lookup(const uint8_t *dat, uint32_t val, uint8_t def)
+{
+  <<Look up an entry in optimal table>>
+}
+
+#include <sys/resource.h>
+struct rusage ru;
+
+static void tstart(void)
+{
+  getrusage(RUSAGE_SELF, &ru);
+}
+
+static unsigned long tend(void)
+{
+  struct rusage ru2;
+  getrusage(RUSAGE_SELF, &ru2);
+  return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
+            (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
+}
+
+static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
+                     const uint8_t *mtab, uint8_t def)
+{
+    uint32_t i;
+
+    /* check integrity */
+    for(i = 0; i < 0x110000; i++) {
+      uni_chrrng_dat_t cr = {i, i}, *res;
+      uint8_t b;
+      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
+      b = res ? res->dat : def;
+      if(b != mtab_lookup(mtab, i, def)) {
+        fprintf(stderr, "mismatch %s@%d\n", name, i);
+	exit(1);
+      }
+    }
+    /* check performance */
+    int j;
+    unsigned long tr, tt;
+    tstart();
+    for(j = 0; j < 10; j++)
+    for(i = 0; i < 0x110000; i++) {
+      uni_chrrng_dat_t cr = {i, i}, *res;
+      uint8_t b;
+      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
+      b = res ? res->dat : def;
+    }
+    tr = tend();
+    tstart();
+    for(j = 0; j < 10; j++)
+    for(i = 0; i < 0x110000; i++) {
+      uni_chrrng_dat_t cr = {i, i}, *res;
+      uint8_t b = mtab_lookup(mtab, i, def);
+    }
+    tt = tend();
+    printf("%s r%ld t%ld\n", name, tr, tt);
+}
+
+static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
+                      const uint8_t *mtab)
+{
+    uint32_t i;
+    
+    /* check integrity */
+    for(i = 0; i < 0x110000; i++) {
+      uni_chrrng_t cr = {i, i}, *res;
+      uint8_t b;
+      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
+      b = mtab_lookup(mtab, i / 8, 0);
+      if(!(b & (1 << (i & 7))) != !res) {
+        fprintf(stderr, "mismatch %s@%d\n", name, i);
+	exit(1);
+      }
+    }
+    /* check performance */
+    int j;
+    unsigned long tr, tt;
+    tstart();
+    for(j = 0; j < 10; j++)
+    for(i = 0; i < 0x110000; i++) {
+      uni_chrrng_t cr = {i, i}, *res;
+      uint8_t b;
+      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
+    }
+    tr = tend();
+    tstart();
+    for(j = 0; j < 10; j++)
+    for(i = 0; i < 0x110000; i++) {
+      uint8_t b;
+      b = mtab_lookup(mtab, i / 8, 0);
+      b &= i & 7;
+    }
+    tt = tend();
+    printf("%s r%ld t%ld\n", name, tr, tt);
+}
+
+int main(void)
+{
+#define dat(x, d) doit_dat(#x, unirng_##x, unirng_##x##_len, unitab_##x, d)
+#define bool(x) doit_bool(#x, unirng_##x, unirng_##x##_len, unitab_##x)
+  <<Convert ranges to tables>>
+  return 0;
+}
+@
+
+<<Look up an entry in optimal table>>=
+uint32_t low = *(uint32_t *)dat, high, skip;
+if(val < low)
+  return def;
+dat += 4;
+high = *(uint32_t *)dat;
+if(val > high)
+  return def;
+dat += 4;
+val -= low;
+skip = *(uint32_t *)dat;
+dat += 4;
+low = 0;
+while(*dat) {
+  uint8_t psz = dat[1];
+  uint32_t nextlen = 1 << dat[2];
+  uint32_t idx = val >> *dat;
+  uint32_t nskip = 0;
+  val -= idx << *dat;
+  dat += 3;
+  switch(psz) {
+    case 1:
+      nskip = *dat;
+      if(!nskip)
+        nskip = 0x100;
+      dat += low + 1;
+      idx = dat[idx];
+      break;
+    case 2:
+      nskip = *(uint16_t *)dat;
+      if(!nskip)
+        nskip = 0x10000;
+      dat += low + 2;
+      idx = ((uint16_t *)dat)[idx];
+      break;
+    case 4:
+      nskip = *(uint32_t *)dat;
+      dat += low + 4;
+      idx = ((uint32_t *)dat)[idx];
+      break;
+  }
+  dat += skip - low;
+  low = idx * nextlen;
+  skip = nskip * nextlen;
+}
+/* yay!  at last level */
+dat += low + 1; /* skip to correct block */
+return dat[val];
+@
+
+
+
+Another possibility would be to use more complex data structures.  I
+doubt I could come up with a more space-efficient storage method than
+the sorted range table, but some are much better at operations like
+lookup, scanning, or modification.  An appropriately designed hash
+table could be optimized off-line to provide even faster lookups, at
+the cost of fragility due to the hash algorithm probably depending on
+a particular Unicode release.  Prefix trees (tries, if you prefer)
+have good theoretical performance, and in fact the multi-level table
+is just a prefix tree of sorts.  It and many other faster tree
+approaches achieve their performance by assuming a constant time
+parent-to-child traversal with a large set of children, which once
+again equates to large storage penalties.
+
 \section{Unicode Normalization}
 
 After reading raw Unicode, it needs to be normalized.
@@ -1002,7 +1804,7 @@ uninorm.o
 @
 
 The UCD (Unicode Character
-Database)\footnote{\url{http://www.unicode.org/Public/6.0.0/ucd}}
+Database)\footnote{\url{http://www.unicode.org/Public/6.2.0/ucd}}
 contains files which can be processed to obtain the tables needed for
 normalization.  In particular, UnicodeData.txt, field 6 contains the
 decomposition information, and field 4 contains the canonical ordering
@@ -1010,17 +1812,8 @@ information.  Case folding information is scattered, but combined into
 the DerivedNormalizationProps.txt file.  The latter file also contains
 information regarding valid compositions.
 
-\lstset{language=make}
-<<makefile.config>>=
-# The location of the Unicode Character Database
-#UCD_LOC = /usr/share/unicode-data
-UCD_LOC = /home/darktjm/unicode/6.2/ucd
-@
-
 <<makefile.vars>>=
-UNIDATA = $(UCD_LOC)/UnicodeData.txt
 UNINORM = $(UCD_LOC)/DerivedNormalizationProps.txt
-UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
 @
 
 Rather than parse these files at run time, they are read in by a
@@ -1028,13 +1821,6 @@ helper program, and the results are spit out as C code.  The canonical
 ordering information is a table of all reorderable code points, along
 with their canonical combining class (the number indicating its sort
 order), sorted by code point for binary searching ([[ccctab]]).
-
-\lstset{language=C}
-<<Unicode normalization support local definitions>>=
-typedef struct {
-  int cp, ccc;
-} uni_ccc_t;
-@
 
 The decomposition information is a table of decomposable source code
 points and their destination strings, sorted by source code point for
@@ -1106,28 +1892,27 @@ const uni_decent_t *find_decomp(int cp, int canon);
 @
 
 <<Unicode normalization support local definitions>>=
-static int cmp_de(const void *a, const void *b)
-{
-    return ((uni_decent_t *)a)->cp - ((uni_decent_t *)b)->cp;
-}
+<<Compare [[cp_dat]]>>
 @
 
 <<Unicode normalization support functions>>=
 const uni_decent_t *find_decomp(int cp, int canon)
 {
-    uni_decent_t de = {cp}, *ret;
-    ret = (uni_decent_t *)bsearch(&de, decomp, sizeof(decomp)/sizeof(*decomp),
-                                   sizeof(*decomp), cmp_de);
+    const uni_cp_dat_t *tab = (uni_cp_dat_t *)decomp;
+    uint32_t tab_len = sizeof(decomp)/sizeof(*decomp);
+    uni_decent_t *dret;
+    <<Search [[cp_dat]] table>>
     if(!ret)
         return NULL;
-    if(canon && ret > decomp && ret[-1].cp == cp)
-        return ret - 1;
-    if(!canon && ret < decomp + sizeof(decomp) / sizeof(*decomp) - 1 &&
-       ret[1].cp == cp)
-        return ret + 1;
-    if(canon && ret->len < 0)
+    dret = (uni_decent_t *)ret;
+    if(canon && ret > decomp && dret[-1].cp == cp)
+        return dret - 1;
+    if(!canon && dret < decomp + tab_len - 1 &&
+       dret[1].cp == cp)
+        return dret + 1;
+    if(canon && dret->len < 0)
         return NULL;
-    return ret;
+    return dret;
 }
 @
 
@@ -1142,9 +1927,10 @@ const uni_decent_t *find_nfkc_cf(int cp);
 <<Unicode normalization support functions>>=
 const uni_decent_t *find_nfkc_cf(int cp)
 {
-    uni_decent_t de = {cp};
-    return (uni_decent_t *)bsearch(&de, nfkc_cf, sizeof(nfkc_cf)/sizeof(*nfkc_cf),
-                                    sizeof(*nfkc_cf), cmp_de);
+    uni_cp_dat_t *tab = (uni_cp_dat_t *)nfkc_cf;
+    uint32_t tab_len = sizeof(nfkc_cf)/sizeof(*nfkc_cf);
+    <<Search [[cp_dat]] table>>
+    return (uni_decent_t *)ret;
 }
 @
 
@@ -1157,21 +1943,14 @@ ccc is zero for anything not in the table.
 int find_ccc(int cp);
 @
 
-<<Unicode normalization support local definitions>>=
-static int cmp_ccc(const void *a, const void *b)
-{
-    return ((uni_ccc_t *)a)->cp - ((uni_ccc_t *)b)->cp;
-}
-@
-
 <<Unicode normalization support functions>>=
 int find_ccc(int cp)
 {
-    uni_ccc_t ccc = {cp}, *ret;
-    ret =  (uni_ccc_t *)bsearch(&ccc, ccctab, sizeof(ccctab)/sizeof(*ccctab),
-                                 sizeof(*ccctab), cmp_ccc);
+    const uni_cp_dat_t *tab = ccctab;
+    uint32_t tab_len = sizeof(ccctab)/sizeof(*ccctab);
+    <<Search [[cp_dat]] table>>
     if(ret)
-        return ret->ccc;
+        return ret->data;
     else
         return 0;
 }
@@ -2420,501 +3199,6 @@ int cmprng_dat(const void *a, const void *b)
 #define x_of(x, i) uni_##x##_t range_ret(x, i)
 @
 
-Another possibility would be to use multi-level tables with sharing at
-the lower levels.  The multi-level table approach requires fewer
-lookups (just as many table lookups as there are levels, vs. a binary
-search against a long range list that might take, say, 10 or more
-table probes), but will likely still produce larger tables than the
-range tables, and is difficult to create efficiently at run-time.  The
-latter problem means that it is difficult to find the union or
-intersection of multi-level tables.
-
-There are probably very efficient algorithms to generate multi-level
-tables, but I am not aware of them.  The optimal number of levels and
-level size is difficult to find, but a pretty good number can be found
-by taking each level in turn, and finding the size which produces the
-minimum total length taking into account all uniques and the length of
-the array at the next level.  While it is possible to store the
-pointers in less memory, the next level is always assumed to store
-32-bit pointers for this computation.
-
-The [[split_data]] routine takes an array of bytes, and splits it into
-blocks of at least 4 bytes (there is no point in having a 4-byte
-pointer to 4 bytes of data).  It returns the size of each block, an
-array of pointers into the byte array to be used as the next level and
-the number of unique blocks, and may also modify the byte array to
-place the unique blocks at the start.
-
-<<Split data into multi-level table>>=
-<<[[split_data]] prereq>>
-
-static uint32_t split_data(uint8_t *data, uint32_t len, uint32_t **arr,
-                           uint32_t *nent, int moveit)
-{
-    /* track minimum size in minwidth (the block size) */
-    /* default is no blocking, indicated by block size 4 */
-    uint32_t minsize = len, minlen = 4;
-    /* NULL means no pointers (block size 4) */
-    *arr = NULL;
-    uint32_t curlen = 8; /* start at block larger than raw */
-    <<Variables saved from [[split_data]] loop>>
-
-    while(curlen < len) {
-        uint32_t blks = (len + curlen - 1) / curlen;
-        <<Create multi-level array of size [[curlen]]>>
-	<<Save multi-level array only if smaller than [[minsize]]>>
-	curlen *= 2;
-    }
-    if(moveit && minlen > 4) {
-      <<Shift unique array blocks down>>
-    }
-    *nent = minsize / minlen;
-    return minlen;
-}
-@
-
-For each pass, a new array for the index return is created.  In
-addition, a side array is created to store only the unique block
-indices.  This alone prevents having to scan the entire return array
-for block matches, speeding things up orders of magnitude with sparse
-data.  Additionally, this array is kept sorted, allowing binary
-searching to further reduce the number of comparisons needed.  Using a
-hash table for this would require extra storage, and may speed things
-up further.  In any case, each block is simply added to the return
-array, checking first for duplicates.  Only unique blocks are added to
-the total size.
-
-<<Create multi-level array of size [[curlen]]>>=
-uint32_t i, j;
-uint32_t size = 0;
-uint32_t *ret, *ublocks, nublocks = 0;
-
-ret = malloc(blks * sizeof(*ret));
-ublocks = malloc(blks * sizeof(*ublocks));
-for(i = 0; i < blks; i++) {
-  int h = nublocks - 1, l = 0;
-  while(l <= h) {
-    j = (l + h) / 2;
-    int c = memcmp(data + curlen * i, data + curlen * ublocks[j], curlen);
-    if(!c)
-      break;
-    if(c < 0)
-      h = j - 1;
-    else
-      l = j + 1;
-  }
-  if(l > h) {
-    if(++h == nublocks)
-      ublocks[nublocks++] = i;
-    else {
-      memmove(ublocks + h + 1, ublocks + h,
-              (nublocks - h) * sizeof(*ublocks));
-      ++nublocks;
-      ublocks[h] = i;
-    }
-    j = h;
-    size += curlen;
-  }
-  ret[i] = ublocks[j];
-}
-@
-
-If the array is to be saved, it is saved directly in the result
-pointer.  Otherwise, it is freed.  The binary search array only needs
-to be saved if blocks will be moved down.
-
-<<Variables saved from [[split_data]] loop>>=
-uint32_t *min_ublocks = NULL, min_nublocks = 0;
-@
-
-<<Save multi-level array only if smaller than [[minsize]]>>=
-if(size + (len / curlen) * 4 < minsize + (len / minlen) * 4) {
-  minsize = size;
-  minlen = curlen;
-  if(*arr)
-    free(*arr);
-  *arr = ret;
-  if(moveit) {
-    if(min_ublocks)
-      free(min_ublocks);
-    min_ublocks = ublocks;
-    min_nublocks = nublocks;
-  } else
-    free(ublocks);
-} else {
-  free(ret);
-  free(ublocks);
-}
-@
-
-Finally, to actually shift the data down, we need to re-sort the
-unique index array in numerical order, and then just copy them in that
-order.
-
-<<[[split_data]] prereq>>=
-static int cmp_i32(const void *a, const void *b)
-{
-  return *(int32_t *)a - *(int32_t *)b;
-}
-@
-
-<<Shift unique array blocks down>>=
-uint32_t i;
-qsort(min_ublocks, min_nublocks, sizeof(uint32_t), cmp_i32);
-for(i = 0; i < min_nublocks; i++)
-  if(min_ublocks[i] != i)
-    memcpy(data + minlen * i, data + minlen * min_ublocks[i], minlen);
-for(i = 0; i < (len + minlen - 1) / minlen; i++) {
-  uint32_t *p = bsearch(*arr + i, min_ublocks, min_nublocks,
-                        sizeof(uint32_t), cmp_i32);
-  (*arr)[i] = p - min_ublocks;
-}
-@
-
-To actually create a multi-level table, the [[split_data]] routine
-must be called on each level of the table, until there are no benefits
-to splitting any more.
-
-<<Split data into multi-level table>>=
-static void doit(const char *name, uint8_t *dat, uint32_t dlen,
-                 uint32_t low, uint32_t high)
-{
-  /* 32 bits, minimum 3 bits per level -> max 11 levels */
-  uint32_t *lev[11], levlen[11], levents[11];
-
-  <<Split data into optimal tables>>
-  /* now that the table has been built, spit it out */
-  printf("const uint8_t unitab_%s[] = {\n", name);
-  <<Print optimal multi-level table>>
-  puts("};");
-}
-@
-
-<<Split data into optimal tables>>=
-int32_t i;
-uint32_t nlev, levent;
-uint32_t levsz;
-uint8_t *levdat;
-
-/* first, optimize the raw data */
-for(nlev = 0, levent = levsz = dlen, levdat = dat; levdat; nlev++) {
-  uint32_t nptr;
-  levlen[nlev] = split_data(levdat, levsz, &lev[nlev], &levents[nlev], 1);
-  /* then, optimize the level's pointers */
-  levdat = (uint8_t *)lev[nlev];
-  levent = (levent + levlen[nlev] - 1) / levlen[nlev];
-  /* but first, compress to as few bytes as needed */
-  if(lev[nlev]) {
-    /* for simplicity, limit to 8/16/32, leaving out 24 */
-    nptr = levents[nlev];
-    if(nptr <= (1 << 8)) {
-      uint32_t *sp = lev[nlev];
-      uint8_t *dp = (uint8_t *)sp;
-
-      for(i = 0; i < levent; i++)
-        *dp++ = *sp++;
-      levsz = levent;
-    } else if(nptr <= (1 << 16)) {
-      uint32_t *sp = lev[nlev];
-      uint16_t *dp = (uint16_t *)sp;
-
-      for(i = 0; i < nptr; i++)
-        *dp++ = *sp++;
-      levsz = levent * 2;
-    } else
-      levsz = levent * 4;
-  } else {
-    /* if this is the last one, enure numbers are correct */
-    levents[nlev] = levsz;
-    levlen[nlev] = 1;
-  }
-}
-@
-
-<<Print optimal multi-level table>>=
-/* first, the low and high characters */
-/* this is endian-specific, so don't expect to save to file */
-puts("  /* low, high, # of entries in top-level table (32-bit) */");
-printf("  %d, %d, %d, %d,", ((uint8_t *)&low)[0],
-       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
-printf(" %d, %d, %d, %d,", ((uint8_t *)&high)[0],
-       ((uint8_t *)&high)[1], ((uint8_t *)&high)[2], ((uint8_t *)&high)[3]);
-/* next, the number of bytes in the first level, so it can be skipped */
-low = levents[nlev - 1];
-printf(" %d, %d, %d, %d,\n", ((uint8_t *)&low)[0],
-       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
-/* now, print each table, in reverse order (i.e., lookup order) */
-for(i = nlev - 1; i >= 0; i--) {
-  printf("  /** level %d **/\n", nlev - 1 - i);
-  <<Print optimal table level [[i]]>>
-}
-@
-
-<<Print optimal table level [[i]]>>=
-/* the first byte is the number of bits to mask off the bottom */
-/* assuming byte addressing */
-/* at lowest level, this is always 0 */
-uint32_t mbits = 0;
-uint32_t j;
-for(j = 0; j < i; j++)
-  mbits += lg2(levlen[j]);
-puts("  /* header: shift bits [, pwidth, twidth, tlen] */");
-printf("  %d,", mbits);
-if(i) {
-  /* for pointer levels, next is the pointer width. */
-  uint32_t nptr = levents[i - 1];
-  int nbytes = nptr > (1 << 16) ? 4 : nptr > (1 << 8) ? 2 : 1;
-  printf("  %d,", nbytes);
-  /* and the width of the target entries */
-  printf(" %d,", lg2(levlen[i - 1]));
-  /* and the first pointer, which is a pointer past the end of the next level */
-  /* or 0 if the next level has as many entries as the pointer width */
-  switch(nbytes) {
-    case 1:
-      printf(" %d,", nptr & 0xff);
-      break;
-    case 2: {
-      uint16_t p = nptr;
-      printf(" %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1]);
-      break;
-    }
-    case 4: {
-      uint32_t p = nptr;
-      printf(" %d, %d, %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1],
-             ((uint8_t *)&p)[2], ((uint8_t *)&p)[3]);
-      break;
-    }
-      
-  }
-}
-putchar('\n');
-/* then, the raw data */
-puts("  /* raw data */");
-putchar(' ');
-for(j = 0; j < levents[i] * levlen[i]; j++) {
-  if(j) {
-    putchar(',');
-    if(j > 1 && !((j - 1) % 16)) {
-      putchar('\n');
-      putchar(' ');
-    }
-  }
-  if(i)
-    printf(" %d", (int)((uint8_t *)lev[i - 1])[j]);
-  else
-    printf(" %d", (int)dat[j]);
-}
-if(i)
-  putchar(',');
-putchar('\n');
-@
-
-<<[[split_data]] prereq>>=
-static uint32_t bsz(uint32_t l)
-{
-    l |= l >> 1;
-    l |= l >> 2;
-    l |= l >> 4;
-    l |= l >> 8;
-    l |= l >> 16;
-    return l + 1;
-}
-
-static uint32_t lg2(uint32_t l)
-{
-    l = bsz(l - 1) - 1;
-    l = ((l & 0xaaaaaaaa) >> 1) + (l & 0x55555555);
-    l = ((l & 0xcccccccc) >> 2) + (l & 0x33333333);
-    l = ((l & 0xf0f0f0f0) >> 4) + (l & 0x0f0f0f0f);
-    l = ((l & 0xff00ff00) >> 8) + (l & 0x00ff00ff);
-    l = ((l & 0xffff0000) >> 16) + (l & 0x0000ffff);
-    return l;
-}
-@
-
-Consider the character type table: 2710 table entries in the range
-table, for a total of 32520 bytes and 12 lookups maximum (11 average).
-In comparison, the table produced by the above code, with pointers
-reduced to the minimum required (e.g. 1 byte to address 256 or fewer
-uniques), takes up 36747 bytes, but only requires 4 lookups. This is
-actually a relative win for the table approach.  However, consider the
-deprecated flag: 9 range entries for a total of 72 bytes and 4 lookups
-maximum (3 average), versus 2615 bytes and 4 lookups every time.  In
-fact, storage requirements are always greater for the table, unless
-there are a large number of relatively short ranges.  While the number
-of lookups is lower (unless there are only a few large ranges), the
-chance for cache thrashing is higher.  It's hard to say which is best.
-
-<<C Test Executables>>=
-tsttab \
-@
-
-<<makefile.rules>>=
-tsttab.o: chartypes.gen.h
-@
-
-<<tsttab.c>>=
-<<Common C Header>>
-
-#include "chartypes.h"
-// static_proto
-
-static uint8_t mtab_lookup(const uint8_t *dat, uint32_t val, uint8_t def)
-{
-  <<Look up an entry in optimal table>>
-}
-
-#include <sys/resource.h>
-struct rusage ru;
-
-static void tstart(void)
-{
-  getrusage(RUSAGE_SELF, &ru);
-}
-
-static unsigned long tend(void)
-{
-  struct rusage ru2;
-  getrusage(RUSAGE_SELF, &ru2);
-  return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
-            (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
-}
-
-static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
-                     const uint8_t *mtab, uint8_t def)
-{
-    uint32_t i;
-
-    /* check integrity */
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
-      b = res ? res->dat : def;
-      if(b != mtab_lookup(mtab, i, def)) {
-        fprintf(stderr, "mismatch %s@%d\n", name, i);
-	exit(1);
-      }
-    }
-    /* check performance */
-    int j;
-    unsigned long tr, tt;
-    tstart();
-    for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
-      b = res ? res->dat : def;
-    }
-    tr = tend();
-    tstart();
-    for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
-      uint8_t b = mtab_lookup(mtab, i, def);
-    }
-    tt = tend();
-    printf("%s r%ld t%ld\n", name, tr, tt);
-}
-
-static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
-                      const uint8_t *mtab)
-{
-    uint32_t i;
-    
-    /* check integrity */
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
-      b = mtab_lookup(mtab, i / 8, 0);
-      if(!(b & (1 << (i & 7))) != !res) {
-        fprintf(stderr, "mismatch %s@%d\n", name, i);
-	exit(1);
-      }
-    }
-    /* check performance */
-    int j;
-    unsigned long tr, tt;
-    tstart();
-    for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
-    }
-    tr = tend();
-    tstart();
-    for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uint8_t b;
-      b = mtab_lookup(mtab, i / 8, 0);
-      b &= i & 7;
-    }
-    tt = tend();
-    printf("%s r%ld t%ld\n", name, tr, tt);
-}
-
-int main(void)
-{
-#define dat(x, d) doit_dat(#x, unirng_##x, unirng_##x##_len, unitab_##x, d)
-#define bool(x) doit_bool(#x, unirng_##x, unirng_##x##_len, unitab_##x)
-  <<Convert ranges to tables>>
-  return 0;
-}
-@
-
-<<Look up an entry in optimal table>>=
-uint32_t low = *(uint32_t *)dat, high, skip;
-if(val < low)
-  return def;
-dat += 4;
-high = *(uint32_t *)dat;
-if(val > high)
-  return def;
-dat += 4;
-val -= low;
-skip = *(uint32_t *)dat;
-dat += 4;
-low = 0;
-while(*dat) {
-  uint8_t psz = dat[1];
-  uint32_t nextlen = 1 << dat[2];
-  uint32_t idx = val >> *dat;
-  uint32_t nskip = 0;
-  val -= idx << *dat;
-  dat += 3;
-  switch(psz) {
-    case 1:
-      nskip = *dat;
-      if(!nskip)
-        nskip = 0x100;
-      dat += low + 1;
-      idx = dat[idx];
-      break;
-    case 2:
-      nskip = *(uint16_t *)dat;
-      if(!nskip)
-        nskip = 0x10000;
-      dat += low + 2;
-      idx = ((uint16_t *)dat)[idx];
-      break;
-    case 4:
-      nskip = *(uint32_t *)dat;
-      dat += low + 4;
-      idx = ((uint32_t *)dat)[idx];
-      break;
-  }
-  dat += skip - low;
-  low = idx * nextlen;
-  skip = nskip * nextlen;
-}
-/* yay!  at last level */
-dat += low + 1; /* skip to correct block */
-return dat[val];
-@
-
 The actual range tables can be automatically generated from the UCD.
 
 <<Character type local definitions>>=
@@ -2941,6 +3225,10 @@ chartypes.gen.h: chartypes.c chartypes.gen
 	echo >$@
 	<<Generate [[chartypes.gen.h]]>>
 	cproto -E "$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -E" -v -e -f 0 $< >>$@
+@
+
+<<C Headers>>=
+chartypes.gen.h \
 @
 
 First, although technically all code points from 0000 through 10FFFF
@@ -2975,43 +3263,6 @@ current point as the start of the next range.  It takes an optional
 argument specifying the array name; without that, it just spits out
 the array and not the full C definition, in case the array needs
 further processing.
-
-\lstset{language=sh}
-<<Build Script Executables>>=
-ud-ranges \
-@
-
-<<ud-ranges>>=
-#!/bin/sh
-<<Common NoWeb Warning>>
-test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
-cut -d\; -f1-2 | (
-  prevcp=-2
-  while IFS=\; read cp n; do
-    # if this cp doesn't follow prevcp, start new range
-    prevcp=$((prevcp+1))
-    if test $prevcp -lt $((0x$cp)); then
-      # end prev. range if it exists
-      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
-      # start new range
-      prevcp=$((0x$cp))
-      printf '\t{0x%06X, ' $prevcp
-    fi
-    # for range start entries, read range end and jump to end
-    case "$n" in *" First>") IFS=\; read cp n; prevcp=$((0x$cp));; esac
-  done
-  if [ $prevcp -ne -2 ]; then
-    # finish off last range
-    if [ -n "$1" ]; then
-      printf '0x%06X}\n' $prevcp
-    else
-      printf '0x%06X},\n' $prevcp
-    fi
-  fi
-)
-test -n "$1" && echo "};"
-test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
-@
 
 The sort of post-processing the script supports is adding the values
 and sorting.  For the Unicode General Category (gc), each one is
@@ -3172,15 +3423,138 @@ bool(depr);
 bool(ign);
 @
 
+For regex:
+\begin{verbatim}
+Don't forgot sloppiness rules:
+numeric (UAX44-LM1):
+  compare as floating-point number w/ limited precision
+  e.g. 01.00 == 1
+name (UAX44-LM2):
+  ignore case, whitespace, underscore, and medial hyphens except 1180
+name (UTS18-2.5.1):
+  ignore case, whitespace, underscore, and all hyphens except 1180,
+     0F60, 0FB0
+  allow "namespace": prefix to apply if name doesn't match otherwise
+    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
+      insert CAPITAL and LOWER into appropriate spot.
+enum/propname (UAX44-LM3):
+  - case-insensitive
+  - remove *PREFIX* of is (not entire value if value is "is")
+  - remove all spaces, underscores, dashes
+
+General_Category (gc)
+Script (sc)
+Alphabetic (Alpha|alpha) == gc=L or Other_Alphabetic in PropList.txt
+Lowercase (Lower|lower) == gc=Ll or Other_Lowercase in PropList.txt
+Uppercase (Upper|upper) == gc=Lu or Other_Uppercase in PropList.txt
+White_Space (WSpace) == PropList.txt
+Noncharacter_Code_Point (NChar) == PropList.txt
+Default_Ignorable_Code_Point (DI) == DerivedCoreProperties.txt
+punct == gc==P & gc!=S & !alpha
+uni_punct == gc==P
+digit == 0-9
+uni_digit == gc==Nd
+xdigit == 0-9a-fA-F
+uni_xdigit == gc=Nd + Hex_Digit
+Hex_Digit (Hex) == PropList.txt
+alnum == alpha + digit
+uni_alnum == alpha + uni_digit
+blank == gc=Zs + TAB
+graph == anything but White_Space, gc=Cc, gc=Cs, gc=Cn
+print == graph + blank - gc=Cc
+word == alnum + _ (by default)
+uni_word == uni_alnum + gc=M + gc=Pc plus Join_Control
+Join_Control (Join_C) == PropList.txt
+l2:
+Name (na) == UnicodeData.txt, field 2
+Name_Alias == NameAliases.txt
+Script_Extensions (scx) == ScriptExtensions.txt (multi)
+Block (blk) == Blocks.txt
+Age (age) == DerivedAge.txt
+Hangul_Syllable_Type (hst) == L, V, T, LV, LVT depending on block
+Deprecated (Dep) == PropList.txt
+Logical_Order_Exception (LOE) == PropList.txt
+Variation_Selector (VS) == PropList.txt
+Numeric_Value (nv) == UnicodeData.txt, field 8
+Numeric_Type (nt) == UnicodeData.txt, Decimal if 6 non-blank, Digit if 7
+                     non-blank (but 6 is blank), Numeric if 6&7 blank
+                     (but 8 non-blank)
+ASCII_Hex_Digit (AHex) == PropList.txt
+ID_Continue (IDC) == DerivedCoreProperties.txt
+ID_Start (IDS) == DerivedCoreProperties.txt
+XID_Continue (XIDC) == DerivedCoreProperties.txt
+XID_Start (XIDS) == DerivedCoreProperties.txt
+Pattern_Syntax (Pat_Syn) == PropList.txt
+Pattern_White_Space (Pat_WS) == PropList.txt
+Lowercase_Mapping (lc) == SpecialCasing.txt (def = Simple_Lowercase_Mapping?)
+Titlecase_Mapping (tc) == SpecialCasing.txt (def = Simple_Titlecase_Mapping?)
+Uppercase_Mapping (uc) == SpecialCasing.txt (def = Simple_Uppercase_Mapping?)
+Case_Folding (cf) == CaseFolding.txt (C + F)
+Simple_Lowercase_Mapping (slc) == UnicodeData.txt, field 13
+Simple_Titlecase_Mapping (stc) == UnicodeData.txt, field 14/12
+Simple_Uppercase_Mapping (suc) == UnicodeData.txt, field 12
+Simple_Case_Folding (scf) == CaseFolding.txt (C + S)
+Soft_Dotted (SD) == PropList.txt
+Cased == DerivedCoreProperties.txt
+Case_Ignorable (CI) == DerivedCoreProperties.txt
+Changes_When_Lowercased (CWL) == DerivedCoreProperties.txt
+Changes_When_Uppercased (CWU) == DerivedCoreProperties.txt
+Changes_When_Titlecased (CWT) == DerivedCoreProperties.txt
+Changes_When_Casefolded (CWCF) == DerivedCoreProperties.txt
+Changes_When_Casemapped (CWCM) == DerivedCoreProperties.txt
+Canonical_Combining_Class (ccc) == UnicodeData.txt, field 3
+Decomposition_Mapping (dm) == UnicodeData.txt, field 5 (w/o <>)
+Composition_Exclusion (CE) == CompositionExclusions.txt
+Full_Composition_Exclusion (Comp_Ex) == DerivedNormalizationProps.txt
+Decomposition_Type (dt) == UnicodeData.txt, field 5 (<> only)
+NFC_Quick_Check (NFC_QC) == DerivedNormalizationProps.txt
+NFKC_Quick_Check (NFKC_QC) == DerivedNormalizationProps.txt
+NFD_Quick_Check (NFD_QC) == DerivedNormalizationProps.txt
+NFKD_Quick_Check (NFKD_QC) == DerivedNormalizationProps.txt
+NFKC_Casefold (NFKC_CF) == DerivedNormalizationProps.txt
+Changes_When_NFKC_Casefolded (CWKCF) == DerivedNormalizationProps.txt
+Joining_Group (jg) == ArabicShaping.txt, field 2
+Joining_Type (jt) == ArabicShaping.txt, field 3
+Line_Break (lb) == LineBreak.txt
+Grapheme_Cluster_Break (GCB) == auxiliary/GraphemeBreakProperty.txt
+Sentence_Break (SB) == auxiliary/SentenceBreakProperty.txt
+Word_Break (WB) == auxiliary/WordBreakProperty.txt
+East_Asian_Width (ea) == EastAsianWidth.txt
+Bidi_Class (bc) == UnicodeData.txt, field 4
+Bidi_Control (Bidi_C) == PropList.txt
+Bidi_Mirrored (Bidi_M) == UnicodeData.txt, field 9
+Bidi_Mirroring_Glyph (bmg) == BidiMirroring.txt
+Ideographic (Ideo) == PropList.txt
+Unified_Ideograph == PropList.txt
+Radical == PropList.txt
+IDS_Binary_Operator == PropList.txt
+IDS_Trinary_Operator == PropList.txt
+Math == DerivedCoreProperties.txt
+Quotation_Mark (QMark) == PropList.txt
+Dash == PropList.txt
+STerm == PropList.txt
+Terminal\_Punctuation (Term) == PropList.txt
+Diacritic (Dia) == PropList.txt
+Extender (Ext) == PropList.txt
+Grapheme_Base == DerivedCoreProperties.txt
+----
+isxxx; xxx == Cased, Lowercase, Uppercase, Titlecase -> xxx above
+toxxx; xxx == Lowercase, Uppercase, Titlecase -> xxx_Mapping above
+cjkTraditionalVariant == unihan/Unihan_Variants, kTraditionalVariant
+cjkSimplifiedVariant == unihan/Unihan_Variants, kSimplifiedVariant
+CJK_Radical == unihan/Unihan_RadicalStrokeCounts.txt, kRSUnicode
+exemplar == DUCET://ldml/characters/exemplarCharacters (UnicodeSet)
+IDNA_Status == idna/IdnaMappingTable.txt, field 2
+IDNA_Mapping == idna/IdnaMappingTable.txt, field 3
+ID_Restrict_Status == security/xidmodifications.txt, field 2
+ID_Restrict_Type == security/xidmodifications.txt, field 3
+Collation_Primary == DUCET: collation order (from various)
+\end{verbatim}
+
 Some other standard categories which might be useful are ignored and
 deprecated code points.  These are extracted from PropList.txt and
 DerivedCoreProperties.txt, which is in a different format, requiring a
 different parser script.
-
-<<makefile.vars>>=
-UNIPROP = $(UCD_LOC)/PropList.txt
-UNIDER = $(UCD_LOC)/DerivedCoreProperties.txt
-@
 
 <<Character types generation deps>>=
 $(UNIDER) der-ranges \
@@ -3201,47 +3575,6 @@ int is_uni_ign(int cp);
 <<Character type functions>>=
 is_x(depr)
 is_x(ign)
-@
-
-The new script is almost identical to [[ud-ranges]], but the format
-for ranges is different.
-
-\lstset{language=sh}
-<<Build Script Executables>>=
-der-ranges \
-@
-
-<<der-ranges>>=
-#!/bin/sh
-<<Common NoWeb Warning>>
-test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
-cut -d\; -f1 | (
-  prevcp=-2
-  while read cpr; do
-    # if this cp doesn't follow prevcp, start new range
-    prevcp=$((prevcp+1))
-    cp=${cpr%%..*}
-    if test $prevcp -lt $((0x$cp)); then
-      # end prev. range if it exists
-      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
-      # start new range
-      prevcp=$((0x$cp))
-      printf '\t{0x%06X, ' $prevcp
-    fi
-    # for range entries, jump to end
-    case "$cpr" in *..*) cp=${cpr#*..}; prevcp=$((0x$cp));; esac
-  done
-  if [ $prevcp -ne -2 ]; then
-    # finish off last range
-    if [ -n "$1" ]; then
-      printf '0x%06X}\n' $prevcp
-    else
-      printf '0x%06X},\n' $prevcp
-    fi
-  fi
-)
-test -n "$1" && echo "};"
-test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
 @
 
 The Script (sc) property comes from Scripts.txt in a similar way.  It
@@ -3652,6 +3985,10 @@ strs-dyn.c: strs.c cproto.h
 	ln -sf $< $@
 strs-dyn.o: EXTRA_CFLAGS+=-DDYN_BUILTIN_STR
 strs.o: strs.gen
+@
+
+<<Clean temporary files>>=
+rm -f strs-dyn.[oc]
 @
 
 \lstset{language=C}
@@ -4962,6 +5299,10 @@ strs-strs.gen: strs.gen
 	touch strs-strs.gen
 @
 
+<<C Headers>>=
+builtin-strings.h \
+@
+
 The automatically generated names were not included in the above
 lists.  In order to make it easier to look them up in the name-to-code
 direction, their prefixes are added to the name table.  In addition, a
@@ -6021,7 +6362,7 @@ First, we'll iterate through all of the Unicode names mapping to one
 character, both forward and reverse.
 
 <<tstchars>>=
-cat charnames.{asc,uni} | while IFS=, read a b; do
+cat charnames.uni{a,} | while IFS=, read a b; do
   b=$(($b))
   hb=`printf %04X $b`
   tr=$(./tst "$a" | head -n 1)
@@ -6094,917 +6435,7 @@ int main(void)
 #endif
 @
 
-\chapter{Unorganized crap}
-\lstset{language=sh}
-\section{mkhang}
-<<mkhang>>=
-#!/bin/sh
-
-# 28 T
-T="`fgrep JONGSEONG \"\$1\" | cut -d\\# -f1 | cut -d\\; -f2 | sed 's/^ */:/'`"
-# 21 V
-V="`fgrep JUNGSEONG \"\$1\" | cut -d\\# -f1 | cut -d\\; -f2 | sed 's/^ */:/'`"
-vskip=28
-# 19 L
-L="`fgrep CHOSEONG \"\$1\" | cut -d\\# -f1 | cut -d\\; -f2 | sed 's/^ */:/'`"
-lskip=$((21*28))
-
-cp=$((0xac00))
-for l in $L; do
-  for v in $V; do
-    lv="${l#:}${v#:}"
-    echo "HANGUL SYLLABLE $lv,$cp"
-    cp=$((cp+1))
-    for t in $T; do
-      echo "HANGUL SYLLABLE $lv${t#:},$cp"
-      cp=$((cp+1))
-    done
-  done
-done
-@
-
-\lstset{language=C}
-\section{tok.c}
-<<tok.c>>=
-<<Common C Header>>
-#include "unistuff.h"
-#include "tok.h"
-
-enum escstate {
-    ES_NORM, ES_BS_NORM, ES_NORM_CBESC, ES_STR, ES_RAW_STR, ES_BS_STR,
-    ES_STR_CBESC, ES_ML_START, ES_ML_RAW_START, ES_ML_STR_TOK,
-    ES_ML_RAW_STR_TOK, ES_ML_STR, ES_ML_RAW_STR, ES_BS_ML_STR,
-    ES_ML_STR_CBESC
-};
-
-void pr_loc(struct loc *l)
-{
-    fprintf(stderr, "%u,%u (%lu): ", l->lineno, l->colno, l->fpos);
-}
-
-typedef struct {
-    unifile *next;
-    FILE *f;
-    struct loc loc;
-#define DEC_LEN 512
-    int decbuf[DEC_LEN];
-    struct loc decloc[DEC_LEN];
-    int decpos, declen;
-    int ign_nl;
-} unifile_t;
-unifile_t *open_files;
-
-static void tokb_append(int c, int **buf, uint32_t *len,
-                        uint32_t *maxlen)
-{
-    if(!*maxlen) {
-        *maxlen = 128;
-        inisize(*buf, *maxlen);
-    } else if(*len == *maxlen) {
-        *maxlen *= 2;
-        resize(*buf, *maxlen);
-    }
-    (*buf)[(*len)++] = c;
-}
-
-int buf_to_utf8(int *buf, int len)
-{
-    int i;
-    char *s = (char *)buf;
-
-    for(i = 0; i < len; i++)
-        s += utf8_encode(s, buf[i]);
-    return (int)(s - (char *)buf);
-}
-
-/* raw token text */
-int *curtok;
-uint32_t toklen = 0;
-static uint32_t maxtok = 0;
-#define tok_append(c) tokb_append(c, &curtok, &toklen, &maxtok)
-struct loc tokloc;
-static int lenesc = 0;
-
-/* token processing state */
-enum {
-    TS_NONE, TS_ID, TS_ID_SEP, TS_NUM, TS_NUM_BASE, TS_NUM_DEC, TS_NUM_E,
-    TS_NUM_ES, TS_NUM_EXP, TS_STRING, TS_RSTRING
-} tokst;
-
-/* processed token text */
-uint32_t *numval;
-uint32_t numlen;
-uint32_t *nexp;
-uint32_t explen;
-static uint32_t maxexp = 0, maxnum = 0;
-int nbase; /* negative for negative exponent */
-int isflt; /* needed because positive exponent could still have dp */
-
-static int *mltok;
-static uint32_t mltokmax = 0, mltoklen = 0;
-static int mltokmatch = 0;
-#define mltok_append(c) tokb_append(c, &mltok, &mltoklen, &mltokmax)
-
-static struct loc bsloc;
-static int *bsbuf = NULL;
-static uint32_t bslen = 0, nbs = 0;
-#define bsbuf_append(c) tokb_append(c, &bsbuf, &nbs, &bslen)
-
-static int add_decompc(unifile_t *uf, uni_normtype_t dect, int c,
-                       struct loc fpos)
-{
-    /* decompose into output buffer */
-    const uni_decent_t *de;
-    switch(dect) {
-      case UN_NFC:
-        de = find_decomp(c, 1);
-        break;
-      case UN_NFKC:
-        de = find_decomp(c, 0);
-        break;
-      case UN_NFKC_CF:
-        de = find_nfkc_cf(c);
-        break;
-      case UN_NONE:
-        de = NULL;
-        break;
-      default:
-        fprintf(stderr, "??? norm type\n");
-        exit(1);
-    }
-    int opos = (uf->decpos + uf->declen)%DEC_LEN;
-    int l = !de ? 1 : de->len > 0 ? de->len : -de->len;
-    /* dec buf should never overflow */
-    if(uf->declen + l > DEC_LEN) {
-        fprintf(stderr, "Incomprehensible Unicode at %lu\n",
-                uf->loc.fpos - 1);
-        return 0;
-    }
-    if(!de)
-        uf->decbuf[opos] = c;
-    else if(!l)
-        return 1;
-    else {
-        if(opos + l > DEC_LEN) {
-            memcpy(uf->decbuf + opos, deccp + de->off, DEC_LEN - opos);
-            memcpy(uf->decbuf, deccp + de->off + DEC_LEN - opos,
-                   l - (DEC_LEN - opos));
-        } else
-            memcpy(uf->decbuf + opos, deccp + de->off, l);
-    }
-    uf->declen += l;
-    while(--l >= 0)
-        uf->decloc[(l + opos)%DEC_LEN] = fpos;
-    return 1;
-}
-
-static int readc(unifile_t *uf, uni_normtype_t dect)
-{
-    int c;
-    int nread;
-
-    while((c = utf8_getc(uf->f, &nread)) != -1) {
-        if(c < 0) {
-            c = 0xfffd;
-            pr_loc(&uf->loc);
-            fprintf(stderr, "Invalid UTF8 code seqence%s\n",
-                    c == -2 ? " (premature EOF)" : "");
-            if(c == -2)
-                break;
-            continue;
-        }
-        if(uf->ign_nl) {
-            int ign_nl = uf->ign_nl;
-            uf->ign_nl = 0;
-            if(c == ign_nl)
-                continue;
-        }
-        if(is_nl(c)) {
-            if(c == '\n')
-                uf->ign_nl = '\r';
-            else if(c == '\r')
-                uf->ign_nl = '\n';
-            uf->loc.lineno++;
-            uf->loc.colno = 0;
-        } else
-            uf->loc.colno++;
-        c = add_decompc(uf, dect, c, uf->loc);
-        uf->loc.fpos += nread;
-        return c;
-    }
-    return 0;
-}
-
-static int process_tok(void)
-{
-    switch(tokst) {
-      case TS_STRING: {
-          /* convert \l to 0 to avoid canonicalization */
-          /* save original 0s first, of course */
-          int nlen, n, nz = 0;
-          if(lenesc)
-              for(n = 0; n < toklen; n++)
-                  if(!curtok[n])
-                      nz++;
-          for(nlen = 0, n = lenesc; n; nlen++, n = curtok[n - 1]);
-          int savepos[nlen + nz];
-          if(lenesc) {
-              for(n = 0, nz = 0; n < toklen; n++)
-                  if(!curtok[n])
-                      savepos[nz++] = n;
-              for(n = lenesc, nlen = 0; n; nlen++) {
-                  int pn = n - 1;
-                  savepos[nlen + nz] = pn;
-                  n = curtok[pn];
-                  curtok[pn] = 0;
-              }
-              /* can't save actual locations since they may change */
-              /* instead, save order in which they appear */
-              int zp = 0, lp = nz;
-              for(n = 0; n < nlen + zp - 1; n++) {
-                  if(zp < nz && (lp - nz < nlen || savepos[zp] < savepos[lp]))
-                      savepos[zp++] = n;
-                  else if(zp < nz && savepos[zp] == savepos[lp]) {
-                      savepos[zp++] = savepos[lp++] = n;
-                  } else
-                      savepos[lp++] = n;
-              }
-          }
-          Canon_Order(curtok, toklen, 1);
-          toklen = NFC_comp(curtok, toklen, NULL);
-          if(lenesc) {
-              int zp = 0, lp = nz, i;
-              for(i = 0; i < toklen; i++) {
-                  if(!curtok[i]) {
-                      if(zp < nz && (lp - nz >= nlen || savepos[zp] < savepos[lp]))
-                          zp++;
-                      else if(zp < nz && savepos[zp] == savepos[lp]) {
-                          zp++;
-                          lp++;
-                          curtok[i] = toklen - 1;
-                      } else {
-                          lp++;
-                          curtok[i] = toklen - 1;
-                      }
-                  }
-              }
-          }
-          return TOK_STRING;
-      }
-      case TS_RSTRING:
-        Canon_Order(curtok, toklen, 1);
-        toklen = NFC_comp(curtok, toklen, NULL);
-        return TOK_STRING;
-      default:
-        return TOK_EOF;
-    }
-}
-
-int gettok(unifile_t *uf)
-{
-    enum escstate escst = ES_NORM;
-    int ebase = 0;
-
-    uni_normtype_t nt = UN_NFKC_CF;
-    int c;
-    struct loc *loc;
-#define readchar(nt) while(!uf->declen && readc(uf, nt))
-#define nextchar() do { \
-    c = uf->decbuf[uf->decpos]; \
-    loc = &uf->decloc[uf->decpos]; \
-    if(++uf->decpos == DEC_LEN) \
-        uf->decpos = 0; \
-    --uf->declen; \
-} while(0)
-#define backup() do { \
-    if(!uf->decpos) \
-        uf->decpos = DEC_LEN - 1; \
-    else \
-        --uf->decpos; \
-    ++uf->declen; \
-} while(0)
-#define re_decomp(nt) do { \
-    int l = uf->declen, i; \
-    for(i = 0; i < l; i++) { \
-        nextchar(); \
-        tok_append(c); \
-    } \
-    toklen -= l; \
-    for(i = 0; i < l; i++) \
-        add_decompc(uf, nt, curtok[toklen + i], *loc); \
-} while(0)
-
-    while(1) {
-        /* canonical ordering only affects final string values and */
-        /* identifiers (i.e., they are all CC_WORDSEP) */
-        /* both ordering and comp only affect CC_WORDSEP chars */
-        /* comp can affect CC_LETTER, though, turning it to CC_ID */
-        /* comp only affects CC_WORDSEP *after* CC_ID, CC_LETTER, CC_OPMID */
-        readchar(nt);
-        if(!uf->declen)
-            break;
-        nextchar();
-        /* process backslashes and strings */
-        /* also switch (de)normalization as needed */
-        switch(escst) {
-          case ES_NORM:
-            if(c == '\\') {
-                bsloc = *loc;
-                escst = ES_BS_NORM;
-            } else if(c == '"') {
-                if(toklen > 0) {
-                    backup();
-                    return process_tok();
-                }
-                escst = ES_STR;
-                nt = UN_NFC;
-                tokloc = *loc;
-            }
-            break;
-          case ES_STR:
-            if(is_bs(c)) {
-                escst = ES_BS_STR;
-                nt = UN_NFKC_CF;
-                break;
-            }
-            /* fall through */
-          case ES_RAW_STR:
-            if(c == '"') {
-                readchar(nt);
-                if(uf->declen > 0) {
-                    nextchar();
-                    if(c != '"') {
-                        nt = UN_NFKC_CF;
-                        /* may have split more, so can't just reinsert */
-                        backup();
-                        re_decomp(nt);
-                        tokst = escst == ES_STR ? TS_STRING : TS_RSTRING;
-                        escst = ES_NORM;
-                        return process_tok();
-                    }
-                }
-            } else if(is_nl(c)) {
-                pr_loc(&tokloc);
-                fputs("unterminated string detected (eol)\n", stderr);
-                escst = ES_NORM;
-                tokst = TS_STRING;
-                return process_tok();
-            }
-            tok_append(c);
-            break;
-          case ES_BS_NORM:
-            if(c == 'm') {
-                escst = ES_ML_START;
-                tokloc = bsloc;
-                break;
-            }
-            if(c == '"') {
-                escst = ES_RAW_STR;
-                tokloc = bsloc;
-                nt = UN_NFC;
-                break;
-            }
-            if(c != '{') {
-                pr_loc(&bsloc);
-                fputs("bad bs escape (expected {)\n", stderr);
-                escst = ES_NORM;
-                continue;
-            } else {
-                escst = ES_NORM_CBESC;
-                nt = UN_NFKC; /* for XML escapes, need to preserve case */
-                nbs = 0;
-            }
-            break;
-          case ES_BS_STR:
-          case ES_BS_ML_STR:
-            switch(c) {
-              case 'a':
-                tok_append(7);
-                break;
-              case 'b':
-                tok_append(8);
-                break;
-              case 't':
-                tok_append(9);
-                break;
-              case 'n':
-                tok_append(10);
-                break;
-              case 'v':
-                tok_append(11);
-                break;
-              case 'f':
-                tok_append(12);
-                break;
-              case 'r':
-                tok_append(13);
-                break;
-              case 'e':
-                tok_append(27);
-                break;
-              case '"':
-                tok_append('"');
-                break;
-              case '\\':
-                tok_append('\\');
-                break;
-              case 'o':
-                ebase = 8;
-                break;
-              case 'x':
-                ebase = 16;
-                break;
-              case 'd':
-                ebase = 10;
-                break;
-              case 'l':
-                tok_append(lenesc);
-                lenesc = toklen;
-                break;
-              case '{':
-                escst = escst == ES_BS_STR ? ES_STR_CBESC : ES_ML_STR_CBESC;
-                nbs = 0;
-                nt = UN_NFKC;
-                break;
-            }
-            if(ebase) {
-                int nc = 0;
-                readchar(nt);
-                if(!uf->declen)
-                    break;
-                nextchar();
-                if(c == '{') {
-                    while(1) {
-                        readchar(nt);
-                        if(!uf->declen)
-                            break;
-                        nextchar();
-                        if(c == '}')
-                            break;
-                        if(c >= '0' && c <= '9')
-                            c -= '0';
-                        else if(c >= 'a' && c <= 'f')
-                            c -= 'a' - 10;
-                        else
-                            c = 16;
-                        if(c >= ebase) {
-                            pr_loc(loc);
-                            fprintf(stderr, "Bad bs escape; expected digit\n");
-                            backup();
-                            escst = escst == ES_BS_STR ? ES_STR : ES_ML_STR;
-                            nt = UN_NFC;
-                            break;
-                        }
-                        /* FIXME: error if overflow */
-                        nc = nc * ebase + c;
-                    }
-                } else {
-                    nt = UN_NFC;
-                    if(c >= '0' && c <= '9')
-                        c -= '0';
-                    else if(c >= 'a' && c <= 'f')
-                        c -= 'a' - 10;
-                    else
-                        c = 16;
-                    if(c >= ebase) {
-                        pr_loc(loc);
-                        fprintf(stderr, "Bad bs escape; expected digit\n");
-                        backup();
-                        escst = escst == ES_BS_STR ? ES_STR : ES_ML_STR;
-                        break;
-                    }
-                    nc = nc * ebase + c;
-                    /* process characters already there due to decomp */
-                    while(uf->declen > 0) {
-                        if(c >= '0' && c <= '9')
-                            c -= '0';
-                        else if(c >= 'a' && c <= 'f')
-                            c -= 'a' - 10;
-                        else
-                            c = 16;
-                        if(c >= ebase) {
-                            backup();
-                            break;
-                        }
-                        /* FIXME: error if overflow (highly unlikely) */
-                        nc = nc * ebase + c;
-                    }
-                    /* pull in more chars if possible */
-                    if(!uf->declen) {
-                        while(1) {
-                            readchar(nt);
-                            nextchar();
-                            if(c >= '0' && c <= '9')
-                                c -= '0';
-                            else if(c >= 'a' && c <= 'f')
-                                c -= 'a' - 10;
-                            else if(c >= 'A' && c <= 'F')
-                                c -= 'A' - 10;
-                            else
-                                c = 16;
-                            if(c >= ebase) {
-                                backup();
-                                break;
-                            }
-                            /* FIXME: error if overflow */
-                            nc = nc * ebase + c;
-                        }
-                    }
-                }
-                tok_append(nc);
-            }
-            if(escst == ES_BS_STR) {
-                escst = ES_STR;
-                nt = UN_NFC;
-            } else if(escst == ES_BS_ML_STR) {
-                escst = ES_ML_STR;
-                nt = UN_NFC;
-            }
-            break;
-          case ES_NORM_CBESC:
-          case ES_STR_CBESC:
-          case ES_ML_STR_CBESC:
-            if(is_nl(c)) {
-                escst = escst == ES_NORM_CBESC ? ES_NORM : escst == ES_STR_CBESC ? ES_STR : ES_ML_STR;
-                pr_loc(&bsloc);
-                nbs = buf_to_utf8(bsbuf, nbs);
-                fprintf(stderr, "bad bs escape (end of line detected): \\{%.*s\n",
-                        nbs, (char *)bsbuf);
-            }
-            if(c == '}') {
-                escst = escst == ES_NORM_CBESC ? ES_NORM : escst == ES_STR_CBESC ? ES_STR : ES_ML_STR;
-                if(escst == ES_STR || escst == ES_ML_STR)
-                    nt = UN_NFC;
-                if(!nbs) {
-                    pr_loc(&bsloc);
-                    fputs("bad bs escape (empty)\n", stderr);
-                    continue;
-                }
-                if(nbs > 4 && (bsbuf[0] == 'x' || bsbuf[0] == 'X')) {
-                    int i;
-                    for(i = 1; i < nbs; i++)
-                        if(!isxdigit(bsbuf[i]))
-                            break;
-                    if(i == nbs) {
-                        c = 0;
-                        for(i = 1; i < nbs; i++) {
-                            c <<= 4;
-                            if(isdigit(bsbuf[i]))
-                                c += bsbuf[i] - '0';
-                            else
-                                c += (bsbuf[i] & 0xf) + 9;
-                        }
-                        if(c > 0x10ffff) {
-                            pr_loc(&bsloc);
-                            nbs = buf_to_utf8(bsbuf, nbs);
-                            fprintf(stderr, "No such unicode code point: \\{%.*s}\n",
-                                    nbs, (char *)bsbuf);
-                        } else {
-                            char uname[128];
-                            int ul = uni_gen_name_for(c, uname, sizeof(uname));
-                            if(ul) {
-				nbs = buf_to_utf8(bsbuf, nbs);
-				pr_loc(&bsloc);
-				fprintf(stderr, "warning: \\{%s} is more informative than \\{%.*s}\n",
-				        uname, nbs, (char *)bsbuf);
-                            }
-                        }
-                        break;
-                    }
-                }
-                nbs = buf_to_utf8(bsbuf, nbs);
-                const int *mcp;
-		c = cp_of_uni((char *)bsbuf, nbs, &mcp);
-                if(c < 0) {
-                    pr_loc(&bsloc);
-                    nbs = buf_to_utf8(bsbuf, nbs);
-                    fprintf(stderr, "Unknown backslash-escape \\{%.*s}\n",
-                            nbs, (char *)bsbuf);
-                    continue;
-                }
-                if(mcp) {
-                    int i;
-                    for(i = 0; i < c; i++)
-                        add_decompc(uf, nt, mcp[i], bsloc);
-                } else
-                    add_decompc(uf, nt, c, bsloc);
-                if(escst == ES_STR || escst == ES_ML_STR) {
-                    while(uf->declen) {
-                        nextchar();
-                        tok_append(c);
-                    }
-                }
-                continue;
-            }
-            bsbuf_append(c);
-            break;
-          case ES_ML_START:
-            if(c == '\\')
-                escst = ES_ML_RAW_START;
-            else if(c == '"') {
-                escst = ES_ML_STR_TOK;
-                mltoklen = 0;
-            } else {
-                pr_loc(&bsloc);
-                fprintf(stderr, "Invalid multi-line string; expected \"\n");
-                escst = ES_NORM;
-            }
-            break;
-          case ES_ML_RAW_START:
-            if(c == '"') {
-                escst = ES_ML_RAW_STR_TOK;
-                mltoklen = 0;
-            } else {
-                pr_loc(&bsloc);
-                fprintf(stderr, "Invalid multi-line string; expected \"\n");
-                escst = ES_NORM;
-            }
-          case ES_ML_STR_TOK:
-          case ES_ML_RAW_STR_TOK:
-            if(comp_chartype_of(c) == CC_SPACE) {
-                if(!mltoklen) {
-                    pr_loc(&bsloc);
-                    fprintf(stderr, "Invalid multi-line end token\n");
-                    /* no recovery */
-                    exit(1);
-                }
-                if(is_nl(c)) {
-                    if(mltok[mltoklen - 1] == ' ')
-                        --mltoklen;
-                    mltok_append(0);
-                    escst = escst == ES_ML_STR_TOK ? ES_ML_STR : ES_ML_RAW_STR;
-                    nt = escst == ES_ML_STR ? UN_NFC : UN_NONE;
-                    mltokmatch = 0;
-                } else if(mltok[mltoklen - 1] != ' ')
-                        mltok_append(' ');
-            } else if(mltoklen > 0 && mltok[mltoklen - 1] == ' ') {
-                pr_loc(&bsloc);
-                fprintf(stderr, "Invalid multi-line end token\n");
-                /* no recovery */
-                exit(1);
-            } else
-                mltok_append(c);
-            break;
-          case ES_ML_STR:
-          case ES_ML_RAW_STR:
-            /* FIXME: ES_ML_STR ignores initial WS unless backslash-cr prev. */
-            /* FIXME: ES_ML_STR supports backslash-escapes */
-            if(mltokmatch >= 0) {
-                if(!mltokmatch && escst == ES_ML_STR &&
-                   comp_chartype_of(c) == CC_SPACE)
-                    continue;
-                if((mltokmatch == mltoklen && c == '"')) {
-                    if(escst == ES_ML_STR) {
-                        escst = ES_NORM;
-                        nt = UN_NFKC_CF;
-                        continue;
-                    } else {
-                        mltokmatch++;
-                        break;
-                    }
-                }
-                if(mltokmatch > mltoklen) { /* only if end " of raw str */
-                    if(comp_chartype_of(c) != CC_SPACE) {
-                        /* place contents of mltok back into string */
-                        /* mltok[0 .. mltoklen - 1] + '"' + */
-                        /*  mltok[mltoklen + 1 .. mltokmatch - 1] */
-                        mltokmatch = -1;
-                    } else if(is_nl(c)) {
-                        escst = ES_NORM;
-                        nt = UN_NFKC_CF;
-                        continue;
-                    }
-                }
-                int pl = toklen;
-                tok_append(c);
-                pl = toklen - pl;
-                if(mltokmatch >= 0 && mltokmatch + pl <= mltoklen &&
-                   !memcmp(mltok + mltokmatch, curtok + toklen - pl, pl))
-                    mltokmatch += pl;
-                else
-                    mltokmatch = -1;
-            }
-            if(is_nl(c)) {
-                c = '\n';
-                mltokmatch = 0;
-            }
-            break;
-        }
-        if(escst != ES_NORM)
-            continue;
-        /* got a character for a token */
-        /* append to raw token; do canon comp later */
-        tok_append(c);
-    }
-    switch(escst) {
-      case ES_NORM:
-        return process_tok();
-      case ES_BS_NORM:
-      case ES_NORM_CBESC:
-        pr_loc(&bsloc);
-        nbs = buf_to_utf8(bsbuf, nbs);
-        fprintf(stderr, "bad bs escape (end of file detected): \\{%.*s\n",
-                nbs, (char *)bsbuf);
-        return TOK_EOF;
-      case ES_STR:
-      case ES_RAW_STR:
-      case ES_BS_STR:
-      case ES_STR_CBESC:
-      case ES_ML_START:
-      case ES_ML_RAW_START:
-      case ES_ML_STR_TOK:
-      case ES_ML_RAW_STR_TOK:
-      case ES_ML_STR:
-      case ES_ML_RAW_STR:
-      case ES_BS_ML_STR:
-      case ES_ML_STR_CBESC:
-        pr_loc(&tokloc);
-        fputs("unterminated string detected (eof)\n", stderr);
-        escst = ES_NORM;
-        tokst = TS_STRING;
-        return process_tok();
-    }
-    return TOK_EOF;
-}
-
-@
-
-\section{tok.h}
-<<tok.h>>=
-<<Common C Warning>>
-#ifndef TOK_H
-#define TOK_H
-
-struct loc {
-    uint32_t lineno, colno;
-    size_t fpos;
-};
-
-void pr_loc(struct loc *l);
-
-unifile_t *uni_fopen(const char *n, FILE *f);
-
-/* raw token text */
-extern int *curtok;
-extern uint32_t toklen;
-extern struct loc tokloc;
-int buf_to_utf8(int *buf, int len);
-
-/* token type */
-enum {
-    TOK_EOF, TOK_STRING, TOK_INT, TOK_FLOAT, TOK_ID, TOK_OP, TOK_PREDOC,
-    TOK_POSTDOC, TOK_COMMA, TOK_SEMI,
-    /* these should be handled invisibly */
-    TOK_CDIR_START, TOK_CDIR_CONT, TOK_CDIR_END
-};
-
-/* processed token text */
-uint32_t *numval;
-uint32_t numlen;
-uint32_t *nexp;
-extern uint32_t explen;
-extern int nbase; /* negative for negative exponent */
-extern int isflt; /* needed because positive exponent could still have dp */
-
-int gettok(unifile_t *uf);
-#endif
-@
-
-\section{tststream.c}
-<<tststream.c>>=
-<<Common C Header>>
-#include "unistuff.h"
-
-int main(void)
-{
-    int c;
-    int bs = 0;
-    char *bsbuf = NULL;
-    int bslen = 0, nbs = 0;
-    while((c = utf_getc_norm(stdin, UN_NFC)) >= 0) {
-        switch(bs) {
-          case 0: /* no backslashes */
-            if(c == '\\')
-                bs = 1;
-            break;
-          case 1: /* got a backslash */
-            if(c == 'm' || c == 'M') {
-                bs = 3;
-                break;
-            }
-            if(c == '"') {
-                bs = 4;
-                break;
-            }
-            if(c != '{') {
-                fprintf(stderr, "bad bs escape (expected {)\n");
-                bs = 0;
-                continue;
-            } else {
-                bs = 2;
-                nbs = 0;
-            }
-            break;
-          case 2: /* {} escape */
-            if(c == 0x0a || c == 0x0d || c == 0x0b || c == 0x0c || c == 0x85 || c == 0x2028 || c == 0x2029) {
-                bs = 0;
-                fprintf(stderr, "bad bs escape (end of line detected): \\{%.*s\n",
-                        nbs, bsbuf);
-            }
-            if(c == '}') {
-                bs = 0;
-                if(!nbs) {
-                    fprintf(stderr, "bad bs escape (empty)\n");
-                    continue;
-                }
-                if(nbs > 4 && (bsbuf[0] == 'x' || bsbuf[0] == 'X')) {
-                    int i;
-                    for(i = 1; i < nbs; i++)
-                        if(!isxdigit(bsbuf[i]))
-                            break;
-                    if(i == nbs) {
-                        c = 0;
-                        for(i = 1; i < nbs; i++) {
-                            c <<= 4;
-                            if(isdigit(bsbuf[i]))
-                                c += bsbuf[i] - '0';
-                            else
-                                c += (bsbuf[i] & 0xf) + 9;
-                        }
-                        if(c > 0x10ffff) {
-                            fprintf(stderr, "No such unicode code point: \\{%.*s}\n",
-                                    nbs, bsbuf);
-                        } else {
-                            char uname[128];
-                            int ul = uni_gen_name_for(c, uname, sizeof(uname));
-                            if(ul)
-			      fprintf(stderr, "warning: \\{%s} is more informative than \\{%.*s}\n",
-			              uname, nbs, bsbuf);
-                        }
-                        break;
-                    }
-                }
-                const int *mcp;
-		c = cp_of_uni(bsbuf, nbs, &mcp);
-                if(c < 0) {
-                    fprintf(stderr, "Unknown backslash-escape \\{%.*s}\n",
-                            nbs, bsbuf);
-                    continue;
-                }
-                if(mcp) {
-                    int i;
-                    for(i = 0; i < c - 1; i++)
-                        ascii_putc(mcp[i], stdout);
-                    c = mcp[i];
-                }
-                break;
-            }
-            if(!bslen) {
-                bslen = 128;
-                inisize(bsbuf, bslen);
-            } else if(nbs == bslen) {
-                bslen *= 2;
-                resize(bsbuf, bslen);
-            }
-            if(c > 0x7f) {
-                fprintf(stderr, "Invalid character in backslash escape: \\{%.*s",
-                        nbs, bsbuf);
-                utf8_putc(c, stderr);
-                bs = 0;
-            }
-            bsbuf[nbs++] = c;
-            break;
-          case 3: /* multi-line string */
-            break;
-          case 4: /* raw single-line string */
-            break;
-        }
-        if(!bs)
-            ascii_putc(c, stdout);
-    }
-    return 0;
-}
-@
-
-\section{tsttok.c}
-<<tsttok.c>>=
-<<Common C Header>>
-#include "unistuff.h"
-#include "tok.h"
-
-int main(int argc, const char **argv)
-{
-    unifile_t *uf = uni_fopen("stdin", stdin);
-    int tok;
-    while((tok = gettok(uf)) > 0) {
-        printf("%d\n", tok);
-    }
-    uni_fclose(uf);
-    return 0;
-}
-@
-
-\chapter{Code Index}
+\section{Code Index}
 \nowebchunks
 
 \end{document}
