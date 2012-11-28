@@ -259,8 +259,8 @@ int cmprng_dat(const void *a, const void *b)
         return 0;
 }
 
-uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len,
-                        uint32_t def)
+uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
+                        uint32_t tab_len, uint32_t def)
 {
   uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
   tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), cmprng_dat);
@@ -1041,6 +1041,8 @@ there are a large number of relatively short ranges.  While the number
 of lookups is lower (unless there are only a few large ranges), the
 chance for cache thrashing is higher.  It's hard to say which is best.
 
+Here is a test program which compares the performance of several tables.
+
 <<C Test Executables>>=
 tsttab \
 @
@@ -1071,8 +1073,6 @@ static unsigned long tend(void)
             (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
 }
 
-volatile int v;
-
 static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
                      const uint8_t *mtab, uint8_t def)
 {
@@ -1080,10 +1080,7 @@ static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nen
 
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
-      b = res ? res->dat : def;
+      uint8_t b = find_cp_chrrng(i, rng, nent, def);
       if(b != mtab_lookup(mtab, i, def)) {
         fprintf(stderr, "mismatch %s@%d\n", name, i);
 	exit(1);
@@ -1094,20 +1091,13 @@ static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nen
     unsigned long tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
-      b = res ? res->dat : def;
-      v = b;
-    }
+      for(i = 0; i < 0x110000; i++)
+        find_cp_chrrng(i, rng, nent, def);
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uint8_t b = mtab_lookup(mtab, i, def);
-      v = b;
-    }
+      for(i = 0; i < 0x110000; i++)
+        mtab_lookup(mtab, i, def);
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
 }
@@ -1119,34 +1109,29 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_t cr = {i, i}, *res;
-      uint8_t b;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
-      b = mtab_lookup(mtab, i / 8, 0);
+      int res = is_cp_chrrng(i, rng, nent);
+      uint8_t b = mtab_lookup(mtab, i / 8, 0);
       if(!(b & (1 << (i & 7))) != !res) {
         fprintf(stderr, "mismatch %s@%d\n", name, i);
 	exit(1);
       }
     }
     /* check performance */
+    volatile int res;
     int j;
     unsigned long tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_t cr = {i, i}, *res;
-      res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
-      v = res ? 1 : 0;
-    }
+      for(i = 0; i < 0x110000; i++)
+        res = is_cp_chrrng(i, rng, nent);
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
-    for(i = 0; i < 0x110000; i++) {
-      uint8_t b;
-      b = mtab_lookup(mtab, i / 8, 0);
-      b &= i & 7;
-      v = b ? 1 : 0;
-    }
+      for(i = 0; i < 0x110000; i++) {
+        uint8_t b = mtab_lookup(mtab, i / 8, 0);
+        b &= i & 7;
+        res = b ? 1 : 0;
+      }
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
 }
@@ -2352,7 +2337,7 @@ to determine if the flag is set.
 For classification, the array of ranges is augmented by a value for
 each range.  The value can be a plain integer or an enumeration.
 
-<<Character type local definitions>>=
+<<Return table lookup for range table>>=
 /* prefix with return type */
 #define range_ret(x, i) \
      uni_##x##_of(int cp) \
@@ -2364,6 +2349,10 @@ each range.  The value can be a plain integer or an enumeration.
             return i; \
         return res->dat; \
     }
+@
+
+<<Character type local definitions>>=
+<<Return table lookup for range table>>
 /* enum return type */
 #define x_of(x, i) uni_##x##_t range_ret(x, i)
 @
@@ -2371,29 +2360,31 @@ each range.  The value can be a plain integer or an enumeration.
 The actual range tables can be automatically generated from the UCD.
 
 <<Character type local definitions>>=
-#include "chartypes.gen"
+#include "uni_chartype.gen"
 @
 
 <<Character type exports>>=
-<<[[chartypes.gen]] dependencies>>
+<<[[uni_chartype.gen]] dependencies>>
 #include "uni_chartype.gen.h"
 @
 
 \lstset{language=make}
 <<makefile.rules>>=
-uni_chartype.h: uni_chartype.gen.h
-uni_chartype.o: chartypes.gen
-
-chartypes.gen: <<Character types generation deps>>
+uni_chartype.gen: uni_chartype.c <<Character types generation deps>>
 
 	echo >$@
-	<<Generate [[chartypes.gen]]>>
-	<<Post-process [[chartypes.gen]]>>
-
-uni_chartype.gen.h: <<Character types header generation deps>>
-
-	echo >$@
+	echo >$@.h
 	<<Generate [[uni_chartype.gen.h]]>>
+	<<Generate [[uni_chartype.gen]]>>
+	<<Post-process [[uni_chartype.gen]]>>
+	mkdir cp.$$$$; \
+	trap "rm -rf cp.$$$$" 0; \
+	touch cp.$$$$/{cproto.h,$<.static_proto}; \
+	cproto -E "$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -E" -v -e -f 0 $< >>$@.h
+
+# dummy rule to generate this file
+uni_chartype.gen.h: uni_chartype.gen
+	touch $@
 @
 
 <<C Headers>>=
@@ -2410,7 +2401,7 @@ rule, so a script is used instead.
 $(UNIDATA) ucd-ranges \
 @
 
-<<Generate [[chartypes.gen]]>>=
+<<Generate [[uni_chartype.gen]]>>=
 # filtering valid input
 fgrep -v Surrogate $(UNIDATA) | ./ucd-ranges -n valid 1 >>$@
 @
@@ -2448,7 +2439,7 @@ uni_gc_t uni_gc_of(int cp);
 x_of(gc, U_GC_Cn)
 @
 
-<<[[chartypes.gen]] dependencies>>=
+<<[[uni_chartype.gen]] dependencies>>=
 typedef struct {
   const char const *shortname, *longname;
 } uni_abbrev_name_t;
@@ -2462,25 +2453,21 @@ typedef struct {
 UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
 @
 
-<<Character types header generation deps>>=
-$(UNIDATA) $(UNIVALALIAS) \
-@
-
 \lstset{language=make}
 <<Generate [[uni_chartype.gen.h]]>>=
 # standard character classes
-echo "typedef enum {" >>$@
+echo "typedef enum {" >>$@.h
 cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
   grep "^gc ; $$x " $(UNIVALALIAS) | while read d d d d l d; do \
     echo "  U_GC_$$x, U_GC_$$l = U_GC_$$x,"; \
   done; \
-done >>$@
-echo "  /* Cn means unknown, actually.  Must be > 0 to use as flag */" >>$@
-echo " U_GC_Cn, U_GC_Unassigned = U_GC_Cn" >>$@
-echo "} uni_gc_t;" >>$@
+done >>$@.h
+echo "  /* Cn means unknown, actually.  Must be > 0 to use as flag */" >>$@.h
+echo " U_GC_Cn, U_GC_Unassigned = U_GC_Cn" >>$@.h
+echo "} uni_gc_t;" >>$@.h
 @
 
-<<Generate [[chartypes.gen]]>>=
+<<Generate [[uni_chartype.gen]]>>=
 # standard character classes
 echo "const uni_abbrev_name_t uni_gc_nameof[] = {" >>$@
 cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
@@ -2526,19 +2513,21 @@ rngtotab \
 @
 
 <<Character types generation deps>>=
-rngtotab.c.static_proto uni_chartype.h uni_chartype.gen.h \
+rngtotab.c uni_chartype.h \
 @
 
-<<Post-process [[chartypes.gen]]>>=
-touch cproto.h
-$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o rngtotab rngtotab.c
+<<Post-process [[uni_chartype.gen]]>>=
+mkdir cp.$$$$; \
+trap "rm -rf cp.$$$$" 0; \
+touch cp.$$$$/{cproto.h,uni_chartype.gen.h,rngtotab.c.static_proto}; \
+$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -o rngtotab rngtotab.c;
 ./rngtotab >>$@
 @
 
 <<rngtotab.c>>=
 <<Common C Header>>
 #include "uni_chartype.h"
-#include "chartypes.gen"
+#include "uni_chartype.gen"
 // static_proto
 
 <<Split data into multi-level table>>
@@ -2587,7 +2576,7 @@ int main(void)
 dat(gc, U_GC_Cn);
 dat(sc, U_SC_Zzzz);
 dat(scx, ~0);
-dat(range, 0);
+/* dat(range, 0); */
 bool(valid);
 bool(depr);
 bool(ign);
@@ -2735,7 +2724,7 @@ UNIPROP = $(UCD_LOC)/PropList.txt
 $(UNIDER) $(UNIPROP) \
 @
 
-<<Generate [[chartypes.gen]]>>=
+<<Generate [[uni_chartype.gen]]>>=
 # other features
 ./ucd-ranges -n depr 2 Deprecated < $(UNIPROP) >>$@
 ./ucd-ranges -n ign 2 Default_Ignorable_Code_Point < $(UNIDER) >>$@
@@ -2791,29 +2780,25 @@ scriptnames.gen: $(UNIVALALIAS)
 scriptnames.gen \
 @
 
-<<Character types header generation deps>>=
-scriptnames.gen \
-@
-
 <<Generate [[uni_chartype.gen.h]]>>=
-echo "typedef enum {" >>$@
+echo "typedef enum {" >>$@.h
 while read s l s2; do \
   printf %s "  U_SC_$$s,"; \
   test "$$s" = "$$l" || printf %s " U_SC_$$l = U_SC_$$s,"; \
   test -n "$$s2" && printf %s " U_SC_$$s2 = U_SC_$$s,"; \
   echo; \
-done < scriptnames.gen | sed '$$s/,$$//' >>$@
-echo "} uni_sc_t;" >>$@
+done < scriptnames.gen | sed '$$s/,$$//' >>$@.h
+echo "} uni_sc_t;" >>$@.h
 @
 
-<<[[chartypes.gen]] dependencies>>=
+<<[[uni_chartype.gen]] dependencies>>=
 typedef struct {
   const char *name;
   /* uni_sc_t */int script;
 } uni_sc_desc_t;
 @
 
-<<Generate [[chartypes.gen]]>>=
+<<Generate [[uni_chartype.gen]]>>=
 # scripts
 echo "const uni_chrrng_dat_t unirng_sc[] = {" >>$@
 # Zzzz not explicitly listed; covers anything not in any other
@@ -4562,6 +4547,10 @@ charnames.uni charnames.unia charnames.uniseq \
            -dbuiltin-strings.h
 @
 
+<<Clean temporary files>>=
+rm -f builtin-strings.h
+@
+
 <<Post-process built-in string table>>=
 ./mkstrs-hash <strs-hash.gen >$@
 echo "const char builtin_str[] =" >>$@
@@ -4669,16 +4658,12 @@ auxiliary value to the name from the symbol table.  To verify that a
 symbol lookup was correct, just ensure that [[uni_range_of]]'s return
 value matches the symbol lookup after extracting the code point.
 
-<<Character types generation deps>>=
+<<Built-in string table components>>=
 charnames.unirng \
 @
 
 \lstset{language=make}
-<<makefile.rules>>=
-uni_chartype.o: builtin-strings.h
-@
-
-<<Generate [[chartypes.gen]]>>=
+<<Generate character name data>>=
 # Unicode range reverse lookup
 echo '#include "builtin-strings.h"' >>$@
 echo "const uni_chrrng_dat_t unirng_range[] = {" >>$@
@@ -4693,12 +4678,13 @@ echo "const uint32_t unirng_range_len = sizeof(unirng_range)/sizeof(unirng_range
 @
 
 \lstset{language=C}
-<<Character type exports>>=
+<<Character name lookup exports>>=
 /* returns string # of low-end of range */
 int uni_range_of(int cp);
 @
 
-<<Character type functions>>=
+<<Character name lookup functions>>=
+<<Return table lookup for range table>>
 int range_ret(range, 0)
 @
 
