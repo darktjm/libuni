@@ -9,7 +9,7 @@
 \RCS $Revision$
 \RCS $Date$
 
-%%% requires build
+%%% requires tjm-ext
 
 \begin{document}
 
@@ -52,953 +52,99 @@ build a regular expression library and a compiler using these routines.
 
 \section{Introduction}
 
-I do a lot of simple memory allocations, and it's easy to forget to
-include the sizeof(element) scale factor.  To make this easier, here
-are a few macros.
+The Unicode standard is a freely available standard describing a large
+character set, and the features of those characters.  It also
+describes several common transformations and processing methods for
+those characters.  The ISO 10646 standard is also freely available at
+this time, but like most ISO standards, this was not always so.  The
+ISO standard describes the same character set, but has a much smaller
+scope overall.  The Unicode Consortium also provides an electronically
+readable form of its attribute information: the Unicode Character
+Database.%
+\footnote{\url{http://www.unicode.org/Public/zipped}}
+The purpose of this library is to provide convenient access to that
+information in C programs.  The ISO 10646 standard also provides such
+information, but again, it is of more limited scope.  To the most
+part, the ISO 10646 standard is completely ignored from this point on.
 
-<<mallocdef.h>>=
+The Unicode consortium also provides a set of rules for interpreting
+characters in different locales.  ISO also has standard to this
+effect.  Both sets of standards and their data files are freely
+available.  However, once again, the ISO data is ignored in favor of
+the Unicode data.  The Unicode locale information is available in
+electronically processable form in the Unicode Common Locale Data
+Repository (CLDR).%
+\footnote{\url{http://cldr.unicode.org},
+\url{http://unicode.org/Public/cldr/}}
+This library provides the CLDR data to C programs as well.
+
+<<uni_all.h>>=
 <<Common C Warning>>
-#ifndef MALLOCDEF_H
-#define MALLCDEF_H
-#define resize(buf, len) do { \
-    buf = realloc(buf, (len) * sizeof(*(buf))); \
-    if(!(buf)) { \
-        perror(#buf); \
-        exit(1); \
-    } \
-} while(0)
-#define inisize(buf, len) do { \
-    buf = malloc((len) * sizeof(*(buf))); \
-    if(!(buf)) { \
-        perror(#buf); \
-        exit(1); \
-    } \
-} while(0)
-#define clearbuf(buf, len) memset(buf, 0, (len) * sizeof(*(buf)))
-#endif
-@
-
-<<Common C Includes>>=
-#include "mallocdef.h"
-@
-
-I also prefer a little bit higher warning level than the default.
-
-<<makefile.vars>>=
-CC=gcc
-CFLAGS=-O2
-EXTRA_CFLAGS += -Wall -Wmissing-prototypes -Wno-unused-result -Wshadow \
-                -Wmissing-prototypes
-EXTRA_CXXFLAGS += -Wall -Wmissing-prototypes -Wno-unused-result -Wshadow
-@
-
-\section{File Input}
-
-Input is in the form of normalized Unicode.  First, the raw input
-needs to be converted into integer code points.  Output may need to be
-produced in different formats as well.
-
-<<unistuff.h>>=
-<<Common C Warning>>
-#ifndef UNISTUFF_H
-#define UNISTUFF_H
+#ifndef UNI_ALL_H
+#define UNI_ALL_H
 
 <<Library [[uni]] headers>>
 
-#endif
+#endif /* UNI_ALL_H */
 @
 
-<<Library [[uni]] Members>>=
-uni_io.o
-@
-
-<<uni_io.c>>=
-<<Common C Header>>
-#include "uni_io.h"
-
-<<Unicode I/O local definitions>>
-
-<<Unicode I/O functions>>
-@
-
-<<Library [[uni]] headers>>=
-#include "uni_io.h"
-@
-
-<<uni_io.h>>=
-<<Common C Warning>>
-#ifndef UNI_IO_H
-#define UNI_IO_H
-
-<<Unicode I/O Exports>>
-#endif
-@
-
-\section{Basic Unicode I/O}
-
-Unicode defines several file formats:  UTF-8, UTF-16, and UTF-32.  No
-special conversion needs to be made from UTF-32 to integer code
-points, other than to filter out invalid values and possibly byte-swap
-the code point.
-
-<<Common C Includes>>=
-#include <stdint.h>
-/* FIXME: this is glibc-specific */
-/* BSD apparently uses <sys/endian.h> */
-/* OpenBSD additionally uses different fn names */
-/* othes may not even have any equivalent functions */
-#include <endian.h>
-@
+This document does not contain the UCD or CLDR itself; it is expected
+that the user download them manually and place them where they can be
+found.  Some Linux distributions may already provide at least the UCD
+as a package, although the CLDR is probably less common.  This package
+was tested with versions 6.0.0 and 6.2.0 of the UCD, but the file
+formats are relatively stable and it should work with later versions
+as well.  I recommend at least version 6.1.0, as that is the first
+version where the control character names were finally made official.
+An earlier version of this library actually had hard-coded names for
+ASCII control characters optionally added to the name database.  This
+package was tested against CLDR version 22.1; I recommend always
+getting the latest version available.  In particular, care must be
+taken that the CLDR and UCD versions are compatible.
 
 \lstset{language=make}
-<<makefile.vars>>=
-EXTRA_CFLAGS += -D_BSD_SOURCE
+<<makefile.config>>=
+# The location of the Unicode Character Database (unzipped)
+# http://www.unicode.org/Public/zipped/<version>/UCD.zip
+UCD_LOC = /usr/share/unicode-data
+# The location of the Unihan Database (unzipped)
+# http://www.unicode.org/Public/zipped/<version>/Unihan.zip
+UNIHAN_LOC = $(UCD_LOC)
+# The location of the Unicode Common Locale Data Repository (unzipped)
+# http://www.unicode.org/Public/cldr/latest/core.zip
+CLDR_LOC = /usr/share/unicode-data/cldr
 @
 
-\lstset{language=C}
-<<Unicode I/O Exports>>=
-int utf32_encode(uint32_t *buf, int cp, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_encode(uint32_t *buf, int cp, int bige)
-{
-  if(cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000))
-    return 0;
-  *buf = bige ? htobe32(cp) : htole32(cp);
-  return 1;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_decode(const uint32_t *s, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_decode(const uint32_t *s, int bige)
-{
-  uint32_t c = bige ? be32toh(*s) : le32toh(*s);
-  if(c > 0x10ffff || (c >= 0xd800 && c < 0xe000))
-    return -1;
-  return c;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_putc(int c, FILE *f, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_putc(int c, FILE *f, int bige)
-{
-  uint32_t w;
-
-  if(!utf32_encode(&w, c, bige))
-    return 0;
-  return fwrite(&w, 4, 1, f);
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_getc(FILE *f, int bige); /* always reads 4 bytes */
-@
-
-<<Unicode I/O functions>>=
-int utf32_getc(FILE *f, int bige)
-{
-  uint32_t w;
-  int ret;
-
-  if((ret = fread(&w, 1, 4, f)) != 4)
-    return ret ? -2 : -1;
-  ret = utf32_decode(&w, bige);
-  return ret < 0 ? -3 : ret;
-}
-@
-
-For UTF-16, a slightly more complex scheme is used, involving the
-surrogate code points (D800 through DFFF) in pairs.  The first half of
-the surrogate code points (D800 through DBFF) is always used for the
-first member of the pair, and the second half is used for the other.
-The first member gives the first 5 bits, and the second member gives
-the remainder. Since this is for representing code points 10000 and
-up, an extra bit can be gained giving the full range through 10FFFF.
-
-<<Unicode I/O Exports>>=
-/* make sure at least 2 words avail in buf */
-/* returns # of words written */
-int utf16_encode(uint16_t *buf, int cp, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_encode(uint16_t *buf, int cp, int bige)
-{
-  if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
-    return 0;
-  if(cp < 0x10000) {
-    *buf = bige ? htobe16(cp) : htole16(cp);
-    return 1;
-  }
-  int u = (cp & 0x1f0000) >> 16;
-  cp &= 0xffff;
-  uint16_t w;
-  w = 0xd800 + ((u - 1) @<< 10) + (cp @>> 10);
-  *buf++ = bige ? htobe16(w) : htole16(w);
-  w = 0xdc00 + (cp > 0x3fff);
-  *buf = bige ? htobe16(w) : htole16(w);
-  return 2;
-}
-@
-
-<<Unicode I/O Exports>>=
-/* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 2 words available */
-int utf16_decode(const uint16_t *s, int *nread, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_decode(const uint16_t *s, int *nread, int bige)
-{
-  uint16_t w = bige ? be16toh(*s) : le16toh(*s);
-  if(nread)
-    *nread = 1;
-  if(w < 0xd800 || w >= 0xe000)
-    return w;
-  if(w >= 0xdc00)
-    return -1;
-  uint16_t w2 = bige ? be16toh(s[1]) : le16toh(s[1]);
-  if(w2 >= 0xe000 || w2 < 0xdc00)
-    return -1;
-  if(nread)
-    *nread = 2;
-  int c = w2 & 0x3ff;
-  c += (w & 0x3f) << 10;
-  w = (w >> 10) & 0xf;
-  c += (w + 1) << 16;
-  return c;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf16_putc(int c, FILE *f, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_putc(int c, FILE *f, int bige)
-{
-  unsigned char buf[4];
-  uint16_t enc[2], encl;
-  
-  encl = utf16_encode(enc, c, bige);
-  if(!encl)
-    return 0;
-  if(bige) {
-    buf[0] = enc[0] >> 8;
-    buf[1] = enc[0];
-    if(encl > 1) {
-      buf[2] = enc[1] >> 8;
-      buf[3] = enc[1];
-    }
-  } else {
-    buf[1] = enc[0] >> 8;
-    buf[0] = enc[0];
-    if(encl > 1) {
-      buf[3] = enc[1] >> 8;
-      buf[2] = enc[1];
-    }
-  }
-  return fwrite(buf, 2, encl, f);
-}
-@
-
-The input function needs to read ahead to get the second member of a
-pair.  If that character is not what was expected, the correct
-behavior is to undo the readahead and return the current code point as
-an error.  However, it is not possible in C standard I/O to push more
-than one character back into the stream.  For now, this is going to
-have to be erroneous behavior.
-
-<<Unicode I/O Exports>>=
-int utf16_getc(FILE *f, int bige, int *nread);  /* nread == # of bytes read */
-@
-
-<<Unicode I/O functions>>=
-int utf16_getc(FILE *f, int bige, int *nread)
-{
-  int c = fgetc(f), c2;
-  if(c == EOF) {
-    if(nread)
-      *nread = 0;
-    return -1;
-  }
-  c2 = fgetc(f);
-  if(c == EOF) {
-    if(nread)
-      *nread = 1;
-    return -2;
-  }
-  if(bige)
-    c = c2 + (c << 8);
-  else
-    c += c2 << 8;
-  if(c < 0xd800 || c >= 0xE000) {
-    if(nread)
-      *nread = 1;
-    return c;
-  }
-  if(c >= 0xdc00) {
-    if(nread)
-      *nread = 2;
-    return -3;
-  }
-  int res = (c & 0x3f) << 10;
-  int w = (c >> 10) & 0xf;
-  res += (w + 1) << 16;
-  if((c = fgetc(f)) == EOF) {
-    if(nread)
-      *nread = 2;
-    return -2;
-  }
-  if((c2 = fgetc(f)) == EOF) {
-    if(nread)
-      *nread = 3;
-    return -2;
-  }
-  if(bige)
-    c = c2 + (c << 8);
-  else
-    c += c2 << 8;
-  if(c < 0xdc00 || c >= 0xe000) {
-#if 0 /* FIXME: this does not work; ungetc() can't be called twice */
-    ungetc(c2, f);
-    ungetc(bige ? c >> 8 : c & 0xff, f);
-    if(nread)
-      *nread = 2;
-#else
-    if(nread)
-      *nread = 4;
-#endif
-    return -3;
-  }
-  if(nread)
-    *nread = 4;
-  res += c & 0x3ff;
-  return res + (c & 0x3ff);
-}
-@
-
-For UTF-8, an even more complex encoding scheme is used.  Again, a
-standalone memory codec is provided.  All code points over 007F are
-encoded using a multi-byte sequence.  All characters in a multi-byte
-sequence have their high bit set; the first non-zero bit determines
-the byte's role.  All but the first byte have only one high bit set,
-and encode 6 bits.  The first byte determines how many trailing bytes
-there are, and also encode 3--5 bits.  The number of high bits set in
-the first byte is the total number of bytes in the sequence.
-
-<<Unicode I/O Exports>>=
-/* make sure at least 4 bytes avail in buf */
-/* returns # of bytes written */
-int utf8_encode(char *buf, int cp);
-@
-
-<<Unicode I/O functions>>=
-int utf8_encode(char *buf, int cp)
-{
-    if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
-        return 0;
-    if(cp < 128) {
-        *buf = cp;
-        return 1;
-    } else if(cp < 0x800) {
-        *buf = 0xc0 + (cp >> 6);
-        buf[1] = 0x80 + (cp & 0x3f);
-        return 2;
-    } else if(cp < 0x10000) {
-        *buf = 0xe0 + (cp >> 12);
-        buf[1] = 0x80 + ((cp >> 6) & 0x3f);
-        buf[2] = 0x80 + (cp & 0x3f);
-        return 3;
-    } else {
-        *buf = 0xf0 + (cp >> 18);
-        buf[1] = 0x80 + ((cp >> 12) & 0x3f);
-        buf[2] = 0x80 + ((cp >> 6) & 0x3f);
-        buf[3] = 0x80 + (cp & 0x3f);
-        return 4;
-    }
-}
-@
-
-<<Unicode I/O Exports>>=
-/* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 4 chars available */
-int utf8_decode(const char *buf, int *nread);
-@
-
-<<Unicode I/O functions>>=
-int utf8_decode(const char *buf, int *nread)
-{
-    if(*buf < 0x7f) {
-        *nread = 1;
-        return (unsigned char)*buf;
-    }
-    int c = (unsigned char)*buf++, ec;
-    if((c & 0xf8) == 0xf0) {
-        c &= 0x07;
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 2;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 3;
-            return -1;
-        }
-        *nread = 4;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x10000 || c > 0x10FFFF)
-            return -1;
-        return c;
-    }
-    if((c & 0xf0) == 0xe0) {
-        c &= 0x0f;
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 2;
-            return -1;
-        }
-        *nread = 3;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
-            return -1;
-        return c;
-    }
-    if((c & 0xe0) == 0xc0) {
-        c &= 0x1f;
-        ec = (unsigned char)*buf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        *nread = 2;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x80)
-            return -1;
-        return c;
-    }
-    *nread = 1;
-    return -1;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf8_putc(int c, FILE *f);
-@
-
-<<Unicode I/O functions>>=
-int utf8_putc(int c, FILE *f)
-{
-    char obuf[4];
-    int nout = utf8_encode(obuf, c);
-    return fwrite(obuf, 1, nout, f);
-}
-@
-
-UTF-8 output is common enough to warrant a string version of the
-output function as well.
-
-<<Unicode I/O Exports>>=
-int utf8_fputs(int *buf, int len, FILE *f);
-@
-
-<<Unicode I/O functions>>=
-int utf8_fputs(int *buf, int len, FILE *f)
-{
-  int ret = 0;
-
-  while(len-- > 0)
-    ret += utf8_putc(*buf++, f);
-  return ret;
-}
-@
-
-Like UTF-16 input, UTF-8 input requires some readahead.  For anything
-more than one character, C once again disallows returning the
-characters to the stream.  So, once again, bad input causes erroneous
-behavior.
-
-<<Unicode I/O Exports>>=
-int utf8_getc(FILE *f, int *nread);  /* nread == # of bytes read */
-@
-
-<<Unicode I/O functions>>=
-int utf8_getc(FILE *f, int *nread)
-{
-  int c;
-  int chrread = 1;
-
-  if((c = getc(f)) == EOF) {
-    c = -1;
-    chrread = 0;
-  } else if(c >= 0x80) {
-    int ec;
-    chrread = 1;
-    if((c & 0xf8) == 0xf0) {
-      <<Read 4-char utf-8>>
-      if(c < 0x10000 || c > 0x10ffff)
-        c = -3;
-    } else if((c & 0xf0) == 0xe0) {
-      <<Read 3-char utf-8>>
-      if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
-        c = -3;
-    } else if((c & 0xe0) == 0xc0) {
-      <<Read 2-char utf-8>>
-      if(c < 0x80)
-        c = -3;
-    } else
-      c = -3;
-  }
-  if(nread)
-    *nread = chrread;
-  return c;
-}
-@
-
-<<Read 4-char utf-8>>=
-c &= 0x07;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-  if((ec = getc(f)) == EOF)
-    c = -2;
-  else if((ec & 0xc0) != 0x80) {
-    ungetc(ec, f);
-    c = -3;
-  } else {
-    chrread = 3;
-    c = (c << 6) + (ec & 0x3f);
-    if((ec = getc(f)) == EOF)
-      c = -2;
-    else if((ec & 0xc0) != 0x80) {
-      ungetc(ec, f);
-      c = -3;
-    } else {
-      chrread = 4;
-      c = (c << 6) + (ec & 0x3f);
-    }
-  }
-}
-@
-
-<<Read 3-char utf-8>>=
-c &= 0x0f;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-  if((ec = getc(f)) == EOF)
-    c = -2;
-  else if((ec & 0xc0) != 0x80) {
-    ungetc(ec, f);
-    c = -3;
-  } else {
-    chrread = 3;
-    c = (c << 6) + (ec & 0x3f);
-  }
-}
-@
-
-<<Read 2-char utf-8>>=
-c &= 0x1f;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-}
-@
-
-\section{General File Input}
-
-For arbitrary input formats other than ISO-Latin-1 and ASCII (which
-map directly to Unicode), the iconv library should be used.
-
-<<Unicode I/O local definitions>>=
-#include <langinfo.h>
-#include <locale.h>
-#include <iconv.h>
-@
-
-A more general UTF reader would have to scan for a byte order mark and
-remember what it said.  This requires retaining state.
-
-<<Unicode I/O Exports>>=
-typedef struct {
-  FILE *f;
-  char *name;
-  <<Unicode file buffer state>>
-} unifile_t;
-@
-
-
-Rather than automatically attaching state to a file on first access
-and never really knowing when to free it, explicit routines are
-provided to create and remove the state.   
-
-<<Unicode I/O Exports>>=
-/* encoding = NULL for automatic detection */
-/* automatically detects utf16/utf32 if encoding == UTF-8 */
-unifile_t *uni_fopen(const char *name, const char *encoding);
-void uni_fclose(unifile_t *uf);
-@
-
-<<Unicode I/O functions>>=
-unifile_t *uni_fopen(const char *name, const char *encoding)
-{
-  unifile_t *uf;
-
-  inisize(uf, 1);
-  clearbuf(uf, 1);
-  uf->name = strdup(name);
-  if(!uf->name) {
-    free(uf);
-    return NULL;
-  }
-  uf->f = fopen(name, "rb");
-  if(!uf->f) {
-    free(uf->name);
-    free(uf);
-    return NULL;
-  }
-  <<Initialize unicode file buffer state>>
-  return uf;
-}
-@
-
-<<Unicode I/O functions>>=
-void uni_fclose(unifile_t *uf)
-{
-  free(uf->name);
-  fclose(uf->f);
-  <<Free unicode file buffer state>>
-  free(uf);
-}
-@
-
-One limitation of standard I/O is that only one character may be
-pushed back into the stream.  To correct this, a 4-byte buffer is
-kept, along with a count.  In order to avoid reading from the file
-after the buffered characters have been removed, an end-of-file flag
-is kept as well.  In order to allow error messages to display the
-correct file offset, that is also kept.
-
-<<Unicode file buffer state>>=
-size_t fpos;
-char readahead[4];
-char raptr;
-unsigned char eof;
-@
-
-The first thing to do is to decide the file's encoding.  ASCII and
-ISO-Latin-1 can be read raw.  UTF-8 is taken to mean automatic Unicode
-detection.  Anything else is passed to iconv.
-
-<<Unicode file buffer state>>=
-unsigned char enctype;
-/*
- * 0 = ASCII/Latin-1
- * 1 = iconv
- * 8/16/32 = utf-8/16/32
- */
-void *enchelp;
-@
-
-<<Unicode I/O local definitions>>=
-#define ICBUF_SIZE 1024
-typedef struct {
-  iconv_t ic;
-  char ibuf[ICBUF_SIZE];
-  int ilen;
-  uint32_t obuf[ICBUF_SIZE];
-  int optr, olen;
-} iconv_supt_t;
-@
-
-<<Initialize unicode file buffer state>>=
-if(!encoding) {
-  setlocale(LC_CTYPE, "");
-  encoding = nl_langinfo(CODESET);
-}
-if(!encoding)
-  encoding = "UTF-8";
-if(encoding && (!strcmp(encoding, "ISO-8859-1") ||
-                !strcmp(encoding, "ANSI_X3.4-1968"))) /* ASCII */
-  return uf; /* enctype == 0 */
-else if(encoding && strcmp(encoding, "UTF-8")) {
-  iconv_supt_t *ics;
-  inisize(ics, 1);
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-#define bo "LE"
-#else
-#define bo "BE"
-#endif
-  ics->ic = iconv_open("UTF-32" bo, encoding);
-  if(ics->ic == (iconv_t)-1) {
-    perror(encoding);
-    exit(1);
-  }
-  uf->enchelp = ics;
-  uf->enctype = 1;
-  return uf;
-}
-/* otherwise it's Unicode */
-@
-
-<<Free unicode file buffer state>>=
-if(uf->enctype == 1 && uf->enchelp) {
-  iconv_supt_t *ics = uf->enchelp;
-  iconv_close(ics->ic);
-  free(ics);
-}
-@
-
-The first thing to do on opening a new Unicode file is to check for
-the byte order mark (FEFF).  Flags are kept to indicate what was
-found.
-
-<<Unicode file buffer state>>=
-unsigned char bige;
-@
-
-<<Initialize unicode file buffer state>>=
-uf->enctype = 8;
-/* Read and process BOM (FEFF) */
-int c = getc(uf->f);
-if(c == EOF)
-  uf->eof = 1;
-else if(c == 0xff) {
-  c = getc(uf->f);
-  if(c == 0xfe) {
-    uf->bige = 1;
-    uf->enctype = 16;
-    uf->fpos = 2;
-  } else {
-    ungetc(c, uf->f);
-    uf->readahead[0] = 0xff;
-    uf->raptr = 1;
-  }
-} else if(c == 0xfe) {
-  c = getc(uf->f);
-  if(c == 0xff) {
-    c = getc(uf->f);
-    if(!c) {
-      c = getc(uf->f);
-      if(!c) {
-        uf->enctype = 32;
-	uf->fpos = 4;
-      } else {
-        ungetc(c, uf->f);
-	uf->readahead[0] = 0;
-	uf->raptr = 1;
-        uf->enctype = 16;
-	uf->fpos = 2;
-      }
-    } else {
-      ungetc(c, uf->f);
-      uf->enctype = 16;
-      uf->fpos = 2;
-    }
-  } else {
-    ungetc(c, uf->f);
-    uf->readahead[0] = 0xfe;
-    uf->raptr = 1;
-  }
-} else if(!c) {
-  c = getc(uf->f);
-  if(!c) {
-    c = getc(uf->f);
-    if(c == 0xfe) {
-      c = getc(uf->f);
-      if(c == 0xff) {
-        uf->enctype = 32;
-	uf->bige = 1;
-	uf->fpos = 4;
-      } else {
-        ungetc(c, uf->f);
-	uf->readahead[0] = 0;
-	uf->readahead[1] = 0;
-	uf->readahead[2] = 0xfe;
-	uf->raptr = 3;
-      }
-    } else {
-      ungetc(c, uf->f);
-      uf->readahead[0] = 0;
-      uf->readahead[1] = 0;
-      uf->raptr = 2;
-    }
-  } else {
-    ungetc(c, uf->f);
-    uf->readahead[0] = 0;
-    uf->raptr = 1;
-  }
-} else
-  ungetc(c, uf->f);
-@
-
-The reader then uses the appropriate method to read a character based
-on the [[enctype]].
-
-<<Unicode I/O Exports>>=
-int uni_fgetc(unifile_t *uf);
-@
-
-<<Unicode I/O functions>>=
-int uni_fgetc(unifile_t *uf)
-{
-  if(!uf->enctype) {
-    int c = getc(uf->f);
-    if(c == EOF)
-      uf->eof = 1;
-    else
-      uf->fpos++;
-    return c;
-  } else if(uf->enctype == 1) {
-    <<Return a character using iconv>>
-  }
-  <<Return a Unicode character>>
-}
-@
-
-Rather than using the potentially flawed direct I/O routines, the
-Unicode reader always reads raw bytes and then calls the decoder
-instead.  That way, the readahead issue disappears.
-
-<<Return a Unicode character>>=
-while(!uf->eof && uf->raptr < 4) {
-  int nr = fread(uf->readahead + uf->raptr, 1, 4 - uf->raptr, uf->f);
-  if(nr <= 0)
-    uf->eof = 1;
-  else
-    uf->raptr += nr;
-}
-if(uf->eof && !uf->raptr)
-  return -1;
-int cp, l;
-if(uf->enctype == 32) {
-  cp = utf32_decode((uint32_t *)uf->readahead, uf->bige);
-  l = 4;
-} else if(uf->enctype == 16) {
-  cp = utf16_decode((uint16_t *)uf->readahead, &l, uf->bige);
-  l *= 2;
-} else
-  cp = utf8_decode(uf->readahead, &l);
-if(l > uf->raptr) {
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-  uf->raptr = 0;
-  return -2;
-}
-if(l < 4)
-  memmove(uf->readahead, uf->readahead + l, 4 - l);
-if(cp < 0)
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-uf->raptr -= l;
-uf->fpos += l;
-return cp < 0 ? -2 : cp;
-@
-
-For iconv:
-
-<<Return a character using iconv>>=
-iconv_supt_t *ics = uf->enchelp;
-while(1) {
-  if(ics->olen) {
-    --ics->olen;
-    return utf32_decode(&ics->obuf[ics->optr++], __BYTE_ORDER == __BIG_ENDIAN);
-  }
-  char *ibuf = ics->ibuf;
-  size_t ilen = ics->ilen;
-  char *obuf = (char *)ics->obuf;
-  size_t olen = ICBUF_SIZE * 4;
-  while(!uf->eof && ilen < ICBUF_SIZE) {
-    int nr = fread(ibuf, 1, ICBUF_SIZE - ilen, uf->f);
-    if(nr <= 0)
-      uf->eof = 1;
-    else
-      ilen += nr;
-  }
-  while(1) {
-    iconv(ics->ic, &ibuf, &ilen, &obuf, &olen);
-    if(ibuf != ics->ibuf)
-      break;
-    /* ignore bad chars */
-    if(!--ilen)
-      break;
-    memmove(ics->ibuf, ics->ibuf + 1, ilen);
-  }
-  if(ilen)
-    memmove(ics->ibuf, ibuf, ilen);
-  else if(uf->eof)
-    iconv(ics->ic, NULL, NULL, &obuf, &olen);
-  ics->olen = olen / 4;
-  ics->optr = 0;
-  ics->ilen = ilen;
-}
+Speaking of names, the Unicode character names are rather verbose.%
+\footnote{It is recommended in some places that common names be
+permitted in a less verbose manner, but that is locale-dependent and
+will not be supported by this library.}
+The XML standard, on the other hand, has fairly short names.  This
+library can use either, or even both (where they do not conflict).  To
+do this, the XML entity database is needed.  This is defined by the
+W3C XML Entity Definitions for Characters.%
+\footnote{\url{http://www.w3.org/TR/xml-entity-names/}}
+This was tested with version 01 April 2010.%
+\footnote{\url{http://www.w3.org/TR/2010/REC-xml-entity-names-20100401/}}
+The only data file needed from that standard is unicode.xml,%
+\footnote{\url{http://www.w3.org/2003/entities/2007xml/unicode.xml}}
+which is linked from the standard.
+
+<<makefile.config>>=
+# The XML entity database http://www.w3.org/2003/entities/2007xml/unicode.xml
+XMLUNI = /usr/share/unicode-data/unicode.xml
 @
 
 \section{Unicode Tables}
 
-The Unicode standard, being the truly open standard that it is, freely
-supplies not only human-readable documents describing the standard,
-but machine-readable data files covering nearly all information about
-the characters.  The UCD (Unicode Character
-Database)\footnote{\url{http://www.unicode.org/Public/6.2.0/ucd}}
-contains text files with relatively stable formats for parsing.  Some
-Linux distributions package this information up as well.  This package
-was tested with version 6.0.0 and 6.2.0.  The name database in
-particular is more useful with versions 6.1.0 and later, where the
-name comment field is replaced with usable aliases for control
-characters.
-
-\lstset{language=make}
-<<makefile.config>>=
-# The location of the Unicode Character Database
-#UCD_LOC = /usr/share/unicode-data
-UCD_LOC = /home/darktjm/unicode/6.2/ucd
-@
-
-This library's primary purpose is to preparse this information and
-query it efficiently.  Unicode covers a lot of attributes regarding a
-lot of characters, and even some sequences of characters.  The size of
-a straight lookup table would end up in the multi-megabyte range
-\emph{for each attribute}.  Not only does this bloat the library, but
-it also guarantees that nothing will ever be in the cache.  Instead,
-several other strategies are used by this library.
+This library's primary purpose is to preparse the Unicode information
+and query it efficiently.  Unicode covers a lot of attributes
+regarding a lot of characters, and even some sequences of characters.
+The size of a straight lookup table would end up in the multi-megabyte
+range \emph{for each attribute}.  Even a bit array could take 128
+kilobytes per boolean attribute.  Not only does this bloat the
+library, but it also guarantees that nothing will ever be in the
+cache.  Instead, several other strategies are used by this library.
 
 One of the simplest strategies is to store keyword-value pairs in a
 table, in order.  The keyword is usually the code point in this case.
@@ -1011,7 +157,20 @@ one example of implementation; other forms of data could be used as
 well.
 
 \lstset{language=C}
-<<Common data structures>>=
+<<Library [[uni]] headers>>=
+#include "uni_common.h"
+@
+
+<<uni_common.h>>=
+#ifndef UNI_COMMON_H
+#define UNI_COMMON_H
+
+<<Common uni data structures>>
+
+#endif /* UNI_COMMON_H */
+@
+
+<<Common uni data structures>>=
 typedef struct {
   int32_t cp; /* can use sign bit for extra storage */
               /* could also add a byte by making this :24 or smaller */
@@ -1019,17 +178,29 @@ typedef struct {
 } uni_cp_dat_t;
 @
 
-<<Compare [[cp_dat]]>>=
+<<Library [[uni]] Members>>=
+uni_common.o
+@
+
+<<uni_common.c>>=
+<<Common C Header>>
+
+<<Common uni functions>>
+@
+
+<<Common uni functions>>=
 static int cmp_cp_dat(const void *a, const void *b)
 {
     return ((uni_cp_dat_t *)a)->cp - ((uni_cp_dat_t *)b)->cp;
 }
-@
 
-<<Search [[cp_dat]] table>>=
-uni_cp_dat_t d = {cp}, *ret;
-ret = (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
-                              cmp_cp_dat);
+const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
+                                uint32_t tab_len)
+{
+  uni_cp_dat_t d = {cp};
+  return (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
+                                cmp_cp_dat);
+}
 @
 
 One step above this strategy is to merge contiguous like-valued
@@ -1043,13 +214,13 @@ because presence of an element indicates truth.  Classification tables
 often have large contiguous blocks as well, but they need an extra
 data field.
 
-<<Common data structures>>=
+<<Common uni data structures>>=
 typedef struct {
     int low, high;
 } uni_chrrng_t;
 @
 
-<<Compare [[chrrng]]>>=
+<<Common uni functions>>=
 int cmprng(const void *a, const void *b)
 {
     const uni_chrrng_t *_a = a, *_b = b;
@@ -1061,20 +232,21 @@ int cmprng(const void *a, const void *b)
     else
         return 0;
 }
+
+int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
+{
+  uni_chrrng_t cr = {cp, cp};
+  return bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_t), cmprng) ? 1 : 0;
+}
 @
 
-<<Search [[chrrng]] table>>=
-uni_chrrng_t cr = {cp, cp};
-int ret = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_t), cmprng) ? 1 : 0;
-@
-
-<<Common data structures>>=
+<<Common uni data structures>>=
 typedef struct {
     int low, high, dat;
 } uni_chrrng_dat_t;
 @
 
-<<Compare [[chrrng_dat]]>>=
+<<Common uni functions>>=
 int cmprng_dat(const void *a, const void *b)
 {
     const uni_chrrng_dat_t *_a = a, *_b = b;
@@ -1086,172 +258,339 @@ int cmprng_dat(const void *a, const void *b)
     else
         return 0;
 }
-@
 
-<<Search [[chrrng_dat]] table>>=
-uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
-uint32_t ret;
-tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), cmprng_dat);
-ret = tab_el ? tab_el->dat : def;
+uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len,
+                        uint32_t def)
+{
+  uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
+  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), cmprng_dat);
+  return tab_el ? tab_el->dat : def;
+}
 @
 
 One advantage of the above two approaches is that the algorithms for
 generating them from the text files is trivial, and can be implemented
-with simple shell scripts.  The files are already in code point order,
-so entries simply need to be read in and merged if they are adjacent.
-For example, UnicodeData.txt only lists a single code point per entry,
-except for certain specially named ranges.  The named ranges are all
-in angle brackets, with First and Last as the last word of the start
-and end of the range, respectively.  A simple shell script can be used
-to generate ranges into a data table.  The script can be used
-to generate the table directly (giving it a name), or it can be
-post-processed to add a data field, running it multiple time for each
-unique value of the data field and then sorting the results.  The data
-file's contents are filtered to the desired code points and passed in
-to this script's standard input.
+with simple shell scripts.  Early in the development cycle for this
+library, that was indeed the case.  However, the scripts were rather
+slow, even though they used mostly builtin shell functionality, so
+they have been replaced with a C program.  This program has a special
+build rule so it can be used to generate other C code without
+depending on that C code itself (as with [[cproto.h]]).  The code
+itself can't use the standard header macro, either, since it needs to
+limit its include files.  One thing it does need, though, is the
+ability to read lines of arbitrary length.  This is provided in my
+support library, which is referenced rather than built here, again to
+avoid building [[cproto.h]].
+
+\lstset{language=make}
+<<C Build Executables>>=
+ucd-ranges \
+@
+
+<<makefile.config>>=
+# location of support library
+SUPT_LIB=../build/libsupt.a
+@
+
+<<makefile.rules>>=
+ucd-ranges: ucd-ranges.c mfgets.h $(SUPT_LIB)
+	$(CC) $(CFLAGS) $(SUPT_INCL) $(CFLAGS_EXTRA) -o $@ ucd-ranges.c \
+	  $(SUPT_LIB)
+@
+
+The files are already in code point order, so entries simply need to
+be read in and merged if they are adjacent.  A range is output as soon
+as it is known.
+
+\lstset{language=C}
+<<ucd-ranges.c>>=
+<<Common C Warning>>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include "mfgets.h"
+
+int main(int argc, const char **argv)
+{
+  <<UCD parser options>>
+  <<UCD parser variables>>
+  <<Process UCD parser arguments>>
+  <<Print UCD entry C range header>>
+  <<For each UCD file line>> {
+    <<Skip entry if not right field>>
+    <<Merge start of range>>
+    <<Merge end of range>>
+  }
+  <<Finish last range>>
+  <<Print UCD entry C range tail>>
+  return 0;
+}
+@
+
+The standard input to the program is the file to parse.  The command
+line arguments specify what to do with the file.  Instead of having to
+filter the file before passing it in, the program can do a simple
+search by either checking if a particular field is non-empty or if it
+is a particular value.  The first and second non-option arguments are
+the field number and the optional value.  Of course this simple
+filtering may not be enough, but this program does not seek, so a
+filter pipeline can be used for more advanced filtering.
+
+<<For each UCD file line>>=
+char *lbuf = NULL;
+unsigned int lbuflen, llen;
+while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin))
+@
+
+<<Process UCD parser arguments>>=
+while(--argc > 0) {
+  const char *arg = *++argv;
+
+  if(*arg != '-')
+    break;
+  if(arg[1] == '-') {
+    argc--;
+    argv++;
+    break;
+  }
+  switch(arg[1]) {
+    <<Process UCD parser argument>>
+  }
+}
+if(argc != 1 && argc != 2)
+  exit(1);
+fieldno = atoi(*argv);
+eq = argc > 1 ? argv[1] : NULL;
+eqlen = eq ? strlen(eq) : 0;
+@
+
+<<UCD parser variables>>=
+int fieldno;
+const char *eq;
+int eqlen;
+@
+
+The program can generate either simple boolean table ranges or valued
+ranges.  The value is extracted from some field, which may not be the
+same field as the search field.
+
+<<UCD parser options>>=
+const char *field_prefix = NULL;
+int val_field = -1;
+@
+
+<<Process UCD parser argument>>=
+case 'p':
+  if(!--argc)
+    exit(1);
+  field_prefix = *++argv;
+  break;
+case 'v':
+  if(!--argc)
+    exit(1);
+  val_field = strtol(*++argv, NULL, 0);
+  break;
+@
+
+The program can be used to generate the table directly (giving it a
+name), or it can just generate table lines to be post-processed and
+merged.  Originally, this program was going to do the post-processing
+and merging as well, but that would require actually storing the
+ranges internally, and dumping the resulting table instead of dumping
+as soon as things are known. This may happen in a future modification.
+
+<<UCD parser options>>=
+const char *cname = NULL;
+@
+
+<<Process UCD parser argument>>=
+case 'n':
+  if(!--argc)
+    exit(1);
+  cname = *++argv;
+  break;
+@
+
+<<Print UCD entry C range header>>=
+if(cname)
+  printf("const uni_chrrng%s_t unirng_%s[] = {\n", 
+         field_prefix ? "_dat" : "", cname);
+@
+
+<<Print UCD entry C range tail>>=
+if(cname) {
+  printf("};\n"
+         "const uint32_t unirng_%s_len = sizeof(unirng_%s)/sizeof(unirng_%s[0]);\n",
+	 cname, cname, cname);
+  }
+@
+
+The format of all of the UCD text files is semicolon-separated fields,
+with optional comments starting with hash marks.  Some fields are
+actually after the hash mark, so that is used as a field separator if
+it is not the first one.
+
+<<Skip entry if not right field>>=
+char *lptr = lbuf;
+int i;
+for(i = 1; i < fieldno; i++) {
+  while(*lptr && *lptr != ';' && *lptr != '#')
+    ++lptr;
+  if(!*lptr || *lptr == '#' && i == 1)
+    break;
+  ++lptr;
+}
+if(i < fieldno)
+  continue;
+while(isspace(*lptr)) lptr++;
+if(eq) {
+  int clen = eqlen;
+  if(memcmp(lptr, eq, eqlen))
+    continue;
+  while(isspace(lptr[clen])) clen++;
+  if(lptr[clen] && lptr[clen] != ';' && lptr[clen] != '#')
+    continue;
+} else if(!*lptr || *lptr == ';' || *lptr == '#')
+  continue;
+@
+
+If the field to search on is not the same as the extracted value, the
+line is skipped if the value is blank as well.
+
+<<Skip entry if not right field>>=
+if(val_field > 0 && val_field != fieldno) {
+  if(val_field > fieldno)
+    i = fieldno;
+  else {
+    i = 1;
+    lptr = lbuf;
+  }
+  for(; i < val_field; i++) {
+    while(*lptr && *lptr != ';' && *lptr != '#')
+      ++lptr;
+    if(!*lptr)
+      break;
+    ++lptr;
+  }
+  if(i < val_field)
+    continue;
+  while(isspace(*lptr))
+    lptr++;
+  if(!*lptr || *lptr == ';' || *lptr == '#')
+    continue;
+}
+@
+
+While we're at it, we may as well extract the value.  The start is
+already at [[lptr]], so only the length needs to be computed.
+
+<<UCD parser variables>>=
+int vlen;
+@
+
+<<Skip entry if not right field>>=
+if(field_prefix) {
+  for(vlen = 0; lptr[vlen] && lptr[vlen] != ';' && lptr[vlen] != '#'; vlen++);
+  while(isspace(lptr[vlen - 1])) vlen--;
+}
+@
+
+The first column always contains the code points, as either a single
+hexadecimal code point or two code points separated by double dots.
+To process a file, lines are read while keeping track of the end of
+the previous range, so that ranges may be merged.  If a jump is
+detected, or if the value for a valued range changes, the previously
+accumulated range must be output.  This is done by always printing the
+first element after the jump, and then printing the last stored end
+point before the jump.  The last range's value must be saved as well
+for this to work.
+
+<<UCD parser variables>>=
+int32_t prevcp=-2;
+char *field = NULL;
+int field_len = 0;
+int32_t cp;
+@
+
+<<Merge start of range>>=
+++prevcp;
+cp = strtol(lbuf, NULL, 16);
+if(prevcp < cp || (field && (field_len != vlen || memcmp(field, lptr, field_len)))) {
+  /* end prev. range if it exists */
+  if(prevcp > 0) {
+    printf("0x%06X", prevcp - 1);
+    if(field_prefix)
+      printf(", %s%.*s", field_prefix, field_len, field);
+    puts("},");
+  }
+  /* start new range */
+  prevcp = cp;
+  printf("\t{0x%06X, ", prevcp);
+  if(field_prefix) {
+    if(!field)
+      field = malloc(vlen);
+    else if(field_len < vlen)
+      field = realloc(field, vlen);
+    field_len = vlen;
+    if(!field)
+      exit(1);
+    memcpy(field, lptr, vlen);
+  }
+}
+@
+
+<<Finish last range>>=
+if(prevcp >= 0) {
+  /* finish off last range */
+  printf("0x%06X", prevcp);
+  if(field_prefix)
+    printf(", %s%.*s", field_prefix, field_len, field);
+  putchar('}');
+  if(!cname)
+    putchar(',');
+  putchar('\n');
+}
+@
+
+If the code point was a singleton, we're done.  If it's a range, then
+the other members of the range need to be merged in as well, by
+advancing [[prevcp]] to the end point of the range. UnicodeData.txt
+represents ranges differently than the other files.  It uses a special
+character name format to indicate the start and end of a range.  The
+others use two hexadecimal numbers separated by double dots.
 
 \lstset{language=make}
 <<makefile.vars>>=
 UNIDATA = $(UCD_LOC)/UnicodeData.txt
 @
 
-\lstset{language=sh}
-<<Build Script Executables>>=
-ud-ranges \
-@
-
-<<ud-ranges>>=
-#!/bin/sh
-<<Common NoWeb Warning>>
-test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
-cut -d\; -f1-2 | (
-  prevcp=-2
-  while IFS=\; read cp n; do
-    # if this cp doesn't follow prevcp, start new range
-    prevcp=$((prevcp+1))
-    if test $prevcp -lt $((0x$cp)); then
-      # end prev. range if it exists
-      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
-      # start new range
-      prevcp=$((0x$cp))
-      printf '\t{0x%06X, ' $prevcp
-    fi
-    # for range start entries, read range end and jump to end
-    case "$n" in *" First>") IFS=\; read cp n; prevcp=$((0x$cp));; esac
-  done
-  if [ $prevcp -ne -2 ]; then
-    # finish off last range
-    if [ -n "$1" ]; then
-      printf '0x%06X}\n' $prevcp
-    else
-      printf '0x%06X},\n' $prevcp
-    fi
-  fi
-)
-test -n "$1" && echo "};"
-test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
-@
-
-Most of the other data files, such as the property lists and alias
-files, specify ranges directly rather than using special names.  The
-only difference between this script and the one above is in how ranges
-are detected.
-
-\lstset{language=make}
-<<makefile.vars>>=
-UNIPROP = $(UCD_LOC)/PropList.txt
-UNIPROPALIAS = $(UCD_LOC)/PropertyAliases.txt
-UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
-UNIDER = $(UCD_LOC)/DerivedCoreProperties.txt
-@
-
-\lstset{language=sh}
-<<Build Script Executables>>=
-der-ranges \
-@
-
-<<der-ranges>>=
-#!/bin/sh
-<<Common NoWeb Warning>>
-test -n "$1" && echo "const uni_chrrng_t unirng_$1[] = {"
-cut -d\; -f1 | (
-  prevcp=-2
-  while read cpr; do
-    # if this cp doesn't follow prevcp, start new range
-    prevcp=$((prevcp+1))
-    cp=${cpr%%..*}
-    if test $prevcp -lt $((0x$cp)); then
-      # end prev. range if it exists
-      test $prevcp -gt 0 && printf '0x%06X},\n' $((prevcp-1))
-      # start new range
-      prevcp=$((0x$cp))
-      printf '\t{0x%06X, ' $prevcp
-    fi
-    # for range entries, jump to end
-    case "$cpr" in *..*) cp=${cpr#*..}; prevcp=$((0x$cp));; esac
-  done
-  if [ $prevcp -ne -2 ]; then
-    # finish off last range
-    if [ -n "$1" ]; then
-      printf '0x%06X}\n' $prevcp
-    else
-      printf '0x%06X},\n' $prevcp
-    fi
-  fi
-)
-test -n "$1" && echo "};"
-test -n "$1" && echo "const uint32_t unirng_${1}_len = sizeof(unirng_$1)/sizeof(unirng_${1}[0]);"
-@
-
-Of course nothing says that these need to be parsed by shell scripts.
-In fact, a C program could produce the same results, and even provide
-other features, such as merging multiple attributes into a single
-table, or specifying the search pattern and source files directly
-instead of relying on pre-filtered standard input.
-
-\lstset{language=make}
-<<C Build Executables>>=
-mktab \
-@
-
-<<makefile.rules>>=
-mktab: mktab.o
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
-@
-
 \lstset{language=C}
-<<mktab.c>>=
-<<Common C Header>>
+<<UCD parser options>>=
+int is_unidata = 0;
+@
 
-<<[[mktab]] globals>>
+<<Process UCD parser argument>>=
+case 'u':
+  is_unidata = 1;
+  break;
+@
 
-int main(int argc, const char **argv)
-{
-  FILE *inf;
-  <<[[mktab]] option variables>>
-  while(argc > 0) {
-    const char *arg = *++argv;
-    if(*arg != '-')
-      break;
-    argc--;
-    if(arg[1] == '-') {
-      argv++;
-      break;
-    }
-    switch(arg[1]) {
-      <<Process [[mktab]] option>>
-    }
+<<Merge end of range>>=
+if(is_unidata) {
+  /* for range start entries, read range end and jump to end */
+  lptr = strchr(lbuf, ';');
+  if(lptr)
+    lptr = strchr(lptr + 1, ';');
+  if(lptr > lbuf + 7 && !memcmp(lptr - 7, " First>", 7)) {
+    mfgets(&lbuf, &lbuflen, &llen, 0, stdin);
+    prevcp = strtol(lbuf, NULL, 16);
   }
-  if(argc > 0) {
-    inf = fopen(*argv, "r");
-    if(!inf) {
-      perror(*argv);
-      exit(1);
+} else {
+  for(lptr = lbuf; *lptr && !isspace(*lptr) && *lptr != ';' && *lptr != '#'; lptr++)
+    if(*lptr == '.' && lptr[1] == '.') {
+      prevcp = strtol(lptr + 2, NULL, 16);
     }
-  } else
-    inf = stdin;
-  <<Convert [[inf]] to range table>>
-  return 0;
 }
 @
 
@@ -1575,6 +914,120 @@ static uint32_t lg2(uint32_t l)
 }
 @
 
+Finally, we need to provide a common function to look up data in these
+tables:  given an integer key, return the 8-bit value for that key.
+
+<<Common uni functions>>=
+uint8_t mtab_lookup(const uint8_t *dat, uint32_t val, uint8_t def)
+{
+  <<Look up an entry in optimal table>>
+}
+@
+
+First, we need to filter out the main range.  Note that converting a
+pointer to a table of bytes to a 32-bit integer pointer may fail on
+some architectures, although really that is a problem with the C
+compiler rather than the architecture.  In a future revision, I should
+probably make the first entries real structure elements rather than
+bytes to avoid this.  Since the skip value for other levels is read
+after that table, the first skip value can be read while we're at it.
+
+<<Look up an entry in optimal table>>=
+uint32_t low = *(uint32_t *)dat, high;
+if(val < low)
+  return def;
+dat += 4;
+high = *(uint32_t *)dat;
+if(val > high)
+  return def;
+dat += 4;
+val -= low;
+@
+
+Each level is a collection of tables.  For that level, we need to know
+the offset into that collection of the table we're looking at, as well
+as the total length of the collection, in order to skip over it after
+the lookup.  For the first table, the length is the next parameter,
+and there is just one table, at offset zero.
+
+<<Look up an entry in optimal table>>=
+high = *(uint32_t *)dat; /* skip value */
+dat += 4;
+low = 0; /* offset of table to look at */
+@
+
+Next in the data come the tables.  The first byte is zero for the
+lowest level, and the number of bits to shift the value right otherwise.
+
+<<Look up an entry in optimal table>>=
+while(*dat) {
+  <<Search next level of optimal table>>
+}
+@
+
+<<Search next level of optimal table>>=
+uint32_t idx = val >> *dat;
+val -= idx << *dat;
+@
+
+The next two bytes are the number of bytes in a pointer and the log base
+2 of the size of each table at the next level.  Once these are
+skipped, the table lookup may be performed.
+
+<<Search next level of optimal table>>=
+uint8_t psz = dat[1];
+uint32_t nextlen = 1 << dat[2];
+dat += 3;
+@
+
+Actualy, the first pointer is always the size of the next level, so
+that needs to be retrieved first.  Then, the pointer is advanced past
+that and added to the offset to the table we're looking at, and the
+pointer is extracted.  Again, possibly unaligned accesses are being
+performed here.  This can't be solved by simply making the entries
+real structure members.  The only solution is to extract byte-by-byte
+or to always align them manually within the byte array.
+
+<<Search next level of optimal table>>=
+uint32_t nhigh = 0;
+switch(psz) {
+  case 1:
+    nhigh = *dat;
+    if(!nhigh)
+      nhigh = 0x100;
+    dat += low + 1;
+    idx = dat[idx];
+    break;
+  case 2:
+    nhigh = *(uint16_t *)dat;
+    if(!nhigh)
+      nhigh = 0x10000;
+    dat += low + 2;
+    idx = ((uint16_t *)dat)[idx];
+    break;
+  case 4:
+    nhigh = *(uint32_t *)dat;
+    dat += low + 4;
+    idx = ((uint32_t *)dat)[idx];
+    break;
+}
+@
+
+Next, we skip over the rest of the level and prepare for the next.
+
+<<Search next level of optimal table>>=
+dat += high - low;
+low = idx * nextlen;
+high = nhigh * nextlen;
+@
+
+Once we reach the bottom, the value an be extracted and returned.
+
+<<Look up an entry in optimal table>>=
+dat += low + 1; /* skip to correct table */
+return dat[val];
+@
+
 Consider the character type table: 2710 table entries in the range
 table, for a total of 32520 bytes and 12 lookups maximum (11 average).
 In comparison, the table produced by the above code, with pointers
@@ -1593,19 +1046,14 @@ tsttab \
 @
 
 <<makefile.rules>>=
-tsttab.o: chartypes.gen.h
+tsttab.o: uni_chartype.gen.h
 @
 
 <<tsttab.c>>=
 <<Common C Header>>
 
-#include "chartypes.h"
+#include "uni_chartype.h"
 // static_proto
-
-static uint8_t mtab_lookup(const uint8_t *dat, uint32_t val, uint8_t def)
-{
-  <<Look up an entry in optimal table>>
-}
 
 #include <sys/resource.h>
 struct rusage ru;
@@ -1622,6 +1070,8 @@ static unsigned long tend(void)
   return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
             (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
 }
+
+volatile int v;
 
 static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
                      const uint8_t *mtab, uint8_t def)
@@ -1649,13 +1099,14 @@ static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nen
       uint8_t b;
       res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_dat_t), cmprng_dat);
       b = res ? res->dat : def;
+      v = b;
     }
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
     for(i = 0; i < 0x110000; i++) {
-      uni_chrrng_dat_t cr = {i, i}, *res;
       uint8_t b = mtab_lookup(mtab, i, def);
+      v = b;
     }
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
@@ -1684,8 +1135,8 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     for(j = 0; j < 10; j++)
     for(i = 0; i < 0x110000; i++) {
       uni_chrrng_t cr = {i, i}, *res;
-      uint8_t b;
       res = bsearch(&cr, rng, nent, sizeof(uni_chrrng_t), cmprng);
+      v = res ? 1 : 0;
     }
     tr = tend();
     tstart();
@@ -1694,6 +1145,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
       uint8_t b;
       b = mtab_lookup(mtab, i / 8, 0);
       b &= i & 7;
+      v = b ? 1 : 0;
     }
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
@@ -1707,58 +1159,6 @@ int main(void)
   return 0;
 }
 @
-
-<<Look up an entry in optimal table>>=
-uint32_t low = *(uint32_t *)dat, high, skip;
-if(val < low)
-  return def;
-dat += 4;
-high = *(uint32_t *)dat;
-if(val > high)
-  return def;
-dat += 4;
-val -= low;
-skip = *(uint32_t *)dat;
-dat += 4;
-low = 0;
-while(*dat) {
-  uint8_t psz = dat[1];
-  uint32_t nextlen = 1 << dat[2];
-  uint32_t idx = val >> *dat;
-  uint32_t nskip = 0;
-  val -= idx << *dat;
-  dat += 3;
-  switch(psz) {
-    case 1:
-      nskip = *dat;
-      if(!nskip)
-        nskip = 0x100;
-      dat += low + 1;
-      idx = dat[idx];
-      break;
-    case 2:
-      nskip = *(uint16_t *)dat;
-      if(!nskip)
-        nskip = 0x10000;
-      dat += low + 2;
-      idx = ((uint16_t *)dat)[idx];
-      break;
-    case 4:
-      nskip = *(uint32_t *)dat;
-      dat += low + 4;
-      idx = ((uint32_t *)dat)[idx];
-      break;
-  }
-  dat += skip - low;
-  low = idx * nextlen;
-  skip = nskip * nextlen;
-}
-/* yay!  at last level */
-dat += low + 1; /* skip to correct block */
-return dat[val];
-@
-
-
 
 Another possibility would be to use more complex data structures.  I
 doubt I could come up with a more space-efficient storage method than
@@ -1778,25 +1178,26 @@ again equates to large storage penalties.
 After reading raw Unicode, it needs to be normalized.
 
 <<Library [[uni]] Members>>=
-uninorm.o
+uni_norm.o
 @
 
 <<Library [[uni]] headers>>=
-#include "uninorm.h"
+#include "uni_norm.h"
 @
 
-<<uninorm.h>>=
+<<uni_norm.h>>=
 <<Common C Warning>>
-#ifndef UNINORM_H
-#define UNINORM_H
+#ifndef UNI_NORM_H
+#define UNI_NORM_H
 
+#include "uni_common.h"
 <<Unicode normalization support exports>>
-#endif
+#endif /* UNI_NORM_H */
 @
 
-<<uninorm.c>>=
+<<uni_norm.c>>=
 <<Common C Header>>
-#include "uninorm.h"
+#include "uni_norm.h"
 
 <<Unicode normalization support local definitions>>
 
@@ -1852,10 +1253,11 @@ well, so it is also separate ([[nfkc_cf]]).
 /* for canonical/compatibility decomposition: */
 /*  off is offset in deccp */
 /*  |len| is length in deccp; len is negative if compatibility */
+/* stored in cp_dat_t uint32 */
 typedef struct {
-    int cp;
-    uint16_t off;
-    int16_t len;
+  int cp;
+  uint16_t off;
+  int16_t len;
 } uni_decent_t;
 /* The decomposition strings */
 extern const int deccp[];
@@ -1872,7 +1274,7 @@ the C file that uses it.
 
 \lstset{language=make}
 <<makefile.rules>>=
-uninorm.o: uninorm.gen
+uni_norm.o: uninorm.gen
 @
 
 <<Plain Built Files>>=
@@ -1891,21 +1293,15 @@ other function that returns variable-length information from [[deccp]].
 const uni_decent_t *find_decomp(int cp, int canon);
 @
 
-<<Unicode normalization support local definitions>>=
-<<Compare [[cp_dat]]>>
-@
-
 <<Unicode normalization support functions>>=
 const uni_decent_t *find_decomp(int cp, int canon)
 {
-    const uni_cp_dat_t *tab = (uni_cp_dat_t *)decomp;
-    uint32_t tab_len = sizeof(decomp)/sizeof(*decomp);
     uni_decent_t *dret;
-    <<Search [[cp_dat]] table>>
-    if(!ret)
+    uint32_t tab_len = sizeof(decomp)/sizeof(*decomp);
+    dret = (uni_decent_t *)find_cp_dat(cp, (uni_cp_dat_t *)decomp, tab_len);
+    if(!dret)
         return NULL;
-    dret = (uni_decent_t *)ret;
-    if(canon && ret > decomp && dret[-1].cp == cp)
+    if(canon && dret > decomp && dret[-1].cp == cp)
         return dret - 1;
     if(!canon && dret < decomp + tab_len - 1 &&
        dret[1].cp == cp)
@@ -1927,10 +1323,8 @@ const uni_decent_t *find_nfkc_cf(int cp);
 <<Unicode normalization support functions>>=
 const uni_decent_t *find_nfkc_cf(int cp)
 {
-    uni_cp_dat_t *tab = (uni_cp_dat_t *)nfkc_cf;
-    uint32_t tab_len = sizeof(nfkc_cf)/sizeof(*nfkc_cf);
-    <<Search [[cp_dat]] table>>
-    return (uni_decent_t *)ret;
+  return (uni_decent_t *)find_cp_dat(cp, (uni_cp_dat_t *)nfkc_cf,
+                                     sizeof(nfkc_cf)/sizeof(*nfkc_cf));
 }
 @
 
@@ -1946,13 +1340,8 @@ int find_ccc(int cp);
 <<Unicode normalization support functions>>=
 int find_ccc(int cp)
 {
-    const uni_cp_dat_t *tab = ccctab;
-    uint32_t tab_len = sizeof(ccctab)/sizeof(*ccctab);
-    <<Search [[cp_dat]] table>>
-    if(ret)
-        return ret->data;
-    else
-        return 0;
+  const uni_cp_dat_t *ret = find_cp_dat(cp, ccctab, sizeof(ccctab)/sizeof(*ccctab));
+  return ret ? ret->data : 0;
 }
 @
 
@@ -2361,7 +1750,7 @@ information is stored, so there is no need to avoid intermingling data.
 
 <<Stuff to do before reading [[unif]]>>=
 /* first spit out the ccc table, so no ccc info needs to be kept */
-puts("static const uni_ccc_t ccctab[] = {");
+puts("static const uni_cp_dat_t ccctab[] = {");
 const char *nxt = ""; /* , for prev. line */
 @
 
@@ -2911,212 +2300,32 @@ for(i = 0; i < ndec; i++)
 puts("\n};");
 @
 
-\section{Generic Normalized Unicode Input}
-
-To make things even easier, we can make a function which returns a
-normalized character.  Any normalization type we have code for, we
-support.
-
-<<Unicode normalization support exports>>=
-typedef enum {
-  UN_NONE, UN_NFD, UN_NFKD, UN_NFC, UN_NFKC, UN_NFKC_CF
-} uni_normtype_t;
-@
-
-<<Unicode normalization support exports>>=
-#include "uni_io.h"
-
-int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt);
-@
-
-<<Unicode normalization support functions>>=
-int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt)
-{
-  <<Get normalized character>>
-}
-@
-
-A simple function which returns a normalized character requires that
-the current decomposition and composition state be kept.  It would be
-ideal to extend the [[unifile_t]] structure with the extra information
-rather than allocating yet another wrapper, but for now I would prefer
-[[unifile_t]] to stay isolated to unnormalized I/O.
-
-In order to make this transparent, the extra support structure is
-automatically created and placed on a linked list.  It is assumed that
-the file will not be closed and reopened without an intervening EOF.
-It is also assumed that the function will not be called any more after
-it returns EOF.
-
-<<Unicode normalization support local definitions>>=
-typedef struct unifile_norm {
-  struct unifile_norm *next;
-  unifile_t *uf;
-  <<Normalized input buffer state>>
-} unifile_norm_t;
-static unifile_norm_t *norm_files = NULL;
-@
-
-<<Get normalized character>>=
-unifile_norm_t *ufn = norm_files;
-
-while(ufn && ufn->uf != uf)
-  ufn = ufn->next;
-if(!ufn) {
-  inisize(ufn, 1);
-  clearbuf(ufn, 1);
-  ufn->next = norm_files;
-  norm_files = ufn;
-}
-
-<<Return normalized character if not EOF>>
-
-unifile_norm_t **bufp;
-for(bufp = &norm_files; *bufp != ufn; bufp = &(*bufp)->next);
-*bufp = ufn->next;
-free(ufn);
-
-return -1;
-@
-
-For support, we'll need to store at least the maximal decomposition of
-a character.  Technically, it is possible to require an infinite
-buffer to support canonical ordering and composition, but we'll only
-support a finite number and hope for the best.  Some future revision
-should make the buffer automatically expand when necessary.
-
-<<Normalized input buffer state>>=
-/* maximal decomposition of a single char is 18 chars */
-/* leave room in buf for at least 2 */
-int buf[128];
-@
-
-We'll also need to know how many characters are in the buffer, and how
-many of those are good to go.
-
-<<Normalized input buffer state>>=
-int blen, oklen;
-@
-
-To return a single character, we'll need to normalize until at least
-one character could not possibly be modified any more.
-
-<<Return normalized character if not EOF>>=
-int oklen = ufn->oklen;
-int *buf = ufn->buf;
-while(!oklen && !uf->eof) {
-  /* read a char into end of buf, if needed & possible */
-  <<Read and normalize a character>>
-}
-if(oklen) {
-  /* now we have oklen chars in buf that are ready to return */
-  int c = buf[0];
-  memmove(buf, buf + 1, (--ufn->blen) * sizeof(*buf));
-  ufn->oklen = oklen - 1;
-  return c;
-}
-@
-
-To add more characters, append a character to the buffer and
-decompose it.  The Unicode standard states that case folding
-requires an additional NFD step beforehand, but reading of the data
-suggests that instead, it needs canonical ordering and composition
-afterwards, just like the NFC and NFKC.  This makes case folding just
-another decomposition method.
-
-int nread;
-
-<<Read and normalize a character>>=
-int c;
-int bp = ufn->blen;
-c = buf[bp] = uni_fgetc(uf);
-if(nt == UN_NONE) {
-  oklen = ufn->blen = ++bp;
-  break;
-}
-if(c != -1)
-  switch(nt) {
-    case UN_NONE: /* here to remove warning */
-    case UN_NFD:
-    case UN_NFC:
-      bp += NFD_dec(buf + bp, 1);
-      break;
-    case UN_NFKD:
-    case UN_NFKC:
-      bp += NFKD_dec(buf + bp, 1);
-      break;
-    case UN_NFKC_CF:
-      bp += NFKC_Casefold(buf + bp, 1);
-  }
-@
-
-Then, the entire set of characters already read in can be ordered.  If
-no characters can be obtained from canonical ordering, try to read
-more right away.
-
-<<Read and normalize a character>>=
-int oblen = Canon_Order(buf, bp, uf->eof);
-if(!oblen) {
-  ufn->blen = bp;
-  continue;
-}
-@
-
-Then, all characters which have been ordered can be composed.  If
-composition might need more characters, the next trip around the loop
-will get them.
-
-<<Read and normalize a character>>=
-switch(nt) {
-  case UN_NONE: /* here to remove warning */
-  case UN_NFD:
-  case UN_NFKD:
-    /* no composition */
-    oklen = oblen;
-    break;
-  case UN_NFC:
-  case UN_NFKC:
-  case UN_NFKC_CF: {
-    int cblen = NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
-    if(uf->eof)
-      oklen = cblen;
-    /* move unordered characters down if composition removed chars */
-    if(cblen < oblen) {
-      if(bp > oblen)
-        memmove(buf + cblen, buf + oblen, (bp - oblen) * sizeof(*buf));
-      bp -= oblen - cblen;
-    }
-    break;
-  }
-}
-ufn->blen = bp;
-@
-
 \section{Character Classification}
 
 Once the characters arrive, they need to be classified for lexical
 analysis and other purposes.
 
 <<Library [[uni]] Members>>=
-chartypes.o
+uni_chartype.o
 @
 
 <<Library [[uni]] headers>>=
-#include "chartypes.h"
+#include "uni_chartype.h"
 @
 
-<<chartypes.h>>=
+<<uni_chartype.h>>=
 <<Common C Warning>>
-#ifndef CHARTYPES_H
-#define CHARTYPES_H
+#ifndef UNI_CHARTYPE_H
+#define UNI_CHARTYPE_H
 
+#include "uni_common.h"
 <<Character type exports>>
-#endif
+#endif /* UNI_CHARTYPE_H */
 @
 
-<<chartypes.c>>=
+<<uni_chartype.c>>=
 <<Common C Header>>
-#include "chartypes.h"
+#include "uni_chartype.h"
 
 <<Character type local definitions>>
 
@@ -3130,26 +2339,6 @@ would be done with only 256 code points, each flag is represented as
 an array of ranges, in numerical order.  Binary searches can be used
 to determine if the flag is set.
 
-<<Character type exports>>=
-typedef struct {
-    int low, high;
-} uni_chrrng_t;
-@
-
-<<Character type functions>>=
-int cmprng(const void *a, const void *b)
-{
-    const uni_chrrng_t *_a = a, *_b = b;
-
-    if(_a->high < _b->low)
-        return -1;
-    else if(_b->high < _a->low)
-        return 1;
-    else
-        return 0;
-}
-@
-
 <<Character type functions>>=
 #define is_x(x) \
     int is_uni_##x(int cp) \
@@ -3162,26 +2351,6 @@ int cmprng(const void *a, const void *b)
 
 For classification, the array of ranges is augmented by a value for
 each range.  The value can be a plain integer or an enumeration.
-
-<<Character type exports>>=
-typedef struct {
-    int low, high, dat;
-} uni_chrrng_dat_t;
-@
-
-<<Character type functions>>=
-int cmprng_dat(const void *a, const void *b)
-{
-    const uni_chrrng_dat_t *_a = a, *_b = b;
-
-    if(_a->high < _b->low)
-        return -1;
-    else if(_b->high < _a->low)
-        return 1;
-    else
-        return 0;
-}
-@
 
 <<Character type local definitions>>=
 /* prefix with return type */
@@ -3207,13 +2376,13 @@ The actual range tables can be automatically generated from the UCD.
 
 <<Character type exports>>=
 <<[[chartypes.gen]] dependencies>>
-#include "chartypes.gen.h"
+#include "uni_chartype.gen.h"
 @
 
 \lstset{language=make}
 <<makefile.rules>>=
-chartypes.h: chartypes.gen.h
-chartypes.o: chartypes.gen.h
+uni_chartype.h: uni_chartype.gen.h
+uni_chartype.o: chartypes.gen
 
 chartypes.gen: <<Character types generation deps>>
 
@@ -3221,14 +2390,14 @@ chartypes.gen: <<Character types generation deps>>
 	<<Generate [[chartypes.gen]]>>
 	<<Post-process [[chartypes.gen]]>>
 
-chartypes.gen.h: chartypes.c chartypes.gen
+uni_chartype.gen.h: <<Character types header generation deps>>
+
 	echo >$@
-	<<Generate [[chartypes.gen.h]]>>
-	cproto -E "$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -E" -v -e -f 0 $< >>$@
+	<<Generate [[uni_chartype.gen.h]]>>
 @
 
 <<C Headers>>=
-chartypes.gen.h \
+uni_chartype.gen.h \
 @
 
 First, although technically all code points from 0000 through 10FFFF
@@ -3238,12 +2407,12 @@ parsed.  The parsing is too confusing when done directly in the make
 rule, so a script is used instead.
 
 <<Character types generation deps>>=
-$(UNIDATA) ud-ranges \
+$(UNIDATA) ucd-ranges \
 @
 
 <<Generate [[chartypes.gen]]>>=
 # filtering valid input
-fgrep -v Surrogate $(UNIDATA) | ./ud-ranges valid >>$@
+fgrep -v Surrogate $(UNIDATA) | ./ucd-ranges -n valid 1 >>$@
 @
 
 \lstset{language=C}
@@ -3289,8 +2458,16 @@ typedef struct {
 } uni_gc_desc_t;
 @
 
+<<makefile.vars>>=
+UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
+@
+
+<<Character types header generation deps>>=
+$(UNIDATA) $(UNIVALALIAS) \
+@
+
 \lstset{language=make}
-<<Generate [[chartypes.gen.h]]>>=
+<<Generate [[uni_chartype.gen.h]]>>=
 # standard character classes
 echo "typedef enum {" >>$@
 cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
@@ -3313,13 +2490,7 @@ cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
 done >>$@
 echo '  {"Cn", "Unassigned"}' >>$@
 echo "};" >>$@
-echo "const uni_chrrng_dat_t unirng_gc[] = {" >>$@
-for x in `cut -d\; -f3 $(UNIDATA) | sort -u`; do \
-  cut -d\; -f1-3 $(UNIDATA) | grep ";$$x" | ./ud-ranges | \
-      sed "s/}/, U_GC_$$x}/"; \
-done | sort -t\{ -k 2 | sed '$$s/,$$//' >>$@
-echo "};" >>$@
-echo "const uint32_t unirng_gc_len = sizeof(unirng_gc)/sizeof(unirng_gc[0]);" >>$@
+./ucd-ranges -n gc -p U_GC_ 3 < $(UNIDATA) >>$@
 echo "const uni_gc_desc_t uni_gc_names[] = {" >>$@
 grep '^gc ;' $(UNIVALALIAS) | while read -r d d s d l t1 l2 t2 l3; do \
   case "$$t1" in \
@@ -3354,20 +2525,19 @@ multi-level tables as well.
 rngtotab \
 @
 
-% FIXME: this won't work.  rngtotab needs chartypes.gen.h, which
-%        requires chartypes.gen, which requires rngtotab
 <<Character types generation deps>>=
-rngtotab.c \
+rngtotab.c.static_proto uni_chartype.h uni_chartype.gen.h \
 @
 
 <<Post-process [[chartypes.gen]]>>=
+touch cproto.h
 $(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o rngtotab rngtotab.c
 ./rngtotab >>$@
 @
 
 <<rngtotab.c>>=
 <<Common C Header>>
-#include "chartypes.h"
+#include "uni_chartype.h"
 #include "chartypes.gen"
 // static_proto
 
@@ -3556,14 +2726,19 @@ deprecated code points.  These are extracted from PropList.txt and
 DerivedCoreProperties.txt, which is in a different format, requiring a
 different parser script.
 
+<<makefile.vars>>=
+UNIDER = $(UCD_LOC)/DerivedCoreProperties.txt
+UNIPROP = $(UCD_LOC)/PropList.txt
+@
+
 <<Character types generation deps>>=
-$(UNIDER) der-ranges \
+$(UNIDER) $(UNIPROP) \
 @
 
 <<Generate [[chartypes.gen]]>>=
 # other features
-fgrep '; Deprecated #' $(UNIPROP) | ./der-ranges depr >>$@
-fgrep '; Default_Ignorable_Code_Point #' $(UNIDER) | ./der-ranges ign >>$@
+./ucd-ranges -n depr 2 Deprecated < $(UNIPROP) >>$@
+./ucd-ranges -n ign 2 Default_Ignorable_Code_Point < $(UNIDER) >>$@
 @
 
 \lstset{language=C}
@@ -3606,15 +2781,28 @@ UNISCRX = $(UCD_LOC)/ScriptExtensions.txt
 $(UNISCR) $(UNIVALALIAS) \
 @
 
-<<Generate [[chartypes.gen.h]]>>=
+<<makefile.rules>>=
+scriptnames.gen: $(UNIVALALIAS)
+	sed -n 's/^sc *; \([^ ]*\) *; \([^ ]*\)[ ;]*\([^ ]*\)/\1 \2 \3/p' \
+	  < $(UNIVALALIAS) >$@
+@
+
+<<Character types generation deps>>=
+scriptnames.gen \
+@
+
+<<Character types header generation deps>>=
+scriptnames.gen \
+@
+
+<<Generate [[uni_chartype.gen.h]]>>=
 echo "typedef enum {" >>$@
-sed -n 's/^sc *; \([^ ]*\) *; \([^ ]*\)[ ;]*\([^ ]*\)/\1 \2 \3/p' \
-  < $(UNIVALALIAS) | while read s l s2; do \
+while read s l s2; do \
   printf %s "  U_SC_$$s,"; \
   test "$$s" = "$$l" || printf %s " U_SC_$$l = U_SC_$$s,"; \
   test -n "$$s2" && printf %s " U_SC_$$s2 = U_SC_$$s,"; \
   echo; \
-done | sed '$$s/,$$//' >>$@
+done < scriptnames.gen | sed '$$s/,$$//' >>$@
 echo "} uni_sc_t;" >>$@
 @
 
@@ -3627,14 +2815,10 @@ typedef struct {
 
 <<Generate [[chartypes.gen]]>>=
 # scripts
+echo "const uni_chrrng_dat_t unirng_sc[] = {" >>$@
 # Zzzz not explicitly listed; covers anything not in any other
 # Hrkt not explicitly listed; covers Kana+Hira
-echo "const uni_chrrng_dat_t unirng_sc[] = {" >>$@
-sed -n 's/^sc *; \([^ ]*\) *; \([^ ]*\)[ ;]*\([^ ]*\)/\1 \2 \3/p' \
-  < $(UNIVALALIAS) | egrep -v Zzzz\|Hrkt | \
-  while read s l s2; do \
-    fgrep "; $$l #" $(UNISCR) | ./der-ranges | sed "s/}/, U_SC_$$s}/"; \
-  done | sort -t\{ -k 2 | sed '$$s/,$$//' >>$@
+./ucd-ranges -p U_SC_ 2 < $(UNISCR) | LANG=C sort | sed '$$s/,$$//' >>$@
 echo "};" >>$@
 echo "const uint32_t unirng_sc_len = sizeof(unirng_sc)/sizeof(unirng_sc[0]);" >>$@
 # note: assumes at most 6 scripts; may change in future
@@ -3648,16 +2832,15 @@ echo "};" >>$@
 echo "const uni_chrrng_dat_t unirng_scx[] = {" >>$@
 grep '^[0-9A-F]' $(UNISCRX) | cut -d\; -f2 | cut -d\# -f1 | uniq | ( \
       i=0; \
-      while IFS= read -r s; do \
-        fgrep ";$$s#" $(UNISCRX) | ./der-ranges | sed "s/}/, $$i}/"; \
+      while read s; do \
+        ./ucd-ranges 2 "$$s" < $(UNISCRX) | sed "s/}/, $$i}/"; \
 	i=$$((i+1)); \
       done) | sort -t\{ -k 2 | sed '$$s/,$$//' >>$@
 echo "};" >>$@
 echo "const uint32_t unirng_scx_len = sizeof(unirng_scx)/sizeof(unirng_scx[0]);" >>$@
 # Zzzz not explicitly listed; covers anything not in any other
 # Hrkt not explicitly listed; covers Kana+Hira
-sed -n 's/^sc *; \([^ ]*\) *; \([^ ]*\)[ ;]*\([^ ]*\)/\1 \2 \3/p' \
-  < $(UNIVALALIAS) | egrep -v Zzzz\|Hrkt | ( \
+egrep -v Zzzz\|Hrkt scriptnames.gen | ( \
   tt=; \
   while read s l s2; do \
     for n in $$l $$s $$s2; do \
@@ -3695,14 +2878,15 @@ chartypes \
 @
 
 <<makefile.rules>>=
-chartypes: chartypes.c chartypes.o uninorm.o uni_io.o
-	$(CC) $(CFLAGS) -DRNG_MAIN $(LDFLAGS) -o $@ $< uninorm.o uni_io.o
+CHARTYPES_OBJS = uni_norm.o uni_io.o uni_common.o
+chartypes: uni_chartype.c uni_chartype.o $(CHARTYPES_OBJS)
+	$(CC) $(CFLAGS) -DRNG_MAIN $(LDFLAGS) -o $@ $< $(CHARTYPES_OBJS)
 @
 
 \lstset{language=C}
 <<Character type functions>>=
 #ifdef RNG_MAIN
-#include "uninorm.h"
+#include "uni_norm.h"
 
 int main(int argc, const char **argv)
 {
@@ -3805,10 +2989,96 @@ charnames.uniseq: $(UNISEQ)
          done > $@
 @
 
+Extracting the XML names could be done with sed as well, but since it
+is XML, and the file format is more likely to retain the same XML
+structure than to retain the same exact text format, XSLT is used
+instead.  The name database has subsets called groups.  Using every
+single name is certain to frequently collide with Unicode names, so a
+particular group should be chosen.  The 2007 group is used by my own
+applications.
+
+<<makefile.config>>=
+# XML entity name group
+XML_ENTITY_NAME_GROUP = 2007
+@
+
+<<Plain Built Files>>=
+charnames.xml \
+@
+
+<<makefile.rules>>=
+charnames.xml: uxml.xslt $(XMLUNI)
+	xsltproc --stringparam GROUP '$(XML_ENTITY_NAME_GROUP)' $^ | \
+	  sed 's/,U/,0x/;s/;//;s/-/,0x/g' | sort -u >$@
+@
+
+<<Plain Build Files>>=
+uxml.xslt
+@
+
+\lstset{language=xml}
+
+<<uxml.xslt>>=
+<?xml version="1.0"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<<Output XML entity names in more managable form>>
+</xsl:stylesheet>
+@
+
+First, the output format needs to set to plain text.  In order to
+avoid formatting of the XML to creep into the text file, all elements
+strip plain spaces.
+
+<<Output XML entity names in more managable form>>=
+<xsl:output method="text"/>
+<xsl:strip-space elements="*"/>
+@
+
+Next, we extract the group.  Each group defines which sets it contains.
+
+<<Output XML entity names in more managable form>>=
+<xsl:param name="GROUP"/>
+<xsl:template match="/unicode/entitygroups">
+  <xsl:for-each select="group[@name=$GROUP]/set">
+    <<Process XML entity set>>
+  </xsl:for-each>
+</xsl:template>
+@
+
+To process each set, a separate template is used.  This template takes
+the set name as a parameter.
+
+<<Process XML entity set>>=
+<xsl:apply-templates select="/unicode/charlist">
+  <xsl:with-param name="set" select="@name"/>
+</xsl:apply-templates>
+@
+
+The per-set template searches the charlist for entities which claim
+membership in the set.  For each such entity, it prints the id
+attribute, whose value is the XML entity name, and the parent's id,
+whose value is the Unicode code point.  A semicolon is gratuitously
+appended to force a newline (otherwise the extreme whitespace
+stripping will remove it).  The Unicode code point is in the form
+\verb|U######| (the code point in hexadecimal) or
+\verb|U######-######| (two hexadecimal code points).  It may be
+possible to convert the dash to a comma and eliminate the semicolon
+and U using XSLT, but I don't know how.  Instead, that transformation
+is done by sed above.
+
+<<Output XML entity names in more managable form>>=
+<xsl:template match="/unicode/charlist">
+  <xsl:param name="set"/>
+  <xsl:for-each select="character/entity[@set=$set]"
+><xsl:value-of select="@id"/>,<xsl:value-of select="parent::*/@id"/>;
+</xsl:for-each>
+</xsl:template>
+@
+
 So, what do we do with all of these names?  The obvious thing is to
 create a hash table to look up the code point using the name, and
 another hash table to look up the name using the code point.  Since
-the const of comparing integers is small, a binary search might
+the cost of comparing integers is small, a binary search might
 suffice for the code point-to-name lookup.  For the hash table, we
 could either use some random hash function and hash table
 implementation, or we could generate a perfect hash function using
@@ -3825,6 +3095,12 @@ for the full Unicode set took 2 hours on my machine, and an additional
 1 hour to compile.  Instead, I decided to go with the first thing I
 ever implemented in a compiler: a single hash table used for all
 strings in the system, preloaded with known symbols.
+
+Of course a hash function may not even be ideal.  For example, Unicode
+regular expressions may allow searching for a name using a pattern.
+For that, the ideal structure is probably a suffix table.  Of
+course such structures can be much larger than the equivalent hash
+table.
 
 \section{Persistent Strings}
 
@@ -3849,23 +3125,24 @@ directly in the string table, [[autoadd]] can be a negative number,
 indicating the number of bytes to add before the string to store data.
 
 <<Library [[uni]] Members>>=
-strs.o
+uni_strs.o
 @
 
 \lstset{language=C}
 <<Common C Includes>>=
-#include "strs.h"
+#include "uni_strs.h"
 @
 
 <<Library [[uni]] headers>>=
-#include "strs.h"
+#include "uni_strs.h"
 @
 
-<<strs.h>>=
+<<uni_strs.h>>=
 <<Common C Warning>>
-#ifndef STRS_H
-#define STRS_H
+#ifndef UNI_STRS_H
+#define UNI_STRS_H
 
+#include "uni_common.h"
 /* if 0-len string, use 0; don't call this function! */
 /* if len == 0, function does strlen() for you */
 /* 0 returned if len == 0 or !autoadd and not already there */
@@ -3878,10 +3155,10 @@ const char *str_for(uint32_t no, int *len);
 
 <<Master string table exports>>
 
-#endif
+#endif /* UNI_STRS_H */
 @
 
-<<strs.c>>=
+<<uni_strs.c>>=
 <<Common C Header>>
 
 <<Master string table definitions>>
@@ -3977,18 +3254,18 @@ Rather than introduce this inefficiency into the compiler, I'll use a
 Similarly, the size of the string can be gotten with [[sizeof]] or
 with an external integer, with the former being more efficient.
 Taking the size directly only works if the string is included directly
-in [[strs.c]], though.
+in [[uni_strs.c]], though.
 
 \lstset{language=make}
 <<makefile.rules>>=
-strs-dyn.c: strs.c cproto.h
+uni_strs-dyn.c: uni_strs.c cproto.h
 	ln -sf $< $@
-strs-dyn.o: EXTRA_CFLAGS+=-DDYN_BUILTIN_STR
-strs.o: strs.gen
+uni_strs-dyn.o: EXTRA_CFLAGS+=-DDYN_BUILTIN_STR
+uni_strs.o: strs.gen
 @
 
 <<Clean temporary files>>=
-rm -f strs-dyn.[oc]
+rm -f uni_strs-dyn.[oc]
 @
 
 \lstset{language=C}
@@ -4000,7 +3277,7 @@ extern int builtin_str_size;
 extern const hashent_t *builtin_hashe;
 extern int builtin_hashe_size;
 #else
-/* builtin_str and builtin_hashe are local to strs.c */
+/* builtin_str and builtin_hashe are local to uni_strs.c */
 #define builtin_str_size (sizeof(builtin_str) - 1) /* remove trailing C 0 */
 #define builtin_hashe_size (sizeof(builtin_hashe)/sizeof(hashent_t))
 #endif
@@ -4310,7 +3587,7 @@ names as individual words, rather than full strings.
 \lstset{language=make}
 <<makefile.rules>>=
 mkstrs.o: EXTRA_CFLAGS+=-DDYN_BUILTIN_STR
-mkstrs: mkstrs.o strs-dyn.o
+mkstrs: mkstrs.o uni_strs-dyn.o
 	$(CC) $(LDFLAGS) -o $@ $^
 @
 
@@ -5299,10 +4576,6 @@ strs-strs.gen: strs.gen
 	touch strs-strs.gen
 @
 
-<<C Headers>>=
-builtin-strings.h \
-@
-
 The automatically generated names were not included in the above
 lists.  In order to make it easier to look them up in the name-to-code
 direction, their prefixes are added to the name table.  In addition, a
@@ -5402,7 +4675,7 @@ charnames.unirng \
 
 \lstset{language=make}
 <<makefile.rules>>=
-chartypes.o: builtin-strings.h
+uni_chartype.o: builtin-strings.h
 @
 
 <<Generate [[chartypes.gen]]>>=
@@ -5433,26 +4706,27 @@ Now enough pieces are together to create some routines for character
 name lookup.
 
 <<Library [[uni]] headers>>=
-#include "charnames.h"
+#include "uni_charname.h"
 @
 
-<<charnames.h>>=
+<<uni_charname.h>>=
 <<Common C Warning>>
 #ifndef CHARNAMES_H
 #define CHARNAMES_H
 
+#include "uni_common.h"
 <<Character name lookup exports>>
 
 #endif
 @
 
 <<Library [[uni]] Members>>=
-charnames.o
+uni_charname.o
 @
 
-<<charnames.c>>=
+<<uni_charname.c>>=
 <<Common C Header>>
-#include "charnames.h"
+#include "uni_charname.h"
 
 <<Character name lookup local definitions>>
 
@@ -5494,6 +4768,10 @@ static int cp_for(uint32_t str)
 }
 @
 
+<<makefile.rules>>=
+uni_charname.o: builtin-strings.h
+@
+
 <<Character name lookup local definitions>>=
 #include "builtin-strings.h"
 @
@@ -5509,7 +4787,7 @@ charnames.gen: <<Character name data generation dependencies>>
 
 	echo >$@
 	<<Generate character name data>>
-charnames.o: charnames.gen
+uni_charname.o: charnames.gen
 @
 
 Looking up Unicode names is much more difficult.  On a lookup failure,
@@ -5565,7 +4843,7 @@ returns the low end of the range, which is what we looked up, so if
 they match, we're good to go.
 
 <<Character name lookup local definitions>>=
-#include "chartypes.h"
+#include "uni_chartype.h"
 @
 
 <<Look up code point of Unicode range element [[buf]]>>=
@@ -6037,6 +5315,1077 @@ while(--tl >= 0)
 return fulllen;
 @
 
+\section{File Input}
+
+Basic I/O support is provided in the form of UTF decoders and
+encoders.  More advanced I/O is provided in the form of arbitrary
+encoding input.
+
+<<Library [[uni]] Members>>=
+uni_io.o
+@
+
+\lstset{language=C}
+<<uni_io.c>>=
+<<Common C Header>>
+#include "uni_io.h"
+
+<<Unicode I/O local definitions>>
+
+<<Unicode I/O functions>>
+@
+
+<<Library [[uni]] headers>>=
+#include "uni_io.h"
+@
+
+<<uni_io.h>>=
+<<Common C Warning>>
+#ifndef UNI_IO_H
+#define UNI_IO_H
+
+#include "uni_common.h"
+<<Unicode I/O Exports>>
+#endif
+@
+
+\subsection{Basic Unicode I/O}
+
+Unicode defines several file formats:  UTF-8, UTF-16, and UTF-32.  No
+special conversion needs to be made from UTF-32 to integer code
+points, other than to filter out invalid values and possibly byte-swap
+the code point.
+
+<<Common C Includes>>=
+#include <stdint.h>
+/* FIXME: this is glibc-specific */
+/* BSD apparently uses <sys/endian.h> */
+/* OpenBSD additionally uses different fn names */
+/* others may not even have any equivalent functions */
+#include <endian.h>
+@
+
+\lstset{language=make}
+<<makefile.vars>>=
+# for endian
+EXTRA_CFLAGS += -D_BSD_SOURCE
+@
+
+\lstset{language=C}
+<<Unicode I/O Exports>>=
+int utf32_encode(uint32_t *buf, int cp, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf32_encode(uint32_t *buf, int cp, int bige)
+{
+  if(cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000))
+    return 0;
+  *buf = bige ? htobe32(cp) : htole32(cp);
+  return 1;
+}
+@
+
+<<Unicode I/O Exports>>=
+int utf32_decode(const uint32_t *s, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf32_decode(const uint32_t *s, int bige)
+{
+  uint32_t c = bige ? be32toh(*s) : le32toh(*s);
+  if(c > 0x10ffff || (c >= 0xd800 && c < 0xe000))
+    return -1;
+  return c;
+}
+@
+
+<<Unicode I/O Exports>>=
+int utf32_putc(int c, FILE *f, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf32_putc(int c, FILE *f, int bige)
+{
+  uint32_t w;
+
+  if(!utf32_encode(&w, c, bige))
+    return 0;
+  return fwrite(&w, 4, 1, f);
+}
+@
+
+<<Unicode I/O Exports>>=
+int utf32_getc(FILE *f, int bige); /* always reads 4 bytes */
+@
+
+<<Unicode I/O functions>>=
+int utf32_getc(FILE *f, int bige)
+{
+  uint32_t w;
+  int ret;
+
+  if((ret = fread(&w, 1, 4, f)) != 4)
+    return ret ? -2 : -1;
+  ret = utf32_decode(&w, bige);
+  return ret < 0 ? -3 : ret;
+}
+@
+
+For UTF-16, a slightly more complex scheme is used, involving the
+surrogate code points (D800 through DFFF) in pairs.  The first half of
+the surrogate code points (D800 through DBFF) is always used for the
+first member of the pair, and the second half is used for the other.
+The first member gives the first 5 bits, and the second member gives
+the remainder. Since this is for representing code points 10000 and
+up, an extra bit can be gained giving the full range through 10FFFF.
+
+<<Unicode I/O Exports>>=
+/* make sure at least 2 words avail in buf */
+/* returns # of words written */
+int utf16_encode(uint16_t *buf, int cp, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf16_encode(uint16_t *buf, int cp, int bige)
+{
+  if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
+    return 0;
+  if(cp < 0x10000) {
+    *buf = bige ? htobe16(cp) : htole16(cp);
+    return 1;
+  }
+  int u = (cp & 0x1f0000) >> 16;
+  cp &= 0xffff;
+  uint16_t w;
+  w = 0xd800 + ((u - 1) @<< 10) + (cp @>> 10);
+  *buf++ = bige ? htobe16(w) : htole16(w);
+  w = 0xdc00 + (cp > 0x3fff);
+  *buf = bige ? htobe16(w) : htole16(w);
+  return 2;
+}
+@
+
+<<Unicode I/O Exports>>=
+/* this function returns -1 on errors */
+/* if the buffer may be invalid, ensure at least 2 words available */
+int utf16_decode(const uint16_t *s, int *nread, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf16_decode(const uint16_t *s, int *nread, int bige)
+{
+  uint16_t w = bige ? be16toh(*s) : le16toh(*s);
+  if(nread)
+    *nread = 1;
+  if(w < 0xd800 || w >= 0xe000)
+    return w;
+  if(w >= 0xdc00)
+    return -1;
+  uint16_t w2 = bige ? be16toh(s[1]) : le16toh(s[1]);
+  if(w2 >= 0xe000 || w2 < 0xdc00)
+    return -1;
+  if(nread)
+    *nread = 2;
+  int c = w2 & 0x3ff;
+  c += (w & 0x3f) << 10;
+  w = (w >> 10) & 0xf;
+  c += (w + 1) << 16;
+  return c;
+}
+@
+
+<<Unicode I/O Exports>>=
+int utf16_putc(int c, FILE *f, int bige);
+@
+
+<<Unicode I/O functions>>=
+int utf16_putc(int c, FILE *f, int bige)
+{
+  unsigned char buf[4];
+  uint16_t enc[2], encl;
+  
+  encl = utf16_encode(enc, c, bige);
+  if(!encl)
+    return 0;
+  if(bige) {
+    buf[0] = enc[0] >> 8;
+    buf[1] = enc[0];
+    if(encl > 1) {
+      buf[2] = enc[1] >> 8;
+      buf[3] = enc[1];
+    }
+  } else {
+    buf[1] = enc[0] >> 8;
+    buf[0] = enc[0];
+    if(encl > 1) {
+      buf[3] = enc[1] >> 8;
+      buf[2] = enc[1];
+    }
+  }
+  return fwrite(buf, 2, encl, f);
+}
+@
+
+The input function needs to read ahead to get the second member of a
+pair.  If that character is not what was expected, the correct
+behavior is to undo the readahead and return the current code point as
+an error.  However, it is not possible in C standard I/O to push more
+than one character back into the stream.  For now, this is going to
+have to be erroneous behavior.
+
+<<Unicode I/O Exports>>=
+int utf16_getc(FILE *f, int bige, int *nread);  /* nread == # of bytes read */
+@
+
+<<Unicode I/O functions>>=
+int utf16_getc(FILE *f, int bige, int *nread)
+{
+  int c = fgetc(f), c2;
+  if(c == EOF) {
+    if(nread)
+      *nread = 0;
+    return -1;
+  }
+  c2 = fgetc(f);
+  if(c == EOF) {
+    if(nread)
+      *nread = 1;
+    return -2;
+  }
+  if(bige)
+    c = c2 + (c << 8);
+  else
+    c += c2 << 8;
+  if(c < 0xd800 || c >= 0xE000) {
+    if(nread)
+      *nread = 1;
+    return c;
+  }
+  if(c >= 0xdc00) {
+    if(nread)
+      *nread = 2;
+    return -3;
+  }
+  int res = (c & 0x3f) << 10;
+  int w = (c >> 10) & 0xf;
+  res += (w + 1) << 16;
+  if((c = fgetc(f)) == EOF) {
+    if(nread)
+      *nread = 2;
+    return -2;
+  }
+  if((c2 = fgetc(f)) == EOF) {
+    if(nread)
+      *nread = 3;
+    return -2;
+  }
+  if(bige)
+    c = c2 + (c << 8);
+  else
+    c += c2 << 8;
+  if(c < 0xdc00 || c >= 0xe000) {
+#if 0 /* FIXME: this does not work; ungetc() can't be called twice */
+    ungetc(c2, f);
+    ungetc(bige ? c >> 8 : c & 0xff, f);
+    if(nread)
+      *nread = 2;
+#else
+    if(nread)
+      *nread = 4;
+#endif
+    return -3;
+  }
+  if(nread)
+    *nread = 4;
+  res += c & 0x3ff;
+  return res + (c & 0x3ff);
+}
+@
+
+For UTF-8, an even more complex encoding scheme is used.  Again, a
+standalone memory codec is provided.  All code points over 007F are
+encoded using a multi-byte sequence.  All characters in a multi-byte
+sequence have their high bit set; the first non-zero bit determines
+the byte's role.  All but the first byte have only one high bit set,
+and encode 6 bits.  The first byte determines how many trailing bytes
+there are, and also encode 3--5 bits.  The number of high bits set in
+the first byte is the total number of bytes in the sequence.
+
+<<Unicode I/O Exports>>=
+/* make sure at least 4 bytes avail in buf */
+/* returns # of bytes written */
+int utf8_encode(char *buf, int cp);
+@
+
+<<Unicode I/O functions>>=
+int utf8_encode(char *buf, int cp)
+{
+    if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
+        return 0;
+    if(cp < 128) {
+        *buf = cp;
+        return 1;
+    } else if(cp < 0x800) {
+        *buf = 0xc0 + (cp >> 6);
+        buf[1] = 0x80 + (cp & 0x3f);
+        return 2;
+    } else if(cp < 0x10000) {
+        *buf = 0xe0 + (cp >> 12);
+        buf[1] = 0x80 + ((cp >> 6) & 0x3f);
+        buf[2] = 0x80 + (cp & 0x3f);
+        return 3;
+    } else {
+        *buf = 0xf0 + (cp >> 18);
+        buf[1] = 0x80 + ((cp >> 12) & 0x3f);
+        buf[2] = 0x80 + ((cp >> 6) & 0x3f);
+        buf[3] = 0x80 + (cp & 0x3f);
+        return 4;
+    }
+}
+@
+
+<<Unicode I/O Exports>>=
+/* this function returns -1 on errors */
+/* if the buffer may be invalid, ensure at least 4 chars available */
+int utf8_decode(const char *buf, int *nread);
+@
+
+<<Unicode I/O functions>>=
+int utf8_decode(const char *buf, int *nread)
+{
+    if(*buf < 0x7f) {
+        *nread = 1;
+        return (unsigned char)*buf;
+    }
+    int c = (unsigned char)*buf++, ec;
+    if((c & 0xf8) == 0xf0) {
+        c &= 0x07;
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 2;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 3;
+            return -1;
+        }
+        *nread = 4;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x10000 || c > 0x10FFFF)
+            return -1;
+        return c;
+    }
+    if((c & 0xf0) == 0xe0) {
+        c &= 0x0f;
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 2;
+            return -1;
+        }
+        *nread = 3;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
+            return -1;
+        return c;
+    }
+    if((c & 0xe0) == 0xc0) {
+        c &= 0x1f;
+        ec = (unsigned char)*buf++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        *nread = 2;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x80)
+            return -1;
+        return c;
+    }
+    *nread = 1;
+    return -1;
+}
+@
+
+<<Unicode I/O Exports>>=
+int utf8_putc(int c, FILE *f);
+@
+
+<<Unicode I/O functions>>=
+int utf8_putc(int c, FILE *f)
+{
+    char obuf[4];
+    int nout = utf8_encode(obuf, c);
+    return fwrite(obuf, 1, nout, f);
+}
+@
+
+UTF-8 output is common enough to warrant a string version of the
+output function as well.
+
+<<Unicode I/O Exports>>=
+int utf8_fputs(int *buf, int len, FILE *f);
+@
+
+<<Unicode I/O functions>>=
+int utf8_fputs(int *buf, int len, FILE *f)
+{
+  int ret = 0;
+
+  while(len-- > 0)
+    ret += utf8_putc(*buf++, f);
+  return ret;
+}
+@
+
+Like UTF-16 input, UTF-8 input requires some readahead.  For anything
+more than one character, C once again disallows returning the
+characters to the stream.  So, once again, bad input causes erroneous
+behavior.
+
+<<Unicode I/O Exports>>=
+int utf8_getc(FILE *f, int *nread);  /* nread == # of bytes read */
+@
+
+<<Unicode I/O functions>>=
+int utf8_getc(FILE *f, int *nread)
+{
+  int c;
+  int chrread = 1;
+
+  if((c = getc(f)) == EOF) {
+    c = -1;
+    chrread = 0;
+  } else if(c >= 0x80) {
+    int ec;
+    chrread = 1;
+    if((c & 0xf8) == 0xf0) {
+      <<Read 4-char utf-8>>
+      if(c < 0x10000 || c > 0x10ffff)
+        c = -3;
+    } else if((c & 0xf0) == 0xe0) {
+      <<Read 3-char utf-8>>
+      if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
+        c = -3;
+    } else if((c & 0xe0) == 0xc0) {
+      <<Read 2-char utf-8>>
+      if(c < 0x80)
+        c = -3;
+    } else
+      c = -3;
+  }
+  if(nread)
+    *nread = chrread;
+  return c;
+}
+@
+
+<<Read 4-char utf-8>>=
+c &= 0x07;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+  if((ec = getc(f)) == EOF)
+    c = -2;
+  else if((ec & 0xc0) != 0x80) {
+    ungetc(ec, f);
+    c = -3;
+  } else {
+    chrread = 3;
+    c = (c << 6) + (ec & 0x3f);
+    if((ec = getc(f)) == EOF)
+      c = -2;
+    else if((ec & 0xc0) != 0x80) {
+      ungetc(ec, f);
+      c = -3;
+    } else {
+      chrread = 4;
+      c = (c << 6) + (ec & 0x3f);
+    }
+  }
+}
+@
+
+<<Read 3-char utf-8>>=
+c &= 0x0f;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+  if((ec = getc(f)) == EOF)
+    c = -2;
+  else if((ec & 0xc0) != 0x80) {
+    ungetc(ec, f);
+    c = -3;
+  } else {
+    chrread = 3;
+    c = (c << 6) + (ec & 0x3f);
+  }
+}
+@
+
+<<Read 2-char utf-8>>=
+c &= 0x1f;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+}
+@
+
+\subsection{General File Input}
+
+A more general UTF reader would have to scan for a byte order mark and
+remember what it said.  This requires retaining state.
+
+<<Unicode I/O Exports>>=
+typedef struct {
+  FILE *f;
+  char *name;
+  <<Unicode file buffer state>>
+} unifile_t;
+@
+
+
+Rather than automatically attaching state to a file on first access
+and never really knowing when to free it, explicit routines are
+provided to create and remove the state.   
+
+<<Unicode I/O Exports>>=
+/* encoding = NULL for automatic detection */
+/* automatically detects utf16/utf32 if encoding == UTF-8 */
+unifile_t *uni_fopen(const char *name, const char *encoding);
+void uni_fclose(unifile_t *uf);
+@
+
+<<Unicode I/O functions>>=
+unifile_t *uni_fopen(const char *name, const char *encoding)
+{
+  unifile_t *uf;
+
+  inisize(uf, 1);
+  clearbuf(uf, 1);
+  uf->name = strdup(name);
+  if(!uf->name) {
+    free(uf);
+    return NULL;
+  }
+  uf->f = fopen(name, "rb");
+  if(!uf->f) {
+    free(uf->name);
+    free(uf);
+    return NULL;
+  }
+  <<Initialize unicode file buffer state>>
+  return uf;
+}
+@
+
+<<Unicode I/O functions>>=
+void uni_fclose(unifile_t *uf)
+{
+  free(uf->name);
+  fclose(uf->f);
+  <<Free unicode file buffer state>>
+  free(uf);
+}
+@
+
+One limitation of standard I/O is that only one character may be
+pushed back into the stream.  To correct this, a 4-byte buffer is
+kept, along with a count.  In order to avoid reading from the file
+after the buffered characters have been removed, an end-of-file flag
+is kept as well.  In order to allow error messages to display the
+correct file offset, that is also kept.
+
+<<Unicode file buffer state>>=
+size_t fpos;
+char readahead[4];
+unsigned char raptr;
+unsigned char eof;
+@
+
+The first thing to do is to decide the file's encoding.  ASCII and
+ISO-Latin-1 can be read raw, since they map directly to Unicode.
+UTF-8 is taken to mean automatic Unicode detection, with UTF-8 as a
+default.  For all other input types, the [[iconv]] function should be
+used.%
+\footnote{The C99 library provides something similar in the
+[[mbstowcs]] function, but the POSIX [[iconv]] function is commonly
+available (perhaps even as a third party library), and could be
+provided as wrapper around [[mbstowcs]] if all else fails.  Unlike
+[[mbstowcs]], the type of the output can always be set to Unicode
+encodings, and the input type can be controlled more easily as well.}
+This function should be in the standard C library, but may be provided
+externally as well.  If so, [[CFLAGS]] and [[LDFLAGS]] may need to be
+modified appropriately.  In order to accomodate the case where a
+minimal C library has no working [[iconv]], or to otherwise avoid code
+bloat, this can be disabled with a configuration variable.
+
+\lstset{language=make}
+<<makefile.config>>=
+# Set to non-empty to enable iconv input support
+#USE_ICONV=y
+@
+
+<<makefile.vars>>=
+ifneq ($USE_ICONV,)
+EXTRA_CFLAGS += -DUNI_USE_ICONV
+endif
+@
+
+<<Unicode I/O local definitions>>=
+#ifdef UNI_USE_ICONV
+#include <langinfo.h>
+#include <locale.h>
+#include <iconv.h>
+#endif
+@
+
+
+<<Unicode file buffer state>>=
+unsigned char enctype;
+/*
+ * 0 = ASCII/Latin-1
+ * 1 = iconv (if UNI_USE_ICONV)
+ * 8/16/32 = utf-8/16/32
+ */
+#ifdef UNI_USE_ICONV
+void *enchelp;
+#endif
+@
+
+<<Unicode I/O local definitions>>=
+#ifdef UNI_USE_ICONV
+#define ICBUF_SIZE 1024
+typedef struct {
+  iconv_t ic;
+  char ibuf[ICBUF_SIZE];
+  int ilen;
+  uint32_t obuf[ICBUF_SIZE];
+  int optr, olen;
+} iconv_supt_t;
+#endif
+@
+
+<<Initialize unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+if(!encoding) {
+  setlocale(LC_CTYPE, "");
+  encoding = nl_langinfo(CODESET);
+}
+#endif
+if(!encoding)
+  encoding = "UTF-8";
+if(encoding && (!strcmp(encoding, "ISO-8859-1") ||
+                !strcmp(encoding, "ANSI_X3.4-1968"))) /* ASCII */
+  return uf; /* enctype == 0 */
+#ifdef UNI_USE_ICONV
+else if(encoding && strcmp(encoding, "UTF-8")) {
+  iconv_supt_t *ics;
+  inisize(ics, 1);
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define bo "LE"
+#else
+#define bo "BE"
+#endif
+  ics->ic = iconv_open("UTF-32" bo, encoding);
+  if(ics->ic == (iconv_t)-1) {
+    perror(encoding);
+    exit(1);
+  }
+  uf->enchelp = ics;
+  uf->enctype = 1;
+  return uf;
+}
+#endif
+/* otherwise it's Unicode */
+@
+
+<<Free unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+if(uf->enctype == 1 && uf->enchelp) {
+  iconv_supt_t *ics = uf->enchelp;
+  iconv_close(ics->ic);
+  free(ics);
+}
+#endif
+@
+
+The first thing to do on opening a new Unicode file is to check for
+the byte order mark (U+FEFF).  Flags are kept to indicate what was
+found.  Note that the byte order mark is still returned as the first
+character, so all read characters must be backed out.
+
+<<Unicode file buffer state>>=
+unsigned char bige;
+@
+
+<<Initialize unicode file buffer state>>=
+uf->enctype = 8; /* default is UTF-8 */
+/* Read and process BOM (FEFF) */
+int c;
+<<Read and store a char from [[uf]]>>
+if(c == 0xff) {
+  <<Read and store a char from [[uf]]>>
+  if(c == 0xfe) { /* FFFE UTF-16BE */
+    uf->bige = 1;
+    uf->enctype = 16;
+  }
+} else if(c == 0xfe) {
+  <<Read and store a char from [[uf]]>>
+  if(c == 0xff) {
+    <<Read and store a char from [[uf]]>>
+    if(!c) {
+      <<Read and store a char from [[uf]]>>
+      if(!c) /* FEFF0000 UTF-32LE */
+        uf->enctype = 32;
+      else /* FEFF */
+        uf->enctype = 16;
+    } else /* FEFF UTF-16LE */
+      uf->enctype = 16;
+  }
+} else if(!c) {
+  <<Read and store a char from [[uf]]>>
+  if(!c) {
+    <<Read and store a char from [[uf]]>>
+    if(c == 0xfe) {
+      <<Read and store a char from [[uf]]>>
+      if(c == 0xff) { /* 0000FEFF UTF-32BE */
+        uf->enctype = 32;
+	uf->bige = 1;
+      }
+    }
+  }
+}
+@
+
+<<Read and store a char from [[uf]]>>=
+c = getc(uf->f);
+if(c == EOF)
+  uf->eof = 1;
+else
+  uf->readahead[uf->raptr++] = c;
+@
+
+The reader then uses the appropriate method to read a character based
+on the [[enctype]].
+
+<<Unicode I/O Exports>>=
+int uni_fgetc(unifile_t *uf);
+@
+
+<<Unicode I/O functions>>=
+int uni_fgetc(unifile_t *uf)
+{
+  if(!uf->enctype) {
+    int c = getc(uf->f);
+    if(c == EOF)
+      uf->eof = 1;
+    else
+      uf->fpos++;
+    return c;
+#ifdef UNI_USE_ICONV
+  } else if(uf->enctype == 1) {
+    <<Return a character using iconv>>
+#endif
+  }
+  <<Return a Unicode character>>
+}
+@
+
+Rather than using the potentially flawed direct I/O routines, the
+Unicode reader always reads raw bytes and then calls the decoder
+instead.  That way, the readahead issue disappears.  The readahead
+buffer is always flushed to four characters every time, since UTF-32
+and UTF-16 both may require that much.  UTF-8 only requires three, but
+there is little point in making that a special case.
+
+<<Return a Unicode character>>=
+while(!uf->eof && uf->raptr < 4) {
+  int nr = fread(uf->readahead + uf->raptr, 1, 4 - uf->raptr, uf->f);
+  if(nr <= 0)
+    uf->eof = 1;
+  else
+    uf->raptr += nr;
+}
+if(uf->eof && !uf->raptr)
+  return -1;
+int cp, l;
+if(uf->enctype == 32) {
+  cp = utf32_decode((uint32_t *)uf->readahead, uf->bige);
+  l = 4;
+} else if(uf->enctype == 16) {
+  cp = utf16_decode((uint16_t *)uf->readahead, &l, uf->bige);
+  l *= 2;
+} else
+  cp = utf8_decode(uf->readahead, &l);
+if(l > uf->raptr) {
+  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
+  uf->raptr = 0;
+  return -2;
+}
+if(l < 4)
+  memmove(uf->readahead, uf->readahead + l, 4 - l);
+if(cp < 0)
+  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
+uf->raptr -= l;
+uf->fpos += l;
+return cp < 0 ? -2 : cp;
+@
+
+The [[iconv]] conversion proceeds much differently.  If a character is
+availble in the output buffer, it validates and returns that character.
+Otherwise, it fills up the input buffer from the file, and then
+attempts to fill the output buffer using [[iconv]].  Any unprocessed
+input characters are then moved to the start of the input buffer for
+the next pass.
+
+<<Return a character using iconv>>=
+iconv_supt_t *ics = uf->enchelp;
+while(1) {
+  if(ics->olen) {
+    --ics->olen;
+    return utf32_decode(&ics->obuf[ics->optr++], __BYTE_ORDER == __BIG_ENDIAN);
+  }
+  char *ibuf = ics->ibuf;
+  size_t ilen = ics->ilen;
+  char *obuf = (char *)ics->obuf;
+  size_t olen = ICBUF_SIZE * 4;
+  while(!uf->eof && ilen < ICBUF_SIZE) {
+    int nr = fread(ibuf, 1, ICBUF_SIZE - ilen, uf->f);
+    if(nr <= 0)
+      uf->eof = 1;
+    else
+      ilen += nr;
+  }
+  while(1) {
+    iconv(ics->ic, &ibuf, &ilen, &obuf, &olen);
+    if(ibuf != ics->ibuf)
+      break;
+    /* ignore bad chars */
+    if(!--ilen)
+      break;
+    memmove(ics->ibuf, ics->ibuf + 1, ilen);
+  }
+  if(ilen)
+    memmove(ics->ibuf, ibuf, ilen);
+  else if(uf->eof)
+    iconv(ics->ic, NULL, NULL, &obuf, &olen);
+  ics->olen = olen / 4;
+  ics->optr = 0;
+  ics->ilen = ilen;
+}
+@
+
+\section{Generic Normalized Unicode Input}
+
+To make things even easier, we can make a function which returns a
+normalized character.  Any normalization type we have code for, we
+support.
+
+<<Unicode normalization support exports>>=
+typedef enum {
+  UN_NONE, UN_NFD, UN_NFKD, UN_NFC, UN_NFKC, UN_NFKC_CF
+} uni_normtype_t;
+@
+
+<<Unicode normalization support exports>>=
+#include "uni_io.h"
+
+int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt);
+@
+
+<<Unicode normalization support functions>>=
+int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt)
+{
+  <<Get normalized character>>
+}
+@
+
+A simple function which returns a normalized character requires that
+the current decomposition and composition state be kept.  It would be
+ideal to extend the [[unifile_t]] structure with the extra information
+rather than allocating yet another wrapper, but for now I would prefer
+[[unifile_t]] to stay isolated to unnormalized I/O.
+
+In order to make this transparent, the extra support structure is
+automatically created and placed on a linked list.  It is assumed that
+the file will not be closed and reopened without an intervening EOF.
+It is also assumed that the function will not be called any more after
+it returns EOF.
+
+<<Unicode normalization support local definitions>>=
+typedef struct unifile_norm {
+  struct unifile_norm *next;
+  unifile_t *uf;
+  <<Normalized input buffer state>>
+} unifile_norm_t;
+static unifile_norm_t *norm_files = NULL;
+@
+
+<<Get normalized character>>=
+unifile_norm_t *ufn = norm_files;
+
+while(ufn && ufn->uf != uf)
+  ufn = ufn->next;
+if(!ufn) {
+  inisize(ufn, 1);
+  clearbuf(ufn, 1);
+  ufn->next = norm_files;
+  norm_files = ufn;
+}
+
+<<Return normalized character if not EOF>>
+
+unifile_norm_t **bufp;
+for(bufp = &norm_files; *bufp != ufn; bufp = &(*bufp)->next);
+*bufp = ufn->next;
+free(ufn);
+
+return -1;
+@
+
+For support, we'll need to store at least the maximal decomposition of
+a character.  Technically, it is possible to require an infinite
+buffer to support canonical ordering and composition, but we'll only
+support a finite number and hope for the best.  Some future revision
+should make the buffer automatically expand when necessary.
+
+<<Normalized input buffer state>>=
+/* maximal decomposition of a single char is 18 chars */
+/* leave room in buf for at least 2 */
+int buf[128];
+@
+
+We'll also need to know how many characters are in the buffer, and how
+many of those are good to go.
+
+<<Normalized input buffer state>>=
+int blen, oklen;
+@
+
+To return a single character, we'll need to normalize until at least
+one character could not possibly be modified any more.
+
+<<Return normalized character if not EOF>>=
+int oklen = ufn->oklen;
+int *buf = ufn->buf;
+while(!oklen && !uf->eof) {
+  /* read a char into end of buf, if needed & possible */
+  <<Read and normalize a character>>
+}
+if(oklen) {
+  /* now we have oklen chars in buf that are ready to return */
+  int c = buf[0];
+  memmove(buf, buf + 1, (--ufn->blen) * sizeof(*buf));
+  ufn->oklen = oklen - 1;
+  return c;
+}
+@
+
+To add more characters, append a character to the buffer and
+decompose it.  The Unicode standard states that case folding
+requires an additional NFD step beforehand, but reading of the data
+suggests that instead, it needs canonical ordering and composition
+afterwards, just like the NFC and NFKC.  This makes case folding just
+another decomposition method.
+
+int nread;
+
+<<Read and normalize a character>>=
+int c;
+int bp = ufn->blen;
+c = buf[bp] = uni_fgetc(uf);
+if(nt == UN_NONE) {
+  oklen = ufn->blen = ++bp;
+  break;
+}
+if(c != -1)
+  switch(nt) {
+    case UN_NONE: /* here to remove warning */
+    case UN_NFD:
+    case UN_NFC:
+      bp += NFD_dec(buf + bp, 1);
+      break;
+    case UN_NFKD:
+    case UN_NFKC:
+      bp += NFKD_dec(buf + bp, 1);
+      break;
+    case UN_NFKC_CF:
+      bp += NFKC_Casefold(buf + bp, 1);
+  }
+@
+
+Then, the entire set of characters already read in can be ordered.  If
+no characters can be obtained from canonical ordering, try to read
+more right away.
+
+<<Read and normalize a character>>=
+int oblen = Canon_Order(buf, bp, uf->eof);
+if(!oblen) {
+  ufn->blen = bp;
+  continue;
+}
+@
+
+Then, all characters which have been ordered can be composed.  If
+composition might need more characters, the next trip around the loop
+will get them.
+
+<<Read and normalize a character>>=
+switch(nt) {
+  case UN_NONE: /* here to remove warning */
+  case UN_NFD:
+  case UN_NFKD:
+    /* no composition */
+    oklen = oblen;
+    break;
+  case UN_NFC:
+  case UN_NFKC:
+  case UN_NFKC_CF: {
+    int cblen = NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
+    if(uf->eof)
+      oklen = cblen;
+    /* move unordered characters down if composition removed chars */
+    if(cblen < oblen) {
+      if(bp > oblen)
+        memmove(buf + cblen, buf + oblen, (bp - oblen) * sizeof(*buf));
+      bp -= oblen - cblen;
+    }
+    break;
+  }
+}
+ufn->blen = bp;
+@
+
 \section{Testing}
 
 Here is a master driver to call some of the above code for testing.
@@ -6047,7 +6396,7 @@ tst \
 
 <<tst.c>>=
 <<Common C Header>>
-#include "unistuff.h"
+#include "uni_all.h"
 
 @
 
@@ -6202,7 +6551,7 @@ UNINORM_TEST = $(UCD_LOC)/NormalizationTest.txt
 \lstset{language=C}
 <<tstnorm.c>>=
 <<Common C Header>>
-#include "unistuff.h"
+#include "uni_all.h"
 
 /* longest line == 587 chars */
 char lbuf[1024];
@@ -6370,7 +6719,9 @@ cat charnames.uni{a,} | while IFS=, read a b; do
   test $hb = "$tr" || echo "$a,$b $hb"
   tr="`./tst $hb | grep -a '^Unicode:'`"
   tr="${tr#* }"
-  test "$a" = "$tr" || echo "$hb $a $tr"
+  test "$a" = "$tr" && continue
+  ab=`grep "^$a," charnames.uni{a,} | cut -d: -f2 | cut -d, -f2`
+  test "$ab" = "$b" || echo "$hb $a $tr"
 done
 @
 
@@ -6394,8 +6745,8 @@ see if there are any duplicates.
 
 <<makefile.rules>>=
 # explicit strs.gen dep should not be necessary, but gmake flakes on it
-hashcheck: strs.o strs.gen
-	$(CC) -o $@ $(CFLAGS) $(LDFLAGS) $(EXTRA_CFLAGS) -DHASHCHECK strs.c
+hashcheck: uni_strs.o strs.gen
+	$(CC) -o $@ $(CFLAGS) $(LDFLAGS) $(EXTRA_CFLAGS) -DHASHCHECK uni_strs.c
 @
 
 <<C Test Executables>>=
@@ -6403,7 +6754,7 @@ hashcheck \
 @
 
 \lstset{language=C}
-<<strs.c>>=
+<<uni_strs.c>>=
 #ifdef HASHCHECK
 int main(void)
 {
