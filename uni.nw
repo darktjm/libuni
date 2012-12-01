@@ -107,7 +107,7 @@ taken that the CLDR and UCD versions are compatible.
 # The location of the Unicode Character Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/UCD.zip
 UCD_LOC = /usr/share/unicode-data
-# The location of the Unihan Database (unzipped)
+# The location of the Unicode Han Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/Unihan.zip
 UNIHAN_LOC = $(UCD_LOC)
 # The location of the Unicode Common Locale Data Repository (unzipped)
@@ -135,26 +135,17 @@ which is linked from the standard.
 XMLUNI = /usr/share/unicode-data/unicode.xml
 @
 
-\section{Unicode Tables}
+\section{Properties}
 
 This library's primary purpose is to preparse the Unicode information
-and query it efficiently.  Unicode covers a lot of attributes
-regarding a lot of characters, and even some sequences of characters.
-The size of a straight lookup table would end up in the multi-megabyte
-range \emph{for each attribute}.  Even a bit array could take 128
-kilobytes per boolean attribute.  Not only does this bloat the
-library, but it also guarantees that nothing will ever be in the
-cache.  Instead, several other strategies are used by this library.
-
-One of the simplest strategies is to store keyword-value pairs in a
-table, in order.  The keyword is usually the code point in this case.
-The table can be pre-generated, so there is no issue with insertion or
-deletion.  Lookup times are logarithmic with regard to the number of
-table entries.  If the number is large, this can be quite slow.
-Binary search is a trivial algorithm to (re)implement, but using
-[[bsearch]] can keep code cleaner.  Of course the following is just
-one example of implementation; other forms of data could be used as
-well.
+and query it efficiently.  The Unicode Character Database defines
+numerous properties for characters.  Since there are many properties,
+and any particular application may only need a few of them, an attempt
+is made to keep each property in a separate object file.  Static
+linking will only pull in the required properties.  There is little
+penalty for shared libraries which include everything.  There is some
+code that is shared by all properties, though.  This is placed in a
+common file.
 
 \lstset{language=C}
 <<Library [[uni]] headers>>=
@@ -165,17 +156,9 @@ well.
 #ifndef UNI_COMMON_H
 #define UNI_COMMON_H
 
-<<Common uni data structures>>
+<<Common uni definitions>>
 
 #endif /* UNI_COMMON_H */
-@
-
-<<Common uni data structures>>=
-typedef struct {
-  int32_t cp; /* can use sign bit for extra storage */
-              /* could also add a byte by making this :24 or smaller */
-  uint32_t data; /* have whole word available here */
-} uni_cp_dat_t;
 @
 
 <<Library [[uni]] Members>>=
@@ -188,40 +171,223 @@ uni_common.o
 <<Common uni functions>>
 @
 
-<<Common uni functions>>=
-static int cmp_cp_dat(const void *a, const void *b)
-{
-    return ((uni_cp_dat_t *)a)->cp - ((uni_cp_dat_t *)b)->cp;
-}
+These properties come in a variety of formats, but for the purpose of
+this library, they may be generally classified according to the type
+of value:  Boolean, String, Enumerated, or Numeric.  Each class of
+values has a particular set of desirable operations related to a
+property of that class.
 
-const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
-                                uint32_t tab_len)
-{
-  uni_cp_dat_t d = {cp};
-  return (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
-                                cmp_cp_dat);
+\subsection{Boolean Properties}
+
+Boolean properties are either true or false.  They define a subset of
+characters: those for which the value is true.  As with any set, the
+desirable operations are:
+
+% l2h substitution oplus &oplus;
+% l2h substitution wedge &and;
+% l2h substitution vee &or;
+% l2h substitution neg &not;
+% l2h macro bar 1 #1&##773;
+
+\begin{itemize}
+\item Finding out if a character \emph{is} or is not an element of the
+set.
+\item Querying the \emph{members} of a set.
+\item Applying \emph{logical} operators on a set.  There are 16
+possible logical operators on two sets.  Operation numbers are
+assigned using the formula $o_0 \oplus A\wedge o_1 \oplus B\wedge o_2
+\oplus A\wedge B\wedge o_3$, where $o_n$ is true if bit $n$ is
+true in the operation number.
+
+\begin{quote}
+\begin{tabular}{lllllrl}
+$A$&false&false&true&true&\multicolumn{2}{l}{}\\
+$B$&false&true&false&true&\multicolumn{2}{l}{}\\
+&&&&&\multicolumn{2}{l}{Operation}\\
+&false&false&false&false& 0&(false)\\
+&true&true&true&true&     1&(true)\\
+&false&false&true&true&   2&($A$)\\
+&true&true&false&false&   3&($\neg A$)\\
+&false&true&false&true&   4&($B$)\\
+&true&false&true&false&   5&($\neg B$)\\
+&false&true&true&false&   6&($A \oplus B$)\\
+&true&false&false&true&   7&($A \bar \oplus B$)\\
+&false&false&false&true&  8&($A \wedge B$)\\
+&true&true&true&false&    9&($A \bar \wedge B$)\\
+&false&false&true&false& 10&($A - B$)\\
+&true&true&false&true&   11&($\neg(A - B)$)\\
+&false&true&false&false& 12&($B - A$)\\
+&true&false&true&true&   13&($\neg(B - A)$)\\
+&false&true&true&true&   14&($A \vee B$)\\
+&true&false&false&false& 15&($A \bar \vee B$)\\
+\end{tabular}
+\end{quote}
+\end{itemize}
+
+All of the above require that every member be stored.  The \emph{is}
+test can be stored in a single bit.  However, there are over a million
+valid character values, so the total storage for a simple bit array
+would still be over 128 kilobytes, even if the array is limited to the
+valid code point range.  Some properties only apply to a limited range
+of characters, so these might use a little less space.  Even so, with
+numerous properties, this adds up quickly, and may even slow things
+down by keeping everything out of the cache.  A plain bit array also
+makes it difficult to perform the \emph{members} operation: every
+single potential member needs to be tested.  The \emph{logical}
+operators are easy to perform, but require manipulating up to 256
+kilobytes of data.  Other storage strategies are needed.
+
+<<Common uni definitions>>=
+#define MAX_UNI_CP 0x10ffff
+typedef enum {
+  UNI_LOG_FALSE, UNI_LOG_TRUE, UNI_LOG_A, UNI_LOG_NOT_A,
+  UNI_LOG_B, UNI_LOG_NOT_B, UNI_LOG_A_XOR_B, UNI_LOG_A_XNOR_B,
+  UNI_LOG_A_AND_B, UNI_LOG_A_NAND_B, UNI_LOG_A_MINUS_B, UNI_LOG_NOT_A_MINUS_B,
+  UNI_LOG_B_MINUS_A, UNI_LOG_NOT_B_MINUS_A, UNI_LOG_A_OR_B, UNI_LOG_A_NOR_B
+} uni_log_op_t;
+#define BIT_OP_BIT(op, n) (~((((op) >> n) & 1) - 1))
+#define BIT_OP(A, B, op) \
+  (((A) & BIT_OP_BIT(op, 1)) ^ ((B) & BIT_OP_BIT(op, 2)) ^ \
+   ((A) & (B) & BIT_OP_BIT(op, 3)) ^ BIT_OP_BIT(op, 0))
+
+/* for bit arrays */
+#define BSET_ELT(a, b) ((a)[(b)/(sizeof(*(a))*8)])
+#define BSET_BIT(a, b) ((b)%(sizeof(*(a))*8))
+#define BSET_ENTRY(a, e, b) ((e)*(sizeof(*(a))*8) + b)
+#define BSET_MASK(a, b) (1 << BSET_BIT(a, b))
+#define BSET_IS_SET(a, b) (BSET_ELT(a, b) & BSET_MASK(a, b))
+#define BSET_SET(a, b) BSET_ELT(a, b) |= BSET_MASK(a, b)
+#define BSET_CLEAR(a, b) BSET_ELT(a, b) &= ~BSET_MASK(a, b)
+/* Logical ops not directly supported */
+/* List members enumeration not directly supported */
+@
+
+<<Common uni functions>>=
+#if 0
+  <<Perform logical ops on bit array>>
+#endif
+#if 0
+  <<List bit array members>>
+#endif
+@
+
+<<Perform logical ops on bit array>>=
+uint32_t i; elt_t e;
+/* assumes both bit arrays cover entire set of possible values */
+/* if not:
+     if not starting at 0:
+      if(BIT_OP(0, 0, op)) fill_up_to_min_offset_with_1s();
+     if not starting at same point:
+      if(start_a != start_b)
+        for(i = min(start_a, start_b); i < max(start_a, start_b); i++)
+	  tab[i] = BIT_OP(start_a < start_b ? a[i] : 0,
+	                  start_b < start_a ? b[i] : 0, op);
+     if not ending at same point: same basic idea as mismatched starts
+     if not ending at end: same basic idea as not starting at zero
+*/
+for(i = 0; i < tab_size; i++)
+  tab[i] = BIT_OP(taba[i], tabb[i], op);
+@
+
+<<List bit array members>>=
+int i; elt_t e;
+for(i = 0; i < tab_size; i++) {
+  e = tab[i];
+  while(e) {
+    /* strings.h usually selects optimal built-in implementation of ffs() */
+    int b = ffs(e); /* or ffsl, or ffsll if glibc */
+    add_ent(BSET_ENTRY(tab, i, b - 1));
+    e &= ~(1 << (b - 1));
+  }
 }
 @
 
-One step above this strategy is to merge contiguous like-valued
-entries as ranges.  This doubles the amount of work at every step of
-the search, but often reduces the space requirements, and therefore
-also the number of steps, by orders of magnitude.  Most of my early
-work with this library used the sorted range table almost exclusively.
-The most common table where all entries are guaranteed to be
-like-valued are boolean tables; they do not even need a data field
-because presence of an element indicates truth.  Classification tables
-often have large contiguous blocks as well, but they need an extra
-data field.
+One of the simplest strategies is to provide a sorted table of
+members.  Membership is tested by binary search, so the speed of
+lookup is proportional to $\log_2(N)$, where $N$ is the number of set
+members.  Querying the \emph{members} of the set is trival: the table
+is already the list.  Applying \emph{logical} operators only requires
+looking at the members already present, with the exception of the
+latter eight:  inversion may be more expensive than with bit arrays.
+This does not save much space for properties which apply to
+a large number of characters; in fact, it might even take more space.
 
-<<Common uni data structures>>=
+<<Common uni functions>>=
+int uni_cmp_cp(const void *a, const void *b)
+{
+  return *(int32_t *)a - *(int32_t *)b;
+}
+@
+
+<<Common uni definitions>>=
+#define uni_is_cp(c, tab, tab_len) \
+  bsearch(&c, tab, tab_len, sizeof(tab[0]), uni_cmp_cp)
+
+/* members are already in list */
+/* logical operations not directly supported */
+@
+
+<<Common uni functions>>=
+#if 0
+  <<Perform logical ops on cp array>>
+#endif
+@
+
+<<Perform logical ops on cp array>>=
+uint32_t i = 0;
+uint32_t tab[max], tab_len = 0;
+int invert = BIT_OP(0, 0, op);
+uint32_t aptr, bptr;
+for(aptr = bptr = 0; aptr < a_len || bptr < b_len; ) {
+  int res;
+  uint32_t cp;
+  if(bptr == b_len || (aptr < a_len && a[aptr] < b[bptr])) {
+    res = BIT_OP(~0, 0, op);
+    cp = a[aptr++];
+  } else if(aptr == a_len || (bptr < b_len && a[aptr] > b[bptr])) {
+    res = BIT_OP(0, ~0, op);
+    cp = b[bptr++];
+  } else {
+    res = BIT_OP(~0, ~0, op);
+    cp = a[aptr++];
+    bptr++;
+  }
+  if(invert)
+    while(i < cp)
+      tab[tab_len++] = i++;
+  if(res)
+    tab[tab_len++] = cp;
+}
+if(invert)
+  while(i < max)
+    tab[tab_len++] = i++;
+@
+
+A possible improvement on that strategy is to store ranges instead of
+individual code points.  This relies on the fact that most properties
+apply to large consecutive ranges; if this is not true, then this is
+actually worse than storing individual code points.  Whenever the
+number of ranges is less than half of the number of individual code
+points, this table will be smaller, requiring less time to search, and
+less time to perform \emph{logical} operations.  In particular,
+negation is usually much faster with a range table than with an
+individual code point table.  Not only can absent members be skipped,
+but present members within a range can be skipped as well.
+
+<<Common uni definitions>>=
 typedef struct {
-    int low, high;
+    uint32_t low, high;
 } uni_chrrng_t;
+int uni_cmprng(const void *a, const void *b); /* for qsort/bsearch */
+int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
+@
+
+<<Known Data Types>>=
+uni_chrrng_t,%
 @
 
 <<Common uni functions>>=
-int cmprng(const void *a, const void *b)
+int uni_cmprng(const void *a, const void *b)
 {
     const uni_chrrng_t *_a = a, *_b = b;
 
@@ -235,452 +401,402 @@ int cmprng(const void *a, const void *b)
 
 int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
 {
+#if 0
   uni_chrrng_t cr = {cp, cp};
-  return bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_t), cmprng) ? 1 : 0;
+  return bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_t), uni_cmprng) ? 1 : 0;
+#else /* twice as fast! */
+  int l = 0, h = tab_len - 1;
+  while(l <= h) {
+    int j = (l + h) / 2;
+    if(cp < tab[j].low)
+      h = j - 1;
+    else if(cp > tab[j].high)
+      l = j + 1;
+    else
+      return 1;
+  }
+  return 0;
+#endif
 }
 @
 
-<<Common uni data structures>>=
-typedef struct {
-    int low, high, dat;
-} uni_chrrng_dat_t;
+<<Common uni definitions>>=
+/* members are already in list, albeit in compact form */
+void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
+		      uni_chrrng_t **rtab, uint32_t *r_len);
+void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
+                      const uni_chrrng_t *b, uint32_t b_len,
+		      uni_chrrng_t **rtab, uint32_t *r_len);
 @
 
 <<Common uni functions>>=
-int cmprng_dat(const void *a, const void *b)
+void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
+		      uni_chrrng_t **rtab, uint32_t *r_len)
 {
-    const uni_chrrng_dat_t *_a = a, *_b = b;
-
-    if(_a->high < _b->low)
-        return -1;
-    else if(_b->high < _a->low)
-        return 1;
-    else
-        return 0;
+  uni_chrrng_t *tab;
+  uint32_t tab_len = 0;
+  inisize(tab, a_len + 1);
+  uint32_t i;
+  if(a_len && a[0].low) {
+    tab[0].low = 0;
+    tab[0].high = a[0].low - 1;
+    tab_len++;
+  }
+  for(i = 0; i < a_len - 1; i++, tab_len++) {
+    tab[tab_len].low = a[i].high + 1;
+    tab[tab_len].high = a[i + 1].low - 1;
+  }
+  if(a_len && a[a_len - 1].high < MAX_UNI_CP) {
+    tab[tab_len].low = a[a_len - 1].high + 1;
+    tab[tab_len].high = MAX_UNI_CP;
+    tab_len++;
+  }
+  *rtab = tab;
+  *r_len = tab_len;
 }
 
-uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
-                        uint32_t tab_len, uint32_t def)
+void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
+                      const uni_chrrng_t *b, uint32_t b_len,
+		      uni_chrrng_t **rtab, uint32_t *r_len)
 {
-  uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
-  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), cmprng_dat);
-  return tab_el ? tab_el->dat : def;
-}
-@
-
-One advantage of the above two approaches is that the algorithms for
-generating them from the text files is trivial, and can be implemented
-with simple shell scripts.  Early in the development cycle for this
-library, that was indeed the case.  However, the scripts were rather
-slow, even though they used mostly builtin shell functionality, so
-they have been replaced with a C program.  This program has a special
-build rule so it can be used to generate other C code without
-depending on that C code itself (as with [[cproto.h]]).  The code
-itself can't use the standard header macro, either, since it needs to
-limit its include files.  One thing it does need, though, is the
-ability to read lines of arbitrary length.  This is provided in my
-support library, which is referenced rather than built here, again to
-avoid building [[cproto.h]].
-
-\lstset{language=make}
-<<C Build Executables>>=
-ucd-ranges \
-@
-
-<<makefile.config>>=
-# location of support library
-SUPT_LIB=../build/libsupt.a
-@
-
-<<makefile.rules>>=
-ucd-ranges: ucd-ranges.c mfgets.h $(SUPT_LIB)
-	$(CC) $(CFLAGS) $(SUPT_INCL) $(CFLAGS_EXTRA) -o $@ ucd-ranges.c \
-	  $(SUPT_LIB)
-@
-
-The files are already in code point order, so entries simply need to
-be read in and merged if they are adjacent.  A range is output as soon
-as it is known.
-
-\lstset{language=C}
-<<ucd-ranges.c>>=
-<<Common C Warning>>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include "mfgets.h"
-
-int main(int argc, const char **argv)
-{
-  <<UCD parser options>>
-  <<UCD parser variables>>
-  <<Process UCD parser arguments>>
-  <<Print UCD entry C range header>>
-  <<For each UCD file line>> {
-    <<Skip entry if not right field>>
-    <<Merge start of range>>
-    <<Merge end of range>>
+  uni_chrrng_t *tab;
+  uint32_t tab_len = 0, max_tab = 8;
+  /* shortcut all ops that don't involve both sets */
+  if(op == UNI_LOG_FALSE) {
+    inisize(tab, 1); /* so free always works */
+    *rtab = tab;
+    *r_len = 0;
+    return;
+  } else if(op == UNI_LOG_TRUE) {
+    inisize(tab, 1);
+    tab[0].low = 0;
+    tab[0].high = MAX_UNI_CP;
+    *rtab = tab;
+    *r_len = 1;
+    return;
+  } else if(op == UNI_LOG_A) {
+    inisize(tab, a_len);
+    memcpy(tab, a, a_len * sizeof(*a));
+    *rtab = tab;
+    *r_len = a_len;
+    return;
+  } else if(op == UNI_LOG_NOT_A) {
+    uni_chrrng_invert(a, a_len, rtab, r_len);
+    return;
+  } else if(op == UNI_LOG_B) {
+    inisize(tab, b_len);
+    memcpy(tab, b, b_len * sizeof(*b));
+    *rtab = tab;
+    *r_len = b_len;
+    return;
+  } else if(op == UNI_LOG_NOT_B) {
+    uni_chrrng_invert(b, b_len, rtab, r_len);
+    return;
   }
-  <<Finish last range>>
-  <<Print UCD entry C range tail>>
-  return 0;
-}
-@
-
-The standard input to the program is the file to parse.  The command
-line arguments specify what to do with the file.  Instead of having to
-filter the file before passing it in, the program can do a simple
-search by either checking if a particular field is non-empty or if it
-is a particular value.  The first and second non-option arguments are
-the field number and the optional value.  Of course this simple
-filtering may not be enough, but this program does not seek, so a
-filter pipeline can be used for more advanced filtering.
-
-<<For each UCD file line>>=
-char *lbuf = NULL;
-unsigned int lbuflen, llen;
-while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin))
-@
-
-<<Process UCD parser arguments>>=
-while(--argc > 0) {
-  const char *arg = *++argv;
-
-  if(*arg != '-')
-    break;
-  if(arg[1] == '-') {
-    argc--;
-    argv++;
-    break;
-  }
-  switch(arg[1]) {
-    <<Process UCD parser argument>>
-  }
-}
-if(argc != 1 && argc != 2)
-  exit(1);
-fieldno = atoi(*argv);
-eq = argc > 1 ? argv[1] : NULL;
-eqlen = eq ? strlen(eq) : 0;
-@
-
-<<UCD parser variables>>=
-int fieldno;
-const char *eq;
-int eqlen;
-@
-
-The program can generate either simple boolean table ranges or valued
-ranges.  The value is extracted from some field, which may not be the
-same field as the search field.
-
-<<UCD parser options>>=
-const char *field_prefix = NULL;
-int val_field = -1;
-@
-
-<<Process UCD parser argument>>=
-case 'p':
-  if(!--argc)
-    exit(1);
-  field_prefix = *++argv;
-  break;
-case 'v':
-  if(!--argc)
-    exit(1);
-  val_field = strtol(*++argv, NULL, 0);
-  break;
-@
-
-The program can be used to generate the table directly (giving it a
-name), or it can just generate table lines to be post-processed and
-merged.  Originally, this program was going to do the post-processing
-and merging as well, but that would require actually storing the
-ranges internally, and dumping the resulting table instead of dumping
-as soon as things are known. This may happen in a future modification.
-
-<<UCD parser options>>=
-const char *cname = NULL;
-@
-
-<<Process UCD parser argument>>=
-case 'n':
-  if(!--argc)
-    exit(1);
-  cname = *++argv;
-  break;
-@
-
-<<Print UCD entry C range header>>=
-if(cname)
-  printf("const uni_chrrng%s_t unirng_%s[] = {\n", 
-         field_prefix ? "_dat" : "", cname);
-@
-
-<<Print UCD entry C range tail>>=
-if(cname) {
-  printf("};\n"
-         "const uint32_t unirng_%s_len = sizeof(unirng_%s)/sizeof(unirng_%s[0]);\n",
-	 cname, cname, cname);
-  }
-@
-
-The format of all of the UCD text files is semicolon-separated fields,
-with optional comments starting with hash marks.  Some fields are
-actually after the hash mark, so that is used as a field separator if
-it is not the first one.
-
-<<Skip entry if not right field>>=
-char *lptr = lbuf;
-int i;
-for(i = 1; i < fieldno; i++) {
-  while(*lptr && *lptr != ';' && *lptr != '#')
-    ++lptr;
-  if(!*lptr || *lptr == '#' && i == 1)
-    break;
-  ++lptr;
-}
-if(i < fieldno)
-  continue;
-while(isspace(*lptr)) lptr++;
-if(eq) {
-  int clen = eqlen;
-  if(memcmp(lptr, eq, eqlen))
-    continue;
-  while(isspace(lptr[clen])) clen++;
-  if(lptr[clen] && lptr[clen] != ';' && lptr[clen] != '#')
-    continue;
-} else if(!*lptr || *lptr == ';' || *lptr == '#')
-  continue;
-@
-
-If the field to search on is not the same as the extracted value, the
-line is skipped if the value is blank as well.
-
-<<Skip entry if not right field>>=
-if(val_field > 0 && val_field != fieldno) {
-  if(val_field > fieldno)
-    i = fieldno;
-  else {
-    i = 1;
-    lptr = lbuf;
-  }
-  for(; i < val_field; i++) {
-    while(*lptr && *lptr != ';' && *lptr != '#')
-      ++lptr;
-    if(!*lptr)
-      break;
-    ++lptr;
-  }
-  if(i < val_field)
-    continue;
-  while(isspace(*lptr))
-    lptr++;
-  if(!*lptr || *lptr == ';' || *lptr == '#')
-    continue;
-}
-@
-
-While we're at it, we may as well extract the value.  The start is
-already at [[lptr]], so only the length needs to be computed.
-
-<<UCD parser variables>>=
-int vlen;
-@
-
-<<Skip entry if not right field>>=
-if(field_prefix) {
-  for(vlen = 0; lptr[vlen] && lptr[vlen] != ';' && lptr[vlen] != '#'; vlen++);
-  while(isspace(lptr[vlen - 1])) vlen--;
-}
-@
-
-The first column always contains the code points, as either a single
-hexadecimal code point or two code points separated by double dots.
-To process a file, lines are read while keeping track of the end of
-the previous range, so that ranges may be merged.  If a jump is
-detected, or if the value for a valued range changes, the previously
-accumulated range must be output.  This is done by always printing the
-first element after the jump, and then printing the last stored end
-point before the jump.  The last range's value must be saved as well
-for this to work.
-
-<<UCD parser variables>>=
-int32_t prevcp=-2;
-char *field = NULL;
-int field_len = 0;
-int32_t cp;
-@
-
-<<Merge start of range>>=
-++prevcp;
-cp = strtol(lbuf, NULL, 16);
-if(prevcp < cp || (field && (field_len != vlen || memcmp(field, lptr, field_len)))) {
-  /* end prev. range if it exists */
-  if(prevcp > 0) {
-    printf("0x%06X", prevcp - 1);
-    if(field_prefix)
-      printf(", %s%.*s", field_prefix, field_len, field);
-    puts("},");
-  }
-  /* start new range */
-  prevcp = cp;
-  printf("\t{0x%06X, ", prevcp);
-  if(field_prefix) {
-    if(!field)
-      field = malloc(vlen);
-    else if(field_len < vlen)
-      field = realloc(field, vlen);
-    field_len = vlen;
-    if(!field)
-      exit(1);
-    memcpy(field, lptr, vlen);
-  }
-}
-@
-
-<<Finish last range>>=
-if(prevcp >= 0) {
-  /* finish off last range */
-  printf("0x%06X", prevcp);
-  if(field_prefix)
-    printf(", %s%.*s", field_prefix, field_len, field);
-  putchar('}');
-  if(!cname)
-    putchar(',');
-  putchar('\n');
-}
-@
-
-If the code point was a singleton, we're done.  If it's a range, then
-the other members of the range need to be merged in as well, by
-advancing [[prevcp]] to the end point of the range. UnicodeData.txt
-represents ranges differently than the other files.  It uses a special
-character name format to indicate the start and end of a range.  The
-others use two hexadecimal numbers separated by double dots.
-
-\lstset{language=make}
-<<makefile.vars>>=
-UNIDATA = $(UCD_LOC)/UnicodeData.txt
-@
-
-\lstset{language=C}
-<<UCD parser options>>=
-int is_unidata = 0;
-@
-
-<<Process UCD parser argument>>=
-case 'u':
-  is_unidata = 1;
-  break;
-@
-
-<<Merge end of range>>=
-if(is_unidata) {
-  /* for range start entries, read range end and jump to end */
-  lptr = strchr(lbuf, ';');
-  if(lptr)
-    lptr = strchr(lptr + 1, ';');
-  if(lptr > lbuf + 7 && !memcmp(lptr - 7, " First>", 7)) {
-    mfgets(&lbuf, &lbuflen, &llen, 0, stdin);
-    prevcp = strtol(lbuf, NULL, 16);
-  }
-} else {
-  for(lptr = lbuf; *lptr && !isspace(*lptr) && *lptr != ';' && *lptr != '#'; lptr++)
-    if(*lptr == '.' && lptr[1] == '.') {
-      prevcp = strtol(lptr + 2, NULL, 16);
+  inisize(tab, max_tab);
+  int invert = BIT_OP(0, 0, op);
+  uint32_t aptr = 0, bptr = 0;
+  uint32_t alow, ahigh, blow, bhigh;
+  int32_t lasthigh = -1, curlow = -1, curhigh = -1;
+#define set_low_high(x) do { \
+  x##low = x##ptr < x##_len ? x[0].low : MAX_UNI_CP + 1; \
+  x##high = x##ptr < x##_len ? x[0].high : MAX_UNI_CP + 1; \
+} while(0)
+  set_low_high(a);
+  set_low_high(b);
+  while(alow <= MAX_UNI_CP || blow <= MAX_UNI_CP) {
+    uint32_t nextlow, nexthigh, res;
+    if(alow < blow) {
+      nextlow = alow;
+      res = BIT_OP(~0, 0, op);
+      if(ahigh < blow) {
+        nexthigh = ahigh;
+	aptr++;
+	set_low_high(a);
+      } else {
+        nexthigh = blow - 1;
+	alow = blow;
+      }
+    } else if(alow > blow) {
+      nextlow = blow;
+      res = BIT_OP(0, ~0, op);
+      if(bhigh < alow) {
+        nexthigh = bhigh;
+	bptr++;
+	set_low_high(b);
+      } else {
+        nexthigh = alow - 1;
+	blow = alow;
+      }
+    } else {
+      nextlow = alow;
+      res = BIT_OP(~0, ~0, op);
+      nexthigh = ahigh;
+      if(ahigh <= bhigh) {
+        aptr++;
+	set_low_high(a);
+      } else
+        alow = bhigh + 1;
+      if(bhigh <= nexthigh) {
+        nexthigh = bhigh;
+	bptr++;
+	set_low_high(b);
+      } else
+        blow = nexthigh + 1;
     }
+    if(invert && nextlow > lasthigh + 1) {
+      if(curlow < 0)
+        curlow = lasthigh + 1;
+      curhigh = nextlow - 1;
+    }
+    if(res) {
+      if(curlow < 0)
+        curlow = nextlow;
+      curhigh = nexthigh;
+    } else if(curlow >= 0) {
+      if(tab_len == max_tab)
+        resize(tab, max_tab *= 2);
+      tab[tab_len].low = curlow;
+      tab[tab_len++].high = curhigh;
+      curlow = -1;
+    }
+    lasthigh = nexthigh;
+  }
+  if(invert && lasthigh < MAX_UNI_CP) {
+    if(curlow < 0)
+      curlow = lasthigh + 1;
+    curhigh = MAX_UNI_CP;
+  }
+  if(curlow >= 0) {	
+    if(tab_len == max_tab)
+      resize(tab, max_tab *= 2);
+    tab[tab_len].low = curlow;
+    tab[tab_len++].high = curhigh;
+  }
+  *rtab = tab;
+  *r_len = tab_len;
 }
 @
 
-Another possibility would be to use multi-level tables with sharing at
-the lower levels.  This is effectively an optimized prefix tree.  The
-multi-level table approach requires fewer lookups (just as many table
-lookups as there are levels, vs. a binary search against a long range
-list that might take, say, 10 or more table probes), but even when
-using space-saving measures will likely still produce larger tables
-than even unoptimized range tables (range tables could be optimized
-for space by using only 24 bits per code point, for example, and
-storing the data byte in the upper byte).  The sharing requires
-additional management of a list of unique lower-level tables at each
-level, along with their users.  Making a change of any kind is a
-non-trivial operation.  This additional storage and computational
-expense makes these more suited to static one-time generation.  On the
-other hand, their straight lookup performance benefit over ranged
-tables is three-fold or more for many Unicode tables, without a need
-to do any special optimizations.
+Another possible simple improvement is to store fixed ranges, for
+example 32 characters at at time, with a bit array for that range.
+Again, two words are required per entry (start and bit mask), so this
+only saves storage space and time if each block has on average two or
+more bits set.  This loses the range advantage of being able to skip
+large contiguous groups of present members, but also partly loses the
+range disadvantage of requiring contiguous members for efficiency.  It
+also partly gains the disadvantage of requiring scanning of bit arrays
+to produce the \emph{members} list.  No sample implementation is
+provided here.
+
+A more complex possible improvement is to split the original bit array
+into a multi-level table, with duplicate subtables shared.  Basically,
+this is an optimized prefix tree (trie) on the code point bit string.
+The multi-level table approach requires fewer lookups (just as many
+table lookups as there are levels, vs. a binary search against a long
+range list that might take, say, 10 or more table probes), but even
+when using space-saving measures will likely still produce larger
+tables than even unoptimized range tables (range tables could be
+optimized for space by using only 24 bits per code point, for
+example.)  The sharing requires additional management of a list of
+unique lower-level tables at each level, along with their users.
+Making a change of any kind is a non-trivial operation.  This
+additional storage and computational expense makes these more suited
+to static one-time generation.  On the other hand, their straight
+lookup performance benefit over ranged tables is three-fold or more
+for many Unicode tables, without a need to do any special
+optimizations.
 
 There are probably very efficient algorithms to generate multi-level
 tables, but I am not aware of them.  The optimal number of levels and
 level size is difficult to find, but a pretty good number can be found
 by taking each level in turn, and finding the size which produces the
 minimum total length taking into account all uniques and the length of
-the array at the next level.  While it is possible to store the
-pointers in less memory, the next level is always assumed to store
-32-bit pointers for this computation.
+the array at the next level.  Of course the size of the next level is
+determined by redundancy elimination as well, so this requires a
+recursive search with backtracking.  In addition, having too many
+levels eliminates some of the performance benefit, so backtracking is
+not infinite.  The initial bit array may be a subset of the desired
+values, in which case an initial range can (actually, must) be
+specified as well.  When a value lies outside of that range, it can be
+given a default; currently only all zeroes and all ones are supported.
+The structure may also store multiple bit arrays at once, in which
+case it may be necessary to keep more than one byte together
+contiguously at the lowest level; this may be specified using
+[[minwidth]].
 
-The [[split_data]] routine takes an array of bytes, and splits it into
-blocks of at least 4 bytes (there is no point in having a 4-byte
-pointer to 4 bytes of data).  It returns the size of each block, an
-array of pointers into the byte array to be used as the next level and
-the number of unique blocks, and may also modify the byte array to
-place the unique blocks at the start.
+<<Common uni definitions>>=
+#define UNI_MAX_MULTILEV 3
+<<[[multi_tab_t]] definition>>
+void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
+                   uint32_t high, uint8_t def, uint32_t minwidth,
+		   <<Multi-level table type>> **ml, uint32_t *ml_len);
+/* return: 0 == all 0, ~0 == all 1, 1 == *ret is ptr to data */
+/* *ret is also set to NULL for 0 and ~0 returns */
+int multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
+                     const uint8_t **ret, uint8_t def);
+@
 
-<<Split data into multi-level table>>=
-<<[[split_data]] prereq>>
-
-static uint32_t split_data(uint8_t *data, uint32_t len, uint32_t **arr,
-                           uint32_t *nent, int moveit)
+<<Common uni functions>>=
+void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
+                   uint32_t high, uint8_t def, uint32_t minwidth,
+		   <<Multi-level table type>> **ml, uint32_t *ml_len)
 {
-    /* track minimum size in minwidth (the block size) */
-    /* default is no blocking, indicated by block size 4 */
-    uint32_t minsize = len, minlen = 4;
-    /* NULL means no pointers (block size 4) */
-    *arr = NULL;
-    uint32_t curlen = 8; /* start at block larger than raw */
-    <<Variables saved from [[split_data]] loop>>
-
-    while(curlen < len) {
-        uint32_t blks = (len + curlen - 1) / curlen;
-        <<Create multi-level array of size [[curlen]]>>
-	<<Save multi-level array only if smaller than [[minsize]]>>
-	curlen *= 2;
-    }
-    if(moveit && minlen > 4) {
-      <<Shift unique array blocks down>>
-    }
-    *nent = minsize / minlen;
-    return minlen;
+  <<Split [[bits]] into multi-level table [[*ml]]>>
 }
 @
 
-For each pass, a new array for the index return is created.  In
-addition, a side array is created to store only the unique block
-indices.  This alone prevents having to scan the entire return array
-for block matches, speeding things up orders of magnitude with sparse
-data.  Additionally, this array is kept sorted, allowing binary
-searching to further reduce the number of comparisons needed.  Using a
-hash table for this would require extra storage, and may speed things
-up further.  In any case, each block is simply added to the return
-array, checking first for duplicates.  Only unique blocks are added to
-the total size.
+<<Common uni functions>>=
+int multi_tab_lookup(const <<Multi-level table type>>*dat, uint32_t val,
+                     const uint8_t **ret, uint8_t def)
+{
+  <<Find multi-level table entry [[val]]>>
+}
+@
 
-<<Create multi-level array of size [[curlen]]>>=
-uint32_t i, j;
-uint32_t size = 0;
-uint32_t *ret, *ublocks, nublocks = 0;
+Recursion is actually accomplished using a backtracking stack.
 
-ret = malloc(blks * sizeof(*ret));
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+uint32_t i;
+<<Saved multi-level table information>>
+int curlev = 0;
+/* The block size of the block currently being worked on */
+uint32_t curblk[UNI_MAX_MULTILEV];
+
+curblk[0] = 0;
+while(1) {
+  <<Unsaved multi-level table information>>
+
+  <<Compute next [[curblk[curlev]]]>>
+  if(!curblk[curlev]) {
+    if(!curlev--)
+      break;
+    <<Free [[curlev]]>>
+    continue;
+  }
+  <<Compute level [[curlev]]>>
+  <<Create next level bit array>>
+  ++curlev;
+  curblk[curlev] = 0;
+  <<Save or free [[curlev]]>>
+  if(curlev == UNI_MAX_MULTILEV - 1) {
+    curlev--;
+    <<Free [[curlev]]>>
+  }
+}
+@
+
+The minimum block size is twice the pointer size at the next level.
+Any smaller, and the next level could just as well be a copy.
+Actually, any smaller than the architecture's memory alignment may
+cause performance issues.  For now, this is set to a minimum of 4. 
+The pointer size at the next level is 1, 2, or 4 depending on the
+number of blocks at this level.  The maximum block size is one half
+the total size; if the total size is not binary, the data is padded
+with zeroes.
+
+<<Saved multi-level table information>>=
+/* raw data array for current set of levels */
+uint8_t *lev[UNI_MAX_MULTILEV] = { (uint8_t *)bits };
+uint32_t curlen[UNI_MAX_MULTILEV] = { len };
+@
+
+<<Unsaved multi-level table information>>=
+uint32_t blks;
+@
+
+<<Compute next [[curblk[curlev]]]>>=
+if(!curblk[curlev]) {
+  if(curlen[curlev] <= 256 * 2)
+#if 0 /* too small, really */
+    curblk[curlev] = 2;
+#else
+    curblk[curlev] = 4;
+#endif
+  else if(curlen[curlev] <= 256 * 256 * 4)
+    curblk[curlev] = 4;
+  else
+    curblk[curlev] = 8;
+  if(!curlev && curblk[curlev] < minwidth)
+    curblk[curlev] = minwidth;
+} else {
+  curblk[curlev] *= 2;
+  if(curblk[curlev] >= curlen[curlev])
+    curblk[curlev] = 0;
+}
+if(curblk[curlev])
+  blks = (curlen[curlev] + curblk[curlev] - 1) / curblk[curlev];
+@
+
+For each pass, a new pointer array is created.  While this will
+eventually be reduced to the pointer size, 32-bit pointers are used
+during the search.  In addition, a side array is created to store only
+the unique block indices.  This alone prevents having to scan the
+entire return array for block matches, speeding things up orders of
+magnitude with sparse data.  Additionally, this array is kept sorted,
+allowing binary searching to further reduce the number of comparisons
+needed.  Using a hash table for this would require extra storage, and
+may speed things up further.  In any case, each block is simply added
+to the pointer array, checking first for duplicates.  As another
+special compensation for sparse (or dense) arrays, all-zero entries
+are always encoded as the pointer zero, and all-one entries are always
+encoded as the maximum pointer value (all ones).  Not only does this
+save a tiny bit of space, but scanning through dense or sparse
+sections of the array can be much faster.  Care must be taken during
+the comparisons to not access data past the end of the actual bit
+array, instead treating them as zeroes.
+
+<<Unsaved multi-level table information>>=
+uint32_t j;
+uint32_t *ptr, *ublocks, nublocks = 0;
+uint8_t *data = lev[curlev];
+uint32_t blklen, shortlen;
+@
+
+<<Compute level [[curlev]]>>=
+blklen = shortlen = curblk[curlev];
+ptr = malloc(blks * sizeof(*ptr));
 ublocks = malloc(blks * sizeof(*ublocks));
 for(i = 0; i < blks; i++) {
-  int h = nublocks - 1, l = 0;
+  int h, l;
+  /* first, check for 0 or 1 */
+  int is0 = 1, is1 = 1;
+  if(i == blks - 1) {
+    shortlen = curlen[curlev] % blklen;
+    if(!shortlen)
+      shortlen = blklen;
+  }
+  for(l = 0; l < shortlen && (is0 || is1); l++) {
+    if(data[blklen * i + l])
+      is0 = 0;
+    if(data[blklen * i + l] != (uint8_t)~0)
+      is1 = 0;
+  }
+  if(is0 && (!def || shortlen == blklen)) {
+    ptr[i] = 0;
+    continue;
+  }
+  if(is1 && (def || shortlen == blklen)) {
+    ptr[i] = ~0;
+    continue;
+  }
+  h = nublocks - 1;
+  l = 0;
   while(l <= h) {
     j = (l + h) / 2;
-    int c = memcmp(data + curlen * i, data + curlen * ublocks[j], curlen);
-    if(!c)
-      break;
-    if(c < 0)
+    /* comparing in reverse order to make shortlen cmp easier */
+    int c = memcmp(data + blklen * ublocks[j], data + blklen * i, shortlen);
+    if(!c) {
+      uint32_t k;
+      if(shortlen == blklen)
+        break;
+      /* make c > 0 if there is any non-0 element in ublock */
+      for(k = shortlen; k < blklen && !c; k++)
+        c = data[blklen * ublocks[j] + k];
+      if(!c)
+        break;
+    }
+    if(c > 0)
       h = j - 1;
     else
       l = j + 1;
@@ -695,351 +811,1959 @@ for(i = 0; i < blks; i++) {
       ublocks[h] = i;
     }
     j = h;
-    size += curlen;
   }
-  ret[i] = ublocks[j];
+  ptr[i] = ublocks[j] + 1;
 }
 @
 
-If the array is to be saved, it is saved directly in the result
-pointer.  Otherwise, it is freed.  The binary search array only needs
-to be saved if blocks will be moved down.
+Now that the search is complete, the pointers can be compressed to the
+minimum word size required.  The data will eventually be shifted down,
+but it is not necessary (or safe) yet.  However, some preparation must
+be done here, so that the pointers will eventually point to the
+shifted blocks.  The actual pointers need to be adjusted to use the
+offset of that pointer in the unique blocks array.  This could not
+have been done above, because the array was having members inserted in
+the middle, invalidating all of the indices.  To look up the index
+more quickly, the block array is stored by block number first (it was
+sorted by block contents, instead).
 
-<<Variables saved from [[split_data]] loop>>=
-uint32_t *min_ublocks = NULL, min_nublocks = 0;
+<<Saved multi-level table information>>=
+/* unique block pointers */
+uint32_t *curublk[UNI_MAX_MULTILEV] = {NULL};
+uint32_t curnublk[UNI_MAX_MULTILEV];
 @
 
-<<Save multi-level array only if smaller than [[minsize]]>>=
-if(size + (len / curlen) * 4 < minsize + (len / minlen) * 4) {
-  minsize = size;
-  minlen = curlen;
-  if(*arr)
-    free(*arr);
-  *arr = ret;
-  if(moveit) {
-    if(min_ublocks)
-      free(min_ublocks);
-    min_ublocks = ublocks;
-    min_nublocks = nublocks;
+<<Create next level bit array>>=
+curublk[curlev] = ublocks;
+curnublk[curlev] = nublocks;
+qsort(ublocks, nublocks, sizeof(uint32_t), uni_cmp_cp);
+/* for comparison with bsearch, adjust to actual stored value */
+for(i = 0; i < nublocks; i++)
+  ++ublocks[i];
+for(i = 0; i < blks; i++) {
+  if(!ptr[i] || ptr[i] == (uint32_t)~0)
+    continue;
+  uint32_t *p = bsearch(ptr + i, ublocks, nublocks, sizeof(uint32_t), 
+                        uni_cmp_cp);
+  ptr[i] = p - ublocks + 1;
+}
+lev[curlev + 1] = (uint8_t *)ptr;
+/* note: 0 and ~0 are reserved values, so space for 2 must be reserved */
+if(nublocks <= 254) {
+  uint8_t *p = (uint8_t *)ptr;
+  for(i = 0; i < blks; i++)
+    p[i] = ptr[i];
+  curlen[curlev + 1] = blks;
+} else if(nublocks <= 65534) {
+  uint16_t *p = (uint16_t *)ptr;
+  for(i = 0; i < blks; i++)
+    p[i] = ptr[i];
+  curlen[curlev + 1] = blks * 2;
+} else
+  curlen[curlev + 1] = blks * 4;
+@
+
+To retain the minimum-sized level, the current set of minima is
+stored.  If the current level is either smaller or the same size, but
+with fewer levels, it is saved.  Otherwise, it and all of its children
+are freed.
+
+<<Saved multi-level table information>>=
+uint32_t cursize[UNI_MAX_MULTILEV];
+uint8_t *minlev[UNI_MAX_MULTILEV] = { (uint8_t *)bits };
+uint32_t *minublk[UNI_MAX_MULTILEV] = { NULL };
+uint32_t minlen[UNI_MAX_MULTILEV] = { len }, minnublk[UNI_MAX_MULTILEV];
+uint32_t minblk[UNI_MAX_MULTILEV] = { 0 }, minsize = len;
+@
+
+<<Create next level bit array>>=
+cursize[curlev] = nublocks * curblk[curlev];
+cursize[curlev + 1] = curlen[curlev + 1];
+@
+
+<<Save or free [[curlev]]>>=
+uint32_t save_size = 0;
+for(i = 0; curblk[i]; i++)
+  save_size += cursize[i];
+save_size += cursize[i];
+int save_lev = save_size < minsize;
+if(save_size == minsize) {
+  for(j = 0; minblk[j]; j++);
+  save_lev = i < j;
+}
+if(save_lev) {
+  for(i = 0; i < UNI_MAX_MULTILEV; i++) {
+    if(minlev[i] != lev[i] && minlev[i])
+      free(minlev[i]);
+    if(minublk[i] != curublk[i] && minublk[i])
+      free(minublk[i]);
+    minblk[i] = curblk[i];
+    minlev[i] = lev[i];
+    minlen[i] = curlen[i];
+    minublk[i] = curublk[i];
+    minnublk[i] = curnublk[i];
+  }
+  minsize = save_size;
+}
+@
+
+<<Free [[curlev]]>>=
+if(curublk[curlev] != minublk[curlev])
+  free(curublk[curlev]);
+curublk[curlev] = NULL;
+if(lev[curlev + 1] != minlev[curlev + 1])
+  free(lev[curlev + 1]);
+lev[curlev + 1] = NULL;
+@
+
+Now, the data can be combined into a single buffer, which is parsed
+for every lookup.  This buffer is an opaque buffer of 32-bit integers,
+with each data chunk aligned to a 32-bit boundary.  That way, 16-bit
+and 32-bit values can be read directly from the buffer without
+alignment issues.  The buffer is read from top to bottom, traversing
+pointer tables until the data is reached.
+
+
+<<Multi-level table type>>=
+uint32_t
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+#define lev_psz(l) \
+  (!(l) ? 1 : minnublk[l - 1] <= 254 ? 1 : minnublk[l - 1] <= 65534 ? 2 : 4)
+for(curlev = 0; curlev < UNI_MAX_MULTILEV - 1 && minlev[curlev + 1]; curlev++);
+*ml_len = 0<<Multi-level table buffer length>>;
+inisize(*ml, *ml_len);
+uint32_t *mp = *ml;
+@
+
+To determine the size of the buffer, we need to know what the buffer
+will contain.  I will approach this by developing the lookup function
+at the same time.  This function returns either a pointer into the
+lowest-level data arrays, or an integer indicating that this is a zero
+or one entry.
+
+<<Find multi-level table entry [[val]]>>=
+*ret = NULL;
+@
+
+First, we need to filter out the main range.  The default, 0 or 1, is
+encoded as the first bit of the low end, after shifting that up.
+
+<<Find multi-level table entry [[val]]>>=
+if(val < (*dat >> 1) || val > dat[1])
+  return def ? def : *dat & 1 ? ~0 : 0;
+val -= *dat >> 1;
+dat += 2;
+@
+
+<<Multi-level table buffer length>>=
++2
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+*mp++ = (low << 1) + (def & 1);
+*mp++ = high;
+@
+
+After looking up the value at a particular level, the level needs to
+be skipped.  The size of the table can be stored as a compressed
+pointer beyond the end of the next level's data.  This is not possible
+for the first level, though, so the length needs to be stored
+separately.  There is no point in storing a compression length as
+well, so this is stored as a 32-bit integer.
+
+<<Find multi-level table entry [[val]]>>=
+uint32_t skip = *dat++;
+@
+
+<<Multi-level table buffer length>>=
++1
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+*mp++ = minlen[curlev] / lev_psz(curlev);
+@
+
+Following this is a list of levels.  The first word of the last level
+(i.e., the data level) is zero to terminate the list.
+
+<<Find multi-level table entry [[val]]>>=
+<<Prepare to scan multi-level table pointers>>
+while(*dat) {
+  <<Scan multi-level table pointers>>
+}
+@
+
+<<Multi-level table buffer length>>=
++1;
+for(i = 1; i <= curlev; i++)
+  *ml_len += 0<<Multi-level table buffer pointer [[i]] length>>;
+*ml_len += 0<<Multi-level table buffer data length>>
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+while(curlev > 0) {
+  <<Dump multi-level table pointers>>
+  --curlev;
+}
+*mp++ = 0;
+@
+
+Next, we need information regarding this level of the array.  First,
+each array corresponds to a particular set of bits; all bits below
+that are ignored.  The bit number below which the reset may be ignored
+is stored next.  For the lowest level of the array, this is always
+zero, so this corresponds with the loop terminator.  Rather than store
+the number of bits in an entire 32-bit word, it is stored in a byte.
+The other three bytes are available for other information that is only
+needed for a pointer level.
+
+<<Scan multi-level table pointers>>=
+uint32_t desc = *dat++;
+uint8_t shift = desc;
+uint32_t idx = val >> shift;
+
+val -= idx << shift;
+@
+
+<<Multi-level table buffer pointer [[i]] length>>=
++1
+@
+
+<<Dump multi-level table pointers>>=
+uint32_t desc;
+<<Compute pointer level descriptor>>
+*mp++ = desc;
+@
+
+<<Compute pointer level descriptor>>=
+for(i = 0, desc = 0; i < curlev; i++)
+  desc += lg2(minblk[i] / lev_psz(i));
+@
+
+Now that the index into the subarray is known, to actually look
+something up in the table requires the size of the table entries.
+This is stored next.
+
+<<Scan multi-level table pointers>>=
+desc >>= 8;
+uint8_t psz = desc;
+@
+
+<<Compute pointer level descriptor>>=
+uint8_t psz = lev_psz(curlev);
+desc |= psz << 8;
+@
+
+It also needs the offset of the subtable.  Since that is what we are
+loooking up, it can be obtained from the previous pass.  For the first
+pass, the offset is always zero.
+
+<<Prepare to scan multi-level table pointers>>=
+uint32_t toff = 0;
+@
+
+Now the lookup can be performed.  First, the offset beyond the table
+is read, and then the pointer itself.  Then, the data pointer is
+advanced past the end of the entire level.
+
+<<Scan multi-level table pointers>>=
+switch(psz) {
+  case 1: {
+    const uint8_t *p = (const uint8_t *)dat;
+    toff = p[idx + toff + 1];
+    if(!toff)
+      return 0;
+    if(toff == (uint8_t)~0)
+      return ~0;
+    dat += skip / 4 + 1; /* aka (skip + 1 + 3) / 4 */
+    skip = *p;
+    break;
+  }
+  case 2: {
+    const uint16_t *p = (const uint16_t *)dat;
+    toff = p[idx + toff + 1];
+    if(!toff)
+      return 0;
+    if(toff == (uint16_t)~0)
+      return ~0;
+    dat += skip / 2 + 1; /* aka (skip + 1 + 1) / 2 */
+    skip = *p;
+    break;
+  }
+  case 4:
+    toff = dat[idx + toff + 1];
+    if(!toff)
+      return 0;
+    if(toff == (uint32_t)~0)
+      return ~0;
+    toff = *dat;
+    dat += skip + 1;
+    break;
+}
+@
+
+<<Multi-level table buffer pointer [[i]] length>>=
++((i != curlev ? minnublk[i] * minblk[i] : minlen[i]) + lev_psz(i) + 3) / 4
+@
+
+<<Dump multi-level table pointers>>=
+uint8_t *mpp = (uint8_t *)mp;
+switch(psz) {
+ case 1:
+   *mpp++ = minnublk[curlev - 1];
+   break;
+ case 2:
+   *(uint16_t *)mpp = minnublk[curlev - 1];
+   mpp += 2;
+   break;
+ case 4:
+   *(uint32_t *)mpp = minnublk[curlev - 1];
+   mpp += 4;
+   break;
+}
+<<Copy table data out>>
+free(minlev[curlev]);
+@
+
+<<Copy table data out>>=
+if(minblk[curlev]) {
+  /* copy all but last blindly */
+  for(i = 0; i < minnublk[curlev] - 1; i++) {
+    memcpy(mpp, minlev[curlev] + minblk[curlev] * (minublk[curlev][i] - 1),
+           minblk[curlev]);
+    mpp += minblk[curlev];
+  }
+  /* the last may be short */
+  uint32_t shortlen;
+  if(minublk[curlev][i] == (minlen[curlev] + minblk[curlev] - 1) / minblk[curlev]) {
+    shortlen = minlen[curlev] % minblk[curlev];
+    if(!shortlen)
+      shortlen = minblk[curlev];
   } else
-    free(ublocks);
+    shortlen = minblk[curlev];
+  memcpy(mpp, minlev[curlev] + minblk[curlev] * (minublk[curlev][i] - 1),
+         shortlen);
+  /* silence valgrind */
+  if(shortlen < minblk[curlev])
+    memset(mpp + shortlen, 0, minblk[curlev] - shortlen);
+  mpp += minblk[curlev];
+  free(minublk[curlev]);
 } else {
-  free(ret);
-  free(ublocks);
+  memcpy(mpp, minlev[curlev], minlen[curlev]);
+  mpp += minlen[curlev];
+}
+/* align mpp */
+if((mpp - (uint8_t *)mp) & 3)
+  mpp += 4 - ((mpp - (uint8_t *)mp) & 3);
+mp = (uint32_t *)mpp;
+@
+
+The table offset just acquired is a block number (actually, plus one
+to allow for zero).  To convert it to a word offset, it needs to be
+multiplied by the next block size, in pointer size units.  This is
+stored next in [[desc]].  Since there are two bytes left, it is stored
+as a 16-bit integer.  If another byte is ever needed, it can be
+obtained by changing this to a shift value (it is always a power of
+2).
+
+<<Scan multi-level table pointers>>=
+desc >>= 8;
+toff = (toff - 1) * desc;
+skip *= desc;
+@
+
+<<Compute pointer level descriptor>>=
+desc |= (minblk[curlev - 1] / lev_psz(curlev - 1)) << 16;
+@
+
+The final lookup simply finds the byte offset of the remaining value
+in the selected subtable.  Note that only bytes may be addressed;
+storing more than one byte requires shifting the value left first
+before finding the first byte of the value.  Similarly, storing only
+one bit requires that the value be shifted right first for addressing,
+and then using the shifted out bits to create a bit mask.
+
+<<Find multi-level table entry [[val]]>>=
+*ret = (const uint8_t *)dat + 4 + toff + val;
+return 1;
+@
+
+<<Multi-level table buffer data length>>=
++((curlev ? minnublk[0] * minblk[0] : len) + 3) / 4
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+uint8_t *mpp = (uint8_t *)mp;
+<<Copy table data out>>
+if(mp - *ml != *ml_len) {
+  fprintf(stderr, "len mismatch: %d %d\n", (int)(mp - *ml), (int)*ml_len);
+  exit(1);
 }
 @
 
-Finally, to actually shift the data down, we need to re-sort the
-unique index array in numerical order, and then just copy them in that
-order.
+Generally, even with the complexity I added by compressing pointers,
+the table lookups are faster than equivalent range table lookups.  As
+long as duplicates are removed, the space taken up is comparable to
+ordinary range tables.  With the suppression of zero and one blocks,
+it is faster to find the \emph{members} list than with plain bit
+tables, but is still not very fast.  On the other hand, making
+modifications, or creating new tables from scratch, is very expensive.
+Even if we stick with a table's current structure, there needs to be
+side storage that deals with the shared arrays.  If a change is made
+to an array at any level, then all pointers at the next level need to
+be checked: if they point to the same place, the block needs to be
+duplicated first, and after updating the block (duplicate or not), it
+needs to be compared against all existing blocks at the same level for
+re-merging.  The last step is not strictly necessary for run-time
+operations, but there is no way with the current structure to detect
+shared blocks.  An additional bit for each pointer could be used to
+indicate sharing, which would never be turned off even if the last
+owner disappears.  There are many possibilities, and I do not wish to
+dwell on it any more.  For now, the multi-level tables are expected to
+be read-only and only provide the \emph{in} function.
 
-<<[[split_data]] prereq>>=
-static int cmp_i32(const void *a, const void *b)
+% FIXME: table_to_range
+% FIXME: range_to_table (already implemented, but not as a function)
+% FIXME: invert(table) (easy: doesn't need duplicate scanning)
+% FIXME: logical(table) (hard: needs duplicate scanning, but maybe not)
+
+A parser program is used to generate these tables as static,
+compilable C code from the UCD tables.  One of the advantages of the
+range table method is that creating range tables is trival, and could
+be done using a simple shell script.  However, during the stages of
+this project where that was in use, the generation time began to
+dominate compilation time, so this was converted to C.  Since it is in
+C anyway, it may as well generate multi-level tables directly, as
+well.  In fact, the logic outside of the scripts was becoming
+cumbersome as well, so all of that is now incorporated into the C
+program.
+
+This program has a special build rule so it can be used to generate
+other C code without depending on that C code itself (as with
+[[cproto.h]]).  The code itself can't use the standard header macro,
+either, since it needs to limit its include files.  One thing it does
+need, though, is the ability to read lines of arbitrary length.  This
+is provided in my support library, which is referenced rather than
+built here, again to avoid building [[cproto.h]].
+
+\lstset{language=make}
+<<C Build Executables>>=
+parse-ucd \
+@
+
+<<makefile.config>>=
+# location of support library
+SUPT_LIB=../build/libsupt.a
+@
+
+<<makefile.rules>>=
+parse-ucd: parse-ucd.c mfgets.h $(SUPT_LIB)
+	$(CC) $(CFLAGS) $(SUPT_INCL) $(CFLAGS_EXTRA) -o $@ parse-ucd.c \
+	  $(SUPT_LIB)
+@
+
+\lstset{language=C}
+<<parse-ucd.c>>=
+<<Common C Warning>>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include "mallocdef.h"
+#include "btricks.h"
+#include "mfgets.h"
+#include "uni_common.h"
+
+<<UCD parser local definitions>>
+
+<<UCD parser local functions>>
+
+int main(int argc, const char **argv)
 {
-  return *(int32_t *)a - *(int32_t *)b;
+  <<UCD parser variables>>
+
+  <<Process UCD parser arguments>>
+  <<Parse character data files>>
+  <<Post-process property data>>
+  <<Dump character information as C code>>
+  return 0;
 }
 @
 
-<<Shift unique array blocks down>>=
-uint32_t i;
-qsort(min_ublocks, min_nublocks, sizeof(uint32_t), cmp_i32);
-for(i = 0; i < min_nublocks; i++)
-  if(min_ublocks[i] != i)
-    memcpy(data + minlen * i, data + minlen * min_ublocks[i], minlen);
-for(i = 0; i < (len + minlen - 1) / minlen; i++) {
-  uint32_t *p = bsearch(*arr + i, min_ublocks, min_nublocks,
-                        sizeof(uint32_t), cmp_i32);
-  (*arr)[i] = p - min_ublocks;
+All files will be parsed by the same program.  The only necessary
+parameters are the locations of the UCD files.  Since the main UCD and
+the Unihan components are distributed separately, they may come from
+separate locations.
+
+<<UCD parser variables>>=
+const char *ucd_loc, *unihan_loc;
+@
+
+<<Process UCD parser arguments>>=
+if(argc < 3)
+  exit(1); /* internal use only, no help */
+ucd_loc = *++argv;
+unihan_loc = *++argv;
+@
+
+Rather than construct file names using the provided paths, they are
+assumed to be absolute, and the program just changes to the location
+directory before reading files, and all files are read relative to the
+current directory.
+
+<<UCD parser variables>>=
+FILE *f;
+char *lbuf = NULL;
+unsigned int lbuflen, llen;
+@
+
+<<Parse character data files>>=
+#define open_f(fn) do { \
+  if(!(f = fopen(fn, "r"))) { \
+    perror(fn); \
+    exit(1); \
+  } \
+} while(0)
+<<Parse character data in current directory>>
+<<Initialize UCD files>>
+<<Parse UCD files>>
+<<Initialize Unihan files>>
+<<Parse Unihan files>>
+@
+
+<<Initialize UCD files>>=
+chdir(ucd_loc);
+@
+
+<<Initialize Unihan files>>=
+chdir(unihan_loc);
+@
+
+UCD text files consist of semicolon-separated fields, with the code
+point(s) in the first field.  Comments are introduced with the number
+sign.  Blank lines and purely comment lines are permitted.  Whitespace
+is stripped from the beginning and ending of each field.  One
+particular file stores relevant information in a line comment, so all
+comments on the same line as non-whitespace data are retained.  Rather
+than process each field as it is encountered, like I would normally
+do, each line is split into an array of fields first.  This makes the
+parsing routines more readable and obvious as well.
+
+<<Process a line of [[UnicodeData.txt]]>>=
+split_line(lbuf);
+if(num_fields < 15) { /* should never happen! */
+  perror("UnicodeData.txt");
+  exit(1);
 }
 @
 
-To actually create a multi-level table, the [[split_data]] routine
-must be called on each level of the table, until there are no benefits
-to splitting any more.
+<<UCD parser local definitions>>=
+static char **fields;
+static int num_fields, max_fields = 0;
+@
 
-<<Split data into multi-level table>>=
-static void doit(const char *name, uint8_t *dat, uint32_t dlen,
-                 uint32_t low, uint32_t high)
+<<UCD parser local functions>>=
+static void split_line(char *buf)
 {
-  /* 32 bits, minimum 3 bits per level -> max 11 levels */
-  uint32_t *lev[11], levlen[11], levents[11];
+  if(!max_fields)
+    inisize(fields, (max_fields = 16));
+  num_fields = 0;
+  while(isspace(*buf)) buf++;
+  if(!*buf || *buf == '#')
+    return;
+  while(1) {
+    while(isspace(*buf))
+      buf++;
+    char *f = buf, *nf, fc;
+    for(nf = buf; *nf && *nf != ';' && *nf != '#'; nf++);
+    fc = *nf;
+    buf = nf + 1;
+    while(nf > f && isspace(nf[-1])) --nf;
+    *nf = 0;
+    if(num_fields == max_fields)
+      resize(fields, (max_fields *= 2));
+    fields[num_fields++] = f;
+    if(!fc)
+      return;
+  }
+}
+@
 
-  <<Split data into optimal tables>>
-  /* now that the table has been built, spit it out */
-  printf("const uint8_t unitab_%s[] = {\n", name);
-  <<Print optimal multi-level table>>
+Since named properties are being parsed, and named variables will be
+created, it is useful to have a database of all of the property names
+and their aliases before starting.  For this reason, the first file to
+process is the file which contains those names:  [[PropertyAliases.txt]].
+This file is read in and stored in a local table, sorted by name.  The
+sorting is done after the fact to reduce complexity.
+
+<<Common uni definitions>>=
+typedef struct {
+  const char *short_name, *long_name, *alt_name, *alt_name2;
+} uni_alias_t;
+@
+
+<<UCD parser local definitions>>=
+static uni_alias_t *prop_aliases;
+static int num_prop_aliases = 0, max_prop_aliases = 0;
+@
+
+<<Initialize UCD files>>=
+open_f("PropertyAliases.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  split_line(lbuf);
+  if(num_fields < 2)
+    continue;
+  if(!max_prop_aliases)
+    inisize(prop_aliases, (max_prop_aliases = 128));
+  if(max_prop_aliases == num_prop_aliases)
+    resize(prop_aliases, (max_prop_aliases *= 2));
+  prop_aliases[num_prop_aliases].short_name = strdup(fields[0]);
+  prop_aliases[num_prop_aliases].long_name = strdup(fields[1]);
+  /* there are no comments on alias lines, so field count is correct */
+  prop_aliases[num_prop_aliases].alt_name =
+                 num_fields > 2 ? strdup(fields[2]) : NULL;
+  prop_aliases[num_prop_aliases].alt_name2 =
+                 num_fields > 3 ? strdup(fields[3]) : NULL;
+  if(num_fields > 4) {
+    perror("PropertyAliases.txt");
+    exit(1);
+  }
+  num_prop_aliases++;
+}
+fclose(f);
+@
+
+There are actually two fields to sort by: long name and short name.
+The main table will be sorted by long name, and a side table with
+pointers will be used to sort the table by short name as well.  That
+way, lookups can use binary searching on either field.
+
+<<UCD parser local functions>>=
+static int cmp_longname(const void *a, const void *b)
+{
+  return strcmp(((uni_alias_t *)a)->long_name, ((uni_alias_t *)b)->long_name);
+}
+@
+
+<<Initialize UCD files>>=
+qsort(prop_aliases, num_prop_aliases, sizeof(uni_alias_t), cmp_longname);
+@
+
+<<UCD parser local definitions>>=
+uni_alias_t **prop_aliases_short;
+@
+
+<<UCD parser local functions>>=
+static int cmp_shortname(const void *a, const void *b)
+{
+  return strcmp((*(uni_alias_t **)a)->short_name,
+                (*(uni_alias_t **)b)->short_name);
+}
+@
+
+<<Initialize UCD files>>=
+inisize(prop_aliases_short, num_prop_aliases);
+for(i = 0; i < num_prop_aliases; i++)
+  prop_aliases_short[i] = &prop_aliases[i];
+qsort(prop_aliases_short, num_prop_aliases, sizeof(*prop_aliases_short),
+      cmp_shortname);
+@
+
+
+Properties are added to a master property list, containing the name
+and the parsed contents.  This is simply tacked on next to the
+like-named property in the property name table, if applicable.  Some
+properties are artificial, though, so they are appended to the end.  A
+separate count is provided for this purpose.
+
+<<UCD parser local definitions>>=
+typedef struct {
+  const char *name;
+  <<Property parsed contents>>
+} prop_t;
+static prop_t *parsed_props;
+static uint32_t nparsed, maxparsed = 0;
+@
+
+<<Known Data Types>>=
+prop_t,%
+@
+
+<<UCD parser local functions>>=
+static int add_prop(const char *name)
+{
+  uni_alias_t *pn, n;
+  uint32_t i;
+  if(!maxparsed) {
+    inisize(parsed_props, (maxparsed = nparsed = num_prop_aliases));
+    clearbuf(parsed_props, nparsed);
+  }
+  n.long_name = name;
+  pn = bsearch(&n, prop_aliases, num_prop_aliases, sizeof(*prop_aliases),
+               cmp_longname);
+  if(!pn) {
+    uni_alias_t **ppn;
+    pn = &n;
+    n.short_name = name;
+    ppn = bsearch(&pn, prop_aliases_short, num_prop_aliases,
+                  sizeof(*prop_aliases_short), cmp_shortname);
+    if(ppn)
+      pn = *ppn;
+    else
+      pn = NULL;
+  }
+  if(pn)
+    i = (int)(pn - prop_aliases);
+  else {
+    if(maxparsed == nparsed)
+      resize(parsed_props, (maxparsed *= 2));
+    i = nparsed;
+    clearbuf(&parsed_props[nparsed], 1);
+    nparsed++;
+  }
+  parsed_props[i].name = strdup(name);
+  return i;
+}
+@
+
+During the read loop, only range tables are constructed.  That way,
+multiple, large bit arrays required for multi-level array construction
+are only allocated one at a time, using prepared information from the
+range table.  A function is provided to do just that.
+
+<<Common uni definitions>>=
+uint32_t *rng_to_multi(const uni_chrrng_t *tab, uint32_t tab_len,
+                         uint32_t *ml_len);
+@
+
+<<Common uni functions>>=
+uint32_t *rng_to_multi(const uni_chrrng_t *tab, uint32_t tab_len,
+                       uint32_t *ml_len)
+{
+  uint32_t low, high, len, i;
+  uint32_t *ml;
+  uint8_t *bits, def;
+
+  /* degenerate cases:  all 0, all 1 */
+  if(!tab_len) {
+    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    return ml;
+  }
+  if(tab_len == 1 && !tab[0].low && tab[0].high == MAX_UNI_CP) {
+    bits_to_multi(NULL, 0, 1, 0, 1, 0, &ml, ml_len);
+    return ml;
+  }
+  /* not all 0 or all 1 */
+  low = tab[0].low;
+  high = tab[tab_len - 1].high;
+  /* if starts & ends with 1, make it an inverse array */
+  def = !low && high == MAX_UNI_CP;
+  if(def) {
+    low = tab[0].high + 1;
+    high = tab[tab_len - 1].low - 1;
+  }
+  /* align with byte boundary */
+  low &= ~7;
+  len = ((high - low + 1 + 7) / 8);
+  inisize(bits, len);
+  clearbuf(bits, len);
+  /* FIXME: use quick mask calculation instead of loops */
+  if(def)
+    /* fill in ones if low not aligned with byte boundary */
+    for(i = 0; i < (tab[0].high + 1) % 8; i++)
+      BSET_SET(bits, i);
+  for(i = def; i < tab_len - def; i++) {
+    uint32_t j;
+    for(j = tab[i].low; j <= tab[i].high && (j & 7); j++)
+      BSET_SET(bits, j - low);
+    if(j < ((tab[i].high + 1) &~7)) {
+      memset(&BSET_ELT(bits, j - low), 0xff, (tab[i].high + 1) / 8 - j / 8);
+      j += ((tab[i].high + 1) / 8 - j / 8) * 8;
+    }
+    for(; j <= tab[i].high; j++)
+      BSET_SET(bits, j - low);
+  }
+  if(def && tab[tab_len - 1].low % 8)
+    /* fill in ones if high + 1 not aligned with byte boundary */
+    for(i = tab[tab_len - 1].low % 8; i < 8; i++)
+      BSET_SET(bits, tab[tab_len - 1].low - i);
+  bits_to_multi(bits, len, low / 8, high / 8, def, 0, &ml, ml_len);
+  free(bits);
+  return ml;
+}
+@
+
+The first file to parse for actual data is the main database file,
+[[UnicodeData.txt]].
+
+<<Parse UCD files>>=
+open_f("UnicodeData.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Process a line of [[UnicodeData.txt]]>>
+}
+fclose(f);
+@
+
+The first field is a code point.  While it appears that each line only
+deals with one code point, there are actually ranges as well.  These
+are specified by two consecutive entries with names ending in \texttt{,
+First>} and \textt{, Last>}, respectively.
+
+<<UCD parser variables>>=
+uint32_t low, high;
+char *s;
+@
+
+<<Process a line of [[UnicodeData.txt]]>>=
+low = high = strtol(fields[0], NULL, 16);
+if(fields[1][0] == '<' && (s = strchr(fields[1], ',')) &&
+   !strcasecmp(s, ", First>")) {
+  if(!mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+    perror("UnicodeData.txt");
+    exit(1);
+  }
+  split_line(lbuf);
+  if(num_fields < 15 ||
+     fields[1][0] != '<' || !(s = strchr(fields[1], ',')) ||
+     strcasecmp(s, ", Last>")) { /* should also never happen! */
+    perror("UnicodeData.txt");
+    exit(1);
+  }
+  high = strtol(fields[0], NULL, 16);
+}
+@
+
+The parsed contents for boolean properties are the range table and the
+associated multi-level table.  In order to build the range table in
+place, the storage size of the range table is kept as well.
+
+<<Property parsed contents>>=
+uni_chrrng_t *rng;
+uint32_t rng_len, max_rng_len;
+uint32_t *mt, mt_len;
+@
+
+<<UCD parser variables>>=
+uint32_t i, j;
+@
+
+<<UCD parser local functions>>=
+static void add_bool_rng(prop_t *p, uint32_t low, uint32_t high)
+{
+  if(!p->max_rng_len)
+    inisize(p->rng, (p->max_rng_len = 8));
+  if(p->rng_len && p->rng[p->rng_len - 1].high == low - 1)
+    p->rng[p->rng_len - 1].high = high;
+  else {
+    if(p->rng_len == p->max_rng_len)
+      resize(p->rng, (p->max_rng_len *= 2));
+    p->rng[p->rng_len].low = low;
+    p->rng[p->rng_len].high = high;
+    ++p->rng_len;
+  }
+}
+@
+
+<<UCD parser local definitions>>=
+#define decl_bool(n) int prop_##n = -1
+#define add_bool(n) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  add_bool_rng(&parsed_props[prop_##n], low, high); \
+} while(0)
+@
+
+The only directly derived boolean properties in [[UnicodeData.txt]] are
+ASSIGNED, which is true if the character is present, and
+Bidi\_Mirrored, which is true if field 10 is Y.
+
+<<UCD parser variables>>=
+decl_bool(ASSIGNED);
+decl_bool(Bidi_Mirrored);
+@
+
+<<Process a line of [[UnicodeData.txt]]>>=
+add_bool(ASSIGNED);
+if(fields[9][0] == 'Y')
+  add_bool(Bidi_Mirrored);
+@
+
+The [[PropList.txt]] file has more boolean properties, though.  In
+fact, all entries in this file specify boolean properties.
+
+<<Parse UCD files>>=
+open_f("PropList.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Process a line of [[PropList.txt]]>>
+}
+fclose(f);
+@
+
+Like most of the rest of the UCD files, this file specifies ranges
+using double-dot-separated code points.  Also, there are numerous
+blank lines and comments, which need to be skipped.
+
+<<Process a line of [[PropList.txt]]>>=
+<<Parse dotted cp>>
+@
+
+<<Parse dotted cp>>=
+split_line(lbuf);
+if(num_fields < 2)
+  continue;
+low = high = strtol(lbuf, &s, 16);
+if(s && *s == '.' && s[1] == '.')
+  high = strtol(s + 2, NULL, 16);
+@
+
+Each boolean property is true if field two is the name of that
+property.  Since the [[addprop]] routine finds the correct entry based
+on the name (assuming the name exists), it can be called every time,
+and the correct entry will be updated.  However, the Hyphen property
+needs to be excluded, because it is deprecated.  Also, I have no
+applications which require the Other\_* poperties, so these are
+ignored as well. They are mostly used to derive other properties, but
+it's easier to just process [[DerivedCoreProperties.txt]] than to
+generate them manually.
+
+<<Process a line of [[PropList.txt]]>>=
+if(!strcmp(fields[1], "Hyphen"))
+  continue;
+if(!strncmp(fields[1], "Other_", 6))
+  continue;
+<<Just add field two as binary property>>
+@
+
+<<Just add field two as binary property>>=
+add_bool_rng(&parsed_props[add_prop(fields[1])], low, high);
+@
+
+Speaking of [[DerivedCoreProperties.txt]], this file has entirely
+boolean properties as well.  The only deprecated property is
+Grapheme\_Link.
+
+<<Parse UCD files>>=
+open_f("DerivedCoreProperties.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  if(!strcmp(fields[1], "Grapheme_Link"))
+    continue;
+  <<Just add field two as binary property>>
+}
+fclose(f);
+@
+
+The [[CompositionExclusions.txt]] file simply lists all code points
+having the property Composition\_Exclusion.  Since I process comments
+as fields, and all lines have trailing comments, the number of fields
+is sufficient to use the same parsing technique as for the other
+files.
+
+<<UCD parser variables>>=
+decl_bool(Composition_Exclusion);
+@
+
+<<Parse UCD files>>=
+open_f("CompositionExclusions.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_bool(Composition_Exclusion);
+}
+fclose(f);
+@
+
+Unfortunately, this file does not have all entries in order. Instead,
+it lists multiple groups, and each group is in order.  This requires
+post-processing.  In fact, since this might happen with other files as
+well, this processing may as well be done for all tables.
+
+<<Post-process property data>>=
+for(i = 0; i < nparsed; i++)
+  if(parsed_props[i].rng)
+    fixup_rng(&parsed_props[i]);
+@
+
+<<UCD parser local functions>>=
+static void fixup_rng(prop_t *p)
+{
+  uint32_t i;
+  qsort(p->rng, p->rng_len, sizeof(uni_chrrng_t), uni_cmprng);
+  for(i = 0; i < p->rng_len - 1; i++)
+    if(p->rng[i + 1].low == p->rng[i].high - 1) {
+      p->rng[i].high = p->rng[i + 1].high;
+      if(i + 2 < p->rng_len) {
+        memmove(p->rng + i + 1, p->rng + i + 2,
+	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_t));
+        p->rng_len--;
+      }
+    }
+}
+@
+
+The only remaining required boolean UCD properties come from
+[[DerivedNormalizationProps.txt]].  Unlike the other three, there are
+some non-boolean properties in this file as well.  Luckily, there is a
+comment after every line, so some boolean values can be detected by
+simply counting the fields.  The Expands\_On\_* properties are
+deprecated.  Technically, the quick check fields could be booleans as
+well, but some values are Maybe.  In any case, the Unicode standard
+defines them as enumerated properties.
+
+<<Parse UCD files>>=
+open_f("DerivedNormalizationProps.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  <<Process a line of [[DerivedNormalizationProps.txt]]>>
+}
+fclose(f);
+@
+
+<<Process a line of [[DerivedNormalizationProps.txt]]>>=
+if(num_fields == 3) {
+  if(!strncmp(fields[1], "Expands_On_", 11))
+    continue;
+  <<Just add field two as binary property>>
+  continue;
+}
+@
+
+There are no boolean fields exported from Unihan.  The only field
+which might be considered boolean (kIICore) is not required by
+anything I use.
+
+% FIXME: add fields from other sources, if necessary.
+%  XML: none
+%  CLDR: probably none, and in any case, should probably be loaded at
+%  run-time
+
+Now, to finish up post-processing, the multi-level table is generated.
+
+<<Post-process property data>>=
+for(i = 0; i < nparsed; i++)
+  if(parsed_props[i].rng)
+    parsed_props[i].mt = rng_to_multi(parsed_props[i].rng, parsed_props[i].rng_len,
+                                      &parsed_props[i].mt_len);
+@
+
+The boolean properties can now be printed, using the canonical short
+name.  Converting these to lower-case would be more consistent, but
+once the name is known, casing shouldn't really matter.  A header
+needs to be generated as well, to contain the external variable
+declarations.  This is written to standard error.  It can still be
+distinguished from error messages by the fact that no error code is
+returned by the program.
+
+In addition to the property tables, a simple query function is
+printed.  This calls a generic search function using the multi-level
+table.
+
+<<Dump character information as C code>>=
+for(i = 0; i < nparsed; i++) {
+  if(parsed_props[i].rng) {
+    const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
+                                              parsed_props[i].name;
+    printf("const uni_chrrng_t uni_%s_rng[] = {\n", name);
+    for(j = 0; j < parsed_props[i].rng_len; j++)
+      printf("\t{ %d, %d }%s\n", parsed_props[i].rng[j].low,
+                                 parsed_props[i].rng[j].high,
+				 j < parsed_props[i].rng_len - 1 ? "," : "");
+    puts("};");
+    fprintf(stderr, "#define uni_%s_rng_len %d\n", name,
+                                                   parsed_props[i].rng_len);
+    printf("const uint32_t uni_%s_mtab[] = {\n\t", name);
+    for(j = 0; j < parsed_props[i].mt_len; j++)
+      printf("0x%X%s", parsed_props[i].mt[j], j == parsed_props[i].mt_len - 1 ?
+                                                     "\n" : !((j + 1) % 8) ?
+						           ",\n\t" : ", ");
+    puts("};");
+    fprintf(stderr, "extern const uni_chrrng_t uni_%s_rng[];\n"
+		    "extern const uint32_t uni_%s_mtab[];\n"
+		    "#define is_uni_%s(x) is_uni_x(x, uni_%s_mtab)\n",
+		    name, name, name, name);
+  }
+}
+@
+
+<<Common uni definitions>>=
+int is_uni_x(uint32_t cp, const uint32_t *tab);
+@
+
+<<Common uni functions>>=
+int is_uni_x(uint32_t cp, const uint32_t *tab)
+{
+  const uint8_t *mr;
+  uint8_t mv = multi_tab_lookup(tab, cp / 8, &mr, 0);
+  if(mr)
+    mv = *mr;
+  return mv & BSET_MASK(mr, cp) ? 1 : 0;
+}
+@
+
+\subsection{Enumerated Properties}
+
+Enumerated properties have a limited number of values, which have
+names of their own.  These names may have aliases, as well.  Of course
+all properties have a limited number of values, so it is a matter of
+interpretation whether it qualifies as an enumeration.  The general
+rule followed here is that this only includes properties with an
+explicit list of aliases.  That includes one psuedo-property: the list
+of properties itself.  An enumerated property can be split into sets,
+each of which consists of the characters having one specific
+enumerated value.  This means that each enumerated property also
+defines a number of boolean properties, which are covered above.
+Additional useful operations include:
+
+\begin{itemize}
+\item Find out the value \emph{of} the property for a character.  This
+should be a numeric value indicating the enumeration literal index.
+\item Given a value, find out its \emph{name} and primary \emph{alias}.
+\item Given a name or alias, find out its \emph{value}.  This should
+support Unicode sloppy matching:  case-insensitive, with dashes and
+underscores removed (except as noted).
+\item Obtain a \emph{list} of all possible values and aliases, for more
+general searching.
+\end{itemize}
+
+Again, for the \emph{of} operation, the multi-level table seems
+appropriate.  Rather than storing the actual string value, the
+enumeration is simply converted into an integer from zero to the
+number of elements, and that integer is stored.  For all enumerations
+but the character name, this just one byte.  For the character name, a
+different approach is required.  Since every code point has a
+different name, there will never be any sharing of lower-level tables.
+The only possible sharing would be in the algorithmically generated
+code points.  Since this is a significant special case, it gets its
+own section, later on.
+
+To obtain a subset for boolean operations, the range list is provided
+as well.  It is augmented by a data field.  No enumeration actually
+requires 32 bits, so adding another separate field is wasteful.
+Instead, an 8-bit bit field is added.  This does slow things down
+slightly, but for performance, the multi-level table is better, anyway.
+
+<<Common uni definitions>>=
+typedef struct {
+    uint32_t low, high:24, dat:8;
+} uni_chrrng_dat_t;
+int uni_cmprng_dat(const void *a, const void *b); /* for bsearch/qsort */
+uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
+                        uint32_t tab_len, uint32_t def);
+@
+
+<<Known Data Types>>=
+uni_chrrng_dat_t,%
+@
+
+<<Common uni functions>>=
+int uni_cmprng_dat(const void *a, const void *b)
+{
+    const uni_chrrng_dat_t *_a = a, *_b = b;
+
+    if(_a->high < _b->low)
+        return -1;
+    else if(_b->high < _a->low)
+        return 1;
+    else
+        return 0;
+}
+
+uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
+                        uint32_t tab_len, uint32_t def)
+{
+#if 0
+  uni_chrrng_dat_t cr = {cp, cp}, *tab_el;
+  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat_t), uni_cmprng_dat);
+  return tab_el ? tab_el->dat : def;
+#else /* twice as fast! */
+  int l = 0, h = tab_len - 1;
+  while(l <= h) {
+    int j = (l + h) / 2;
+    if(cp < tab[j].low)
+      h = j - 1;
+    else if(cp > tab[j].high)
+      l = j + 1;
+    else
+      return tab[j].dat;
+  }
+  return def;
+#endif
+}
+@
+
+For the \emph{name} and \emph{alias} operations, a simple lookup table
+can be provided, indexed on the enumeration value (again, except for
+the name property).  The table fulfulls the \emph{list} requirement as
+well.
+
+For the \emph{value} operation, either a sorted table of names or some
+other structure can be provided.  The advantage of the sorted table of
+names is that it takes no effort to create, search, and provides the
+\emph{list} operation (specifially for searching) as well.  A
+statically generated hash function might be faster, though.  Since
+applications that need to look up a lot of \emph{value}s are probably
+rare, only the simple sorted table is provided, and the library user
+is expected to convert that to a hash table, prefix tree, or some
+other structure as needed.
+
+The first thing to read in is the list of aliases.  These are keyed on
+property short name.  Since there is already a list of property names,
+the array of aliases may as well correspond.
+
+<<UCD parser local definitions>>=
+uni_alias_t **val_aliases;
+int *num_val_aliases, *max_val_aliases;
+@
+
+<<Initialize UCD files>>=
+inisize(val_aliases, num_prop_aliases);
+clearbuf(val_aliases, num_prop_aliases);
+inisize(num_val_aliases, num_prop_aliases);
+clearbuf(num_val_aliases, num_prop_aliases);
+inisize(max_val_aliases, num_prop_aliases);
+clearbuf(max_val_aliases, num_prop_aliases);
+@
+
+Then, the alias file can be read and stored in the array.  While it
+would be more efficient to only look up the destination when things
+change, it's easier to just go ahead and put it in place.
+
+<<Initialize UCD files>>=
+open_f("PropertyValueAliases.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  split_line(lbuf);
+  if(num_fields < 3)
+    continue;
+  uni_alias_t me, *mep = &me;
+  me.short_name = fields[0];
+  uni_alias_t **ret = bsearch(&mep, prop_aliases_short, num_prop_aliases,
+                              sizeof(*prop_aliases_short), cmp_shortname);
+  if(!ret) {
+    perror("PropertyValueAliases.txt");
+    exit(1);
+  }
+  int idx = (int)(*ret - prop_aliases);
+  if(!max_val_aliases[idx])
+    inisize(val_aliases[idx], (max_val_aliases[idx] = 16));
+  if(max_val_aliases[idx] == num_val_aliases[idx])
+    resize(val_aliases[idx], (max_val_aliases[idx] *= 2));
+  val_aliases[idx][num_val_aliases[idx]].short_name = strdup(fields[1]);
+  val_aliases[idx][num_val_aliases[idx]].long_name = strdup(fields[2]);
+  /* there are no comments on alias lines, so field count is correct */
+  val_aliases[idx][num_val_aliases[idx]].alt_name =
+                 num_fields > 3 ? strdup(fields[3]) : NULL;
+  val_aliases[idx][num_val_aliases[idx]].alt_name2 =
+                 num_fields > 4 ? strdup(fields[4]) : NULL;
+  if(num_fields > 5) {
+    perror("PropertyValueAliases.txt");
+    exit(1);
+  }
+  num_val_aliases[idx]++;
+}
+fclose(f);
+@
+
+Since we're about to scan files with the enumerations in text form,
+the next logical step is to build a search mechanism.  In this case,
+just a simple sorted array, using the standard loose matching.  This
+is necessary because some fields do not match any of the literal
+values we have gathered so far.  This table will be dumped as well,
+for the \emph{value} function.
+
+<<Common uni definitions>>=
+typedef struct {
+  const char *name;
+  int val;
+} uni_valueof_t;
+@
+
+<<UCD parser local definitions>>=
+uni_valueof_t **enum_vals;
+uint32_t *enum_vals_len;
+
+<<UCD parser local functions>>=
+static int cmp_valueof(const void *a, const void *b)
+{
+  return strcmp(((uni_valueof_t *)a)->name, ((uni_valueof_t *)b)->name);
+}
+@
+
+<<Initialize UCD files>>=
+inisize(enum_vals, num_prop_aliases);
+clearbuf(enum_vals, num_prop_aliases);
+inisize(enum_vals_len, num_prop_aliases);
+clearbuf(enum_vals_len, num_prop_aliases);
+for(i = 0; i < num_prop_aliases; i++) {
+  if(!val_aliases[i])
+    continue;
+  /* ignore boolean properties */
+  if(num_val_aliases[i] == 2 && !strcmp(val_aliases[i][0].short_name, "N") &&
+     !strcmp(val_aliases[i][1].short_name, "Y"))
+    continue;
+  uni_valueof_t *valueof;
+  int num_valueof = 0;
+  inisize(valueof, num_val_aliases[i] * 4);
+  for(j = 0; j < num_val_aliases[i]; j++) {
+    const uni_alias_t *va = &val_aliases[i][j];
+    valueof[num_valueof].name = strdup(va->short_name);
+    valueof[num_valueof++].val = j;
+    valueof[num_valueof].name = strdup(va->long_name);
+    valueof[num_valueof++].val = j;
+    if(va->alt_name && !strchr(va->alt_name, '|')) {
+      valueof[num_valueof].name = strdup(va->alt_name);
+      valueof[num_valueof++].val = j;
+    }
+    if(va->alt_name2 && !strchr(va->alt_name2, '|')) {
+      valueof[num_valueof].name = strdup(va->alt_name2);
+      valueof[num_valueof++].val = j;
+    }
+  }
+  for(j = 0; j < num_valueof; j++) {
+    char *n = (char *)valueof[j].name, *d = n;
+    for(; *n; n++) {
+      if(isupper(*n))
+        *d++ = tolower(*n);
+      else if(*n != '_' && *n != '-' && !isspace(*n))
+        *d++ = *n;
+    }
+    *d = 0;
+  }
+  qsort(valueof, num_valueof, sizeof(*valueof), cmp_valueof);
+  /* remove duplicates now that they are always contiguous */
+  for(j = 1; j < num_valueof; j++)
+    if(!strcmp(valueof[j].name, valueof[j - 1].name)) {
+      free((char *)valueof[j].name);
+      if(valueof[j].val != valueof[j - 1].val) {
+        perror(valueof[j - 1].name);
+	exit(1);
+      }
+      memmove(valueof + j, valueof + j + 1, (num_valueof - (j + 1)) *
+                                               sizeof(*valueof));
+      --j;
+      --num_valueof;
+    }
+  enum_vals[i] = valueof;
+  enum_vals_len[i] = num_valueof;
+}
+@
+
+For each value alias, an enumeration needs to be printed to the header
+file.  Both the short and long name should be supported, but there is
+little value in supporting the secondary aliases.  This excludes
+binary values, which have pointless yes/no aliases, and, if possible,
+deprecated values.  Special care must be taken with the version
+aliases, as the numeric values have decimal points.  The CCC aliases
+are numeric as well, but in this case, the short name should be
+ignored and used as the value directly instead.
+
+In order to support the \emph{name} and \emph{value} functions, tables
+need to be dumped as well.  First, a table similar to the locally
+stored table is printed; this does the \emph{name} operation.  Next,
+value table built just previously is dumped for the \emph{value}
+operation.  Unlike the enumerations, no values may be skipped when
+generating the string tables.
+
+<<Dump character information as C code>>=
+for(i = 0; i < num_prop_aliases; i++) {
+  const char *pn = prop_aliases[i].short_name;
+  if(!enum_vals[i])
+    continue;
+  /* ignore boolean properties */
+  if(parsed_props[i].rng)
+    continue;
+  <<Generate C code for enumeration constants>>
+}
+@
+
+<<Generate C code for enumeration constants>>=
+/* generating nameof array on stdout (except extern decl on stderr) */
+fprintf(stderr, "extern const uni_alias_t uni_%s_nameof[];\n", pn);
+printf("const uni_alias_t uni_%s_nameof[] = {\n", pn);
+/* generating enum on stderr */
+fputs("typedef enum {\n", stderr);
+for(j = 0; j < num_val_aliases[i]; j++) {
+  const uni_alias_t *va = &val_aliases[i][j];
+  /* print nameof table entry */
+  printf("\t{ \"%s\"", va->short_name);
+  if(strcmp(va->long_name, va->short_name))
+    printf(", \"%s\"", va->long_name);
+  if(va->alt_name && !strchr(va->alt_name, '|') &&
+     strcmp(va->alt_name, va->long_name))
+    printf(", \"%s\"", va->alt_name);
+  if(va->alt_name2 && !strchr(va->alt_name2, '|') &&
+     strcmp(va->alt_name, va->alt_name2))
+    printf(", \"%s\"", va->alt_name2);
+  fputs(" }", stdout);
+  if(j < num_val_aliases[i] - 1)
+    putchar(',');
+  putchar('\n');
+  /* filter out bad enum values */
+  /* skip version short name */
+  if(strchr(va->short_name, '.')) {
+    fprintf(stderr, "\tU_%s_%s,\n", pn, va->long_name);
+    continue;
+  }
+  /* use numeric values directly instead of making into enum */
+  if(!isdigit(va->short_name[0]))
+    fprintf(stderr, "\tU_%s_%s,", pn, va->short_name);
+  if(strcmp(va->long_name, va->short_name)) {
+    fprintf(stderr, "%cU_%s_%s = ", isdigit(va->short_name[0]) ? '\t' : ' ',
+                    pn, va->long_name);
+    if(!isdigit(va->short_name[0]))
+      fprintf(stderr, "U_%s_%s,", pn, va->short_name);
+    else
+      fprintf(stderr, "%s,", va->short_name);
+  }
+  /* filter out alt names with dashes */
+  if(va->alt_name && !strchr(va->alt_name, '|') &&
+     !strchr(va->alt_name, '-') &&
+     strcmp(va->alt_name, va->long_name))
+    fprintf(stderr, " U_%s_%s = U_%s_%s,", pn, va->alt_name, pn, va->long_name);
+  if(va->alt_name2 && !strchr(va->alt_name2, '|') &&
+     !strchr(va->alt_name2, '-') &&
+     strcmp(va->alt_name, va->long_name) && strcmp(va->alt_name, va->alt_name2))
+    fprintf(stderr, " U_%s_%s = U_%s_%s,", pn, va->alt_name2, pn, va->long_name);
+  fputc('\n', stderr);
+}
+puts("};");
+fprintf(stderr, "\tU_NUM_%s\n} uni_%s_t;\n", pn, pn);
+/* now, print valueof table */
+fprintf(stderr, "extern const uni_valueof_t uni_%s_valueof[];\n", pn);
+printf("const uni_valueof_t uni_%s_valueof[] = {\n", pn);
+for(j = 0; j < enum_vals_len[i]; j++) {
+  const char *name = val_aliases[i][enum_vals[i][j].val].short_name;
+  if(isdigit(*name))
+    name = val_aliases[i][enum_vals[i][j].val].long_name;
+  printf("\t{ \"%s\", U_%s_%s }%s\n", enum_vals[i][j].name, pn, name,
+	 j < enum_vals_len[i] - 1 ? "," : "");
+}
+puts("};");
+fprintf(stderr, "#define uni_%s_valueof_len %d\n", pn, enum_vals_len[i]);
+@
+
+There is still one nagging issue:  the gc aliases include some that
+are actually combinations of the others.  Since each value can only
+hold one value, this is not going to work.  To support this, an extra
+table is generated which translates a value into a 64-bit mask that
+includes all base values.  For the base values themselves, only their
+own bit will be set.  The pseudo values are recognized by a comment in
+their last field, which is stored in one of the aliases.  This is the
+reason the vertical bar was filtered out above:  all of the aliases
+have vertical bars in their last field.
+
+<<Generate C code for enumeration constants>>=
+if(!strcmp(pn, "gc")) {
+  fputs("extern const uint64_t uni_gc_trans[];\n", stderr);
+  puts("const uint64_t uni_gc_trans[] = {");
+  for(j = 0; j < num_val_aliases[i]; j++) {
+    const char *desc;
+    printf("\t/* %2s */ ", val_aliases[i][j].short_name);
+    desc = val_aliases[i][j].alt_name;
+    if(desc && !strchr(desc, '|')) {
+      desc = val_aliases[i][j].alt_name2;
+      if(desc && !strchr(desc, '|'))
+        desc = NULL;
+    }
+    if(!desc)
+      printf("1ULL << U_gc_%s", val_aliases[i][j].short_name);
+    else {
+      const char *desce;
+      while(1) {
+        desce = strchr(desc, ' ');
+	if(!desce)
+	  desce = desc + strlen(desc);
+	printf("(1ULL << U_gc_%.*s)%s", (int)(desce - desc), desc, *desce ? " | " : "");
+	if(!*desce)
+	  break;
+	desc = desce + 3; /* past ' | ' */
+      }
+    }
+    if(j < num_val_aliases[i] - 1)
+      putchar(',');
+    putchar('\n');
+  }
   puts("};");
 }
 @
 
-<<Split data into optimal tables>>=
-int32_t i;
-uint32_t nlev, levent;
-uint32_t levsz;
-uint8_t *levdat;
+Now that the aliases have been taken care of, it's time to read in the
+enumeration properties themselves.  As with the boolean types, a range
+table will be built first, and then converted to a multi-level table
+when finished.
 
-/* first, optimize the raw data */
-for(nlev = 0, levent = levsz = dlen, levdat = dat; levdat; nlev++) {
-  uint32_t nptr;
-  levlen[nlev] = split_data(levdat, levsz, &lev[nlev], &levents[nlev], 1);
-  /* then, optimize the level's pointers */
-  levdat = (uint8_t *)lev[nlev];
-  levent = (levent + levlen[nlev] - 1) / levlen[nlev];
-  /* but first, compress to as few bytes as needed */
-  if(lev[nlev]) {
-    /* for simplicity, limit to 8/16/32, leaving out 24 */
-    nptr = levents[nlev];
-    if(nptr <= (1 << 8)) {
-      uint32_t *sp = lev[nlev];
-      uint8_t *dp = (uint8_t *)sp;
-
-      for(i = 0; i < levent; i++)
-        *dp++ = *sp++;
-      levsz = levent;
-    } else if(nptr <= (1 << 16)) {
-      uint32_t *sp = lev[nlev];
-      uint16_t *dp = (uint16_t *)sp;
-
-      for(i = 0; i < nptr; i++)
-        *dp++ = *sp++;
-      levsz = levent * 2;
-    } else
-      levsz = levent * 4;
-  } else {
-    /* if this is the last one, enure numbers are correct */
-    levents[nlev] = levsz;
-    levlen[nlev] = 1;
-  }
-}
+<<Property parsed contents>>=
+uni_chrrng_dat_t *rng_dat;
+uint8_t def;
 @
 
-<<Print optimal multi-level table>>=
-/* first, the low and high characters */
-/* this is endian-specific, so don't expect to save to file */
-puts("  /* low, high, # of entries in top-level table (32-bit) */");
-printf("  %d, %d, %d, %d,", ((uint8_t *)&low)[0],
-       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
-printf(" %d, %d, %d, %d,", ((uint8_t *)&high)[0],
-       ((uint8_t *)&high)[1], ((uint8_t *)&high)[2], ((uint8_t *)&high)[3]);
-/* next, the number of bytes in the first level, so it can be skipped */
-low = levents[nlev - 1];
-printf(" %d, %d, %d, %d,\n", ((uint8_t *)&low)[0],
-       ((uint8_t *)&low)[1], ((uint8_t *)&low)[2], ((uint8_t *)&low)[3]);
-/* now, print each table, in reverse order (i.e., lookup order) */
-for(i = nlev - 1; i >= 0; i--) {
-  printf("  /** level %d **/\n", nlev - 1 - i);
-  <<Print optimal table level [[i]]>>
-}
-@
-
-<<Print optimal table level [[i]]>>=
-/* the first byte is the number of bits to mask off the bottom */
-/* assuming byte addressing */
-/* at lowest level, this is always 0 */
-uint32_t mbits = 0;
-uint32_t j;
-for(j = 0; j < i; j++)
-  mbits += lg2(levlen[j]);
-puts("  /* header: shift bits [, pwidth, twidth, tlen] */");
-printf("  %d,", mbits);
-if(i) {
-  /* for pointer levels, next is the pointer width. */
-  uint32_t nptr = levents[i - 1];
-  int nbytes = nptr > (1 << 16) ? 4 : nptr > (1 << 8) ? 2 : 1;
-  printf("  %d,", nbytes);
-  /* and the width of the target entries */
-  printf(" %d,", lg2(levlen[i - 1]));
-  /* and the first pointer, which is a pointer past the end of the next level */
-  /* or 0 if the next level has as many entries as the pointer width */
-  switch(nbytes) {
-    case 1:
-      printf(" %d,", nptr & 0xff);
-      break;
-    case 2: {
-      uint16_t p = nptr;
-      printf(" %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1]);
-      break;
-    }
-    case 4: {
-      uint32_t p = nptr;
-      printf(" %d, %d, %d, %d,", *((uint8_t *)&p), ((uint8_t *)&p)[1],
-             ((uint8_t *)&p)[2], ((uint8_t *)&p)[3]);
-      break;
-    }
-      
-  }
-}
-putchar('\n');
-/* then, the raw data */
-puts("  /* raw data */");
-putchar(' ');
-for(j = 0; j < levents[i] * levlen[i]; j++) {
-  if(j) {
-    putchar(',');
-    if(j > 1 && !((j - 1) % 16)) {
-      putchar('\n');
-      putchar(' ');
-    }
-  }
-  if(i)
-    printf(" %d", (int)((uint8_t *)lev[i - 1])[j]);
-  else
-    printf(" %d", (int)dat[j]);
-}
-if(i)
-  putchar(',');
-putchar('\n');
-@
-
-<<[[split_data]] prereq>>=
-static uint32_t bsz(uint32_t l)
+<<UCD parser local functions>>=
+static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
 {
-    l |= l >> 1;
-    l |= l >> 2;
-    l |= l >> 4;
-    l |= l >> 8;
-    l |= l >> 16;
-    return l + 1;
-}
-
-static uint32_t lg2(uint32_t l)
-{
-    l = bsz(l - 1) - 1;
-    l = ((l & 0xaaaaaaaa) >> 1) + (l & 0x55555555);
-    l = ((l & 0xcccccccc) >> 2) + (l & 0x33333333);
-    l = ((l & 0xf0f0f0f0) >> 4) + (l & 0x0f0f0f0f);
-    l = ((l & 0xff00ff00) >> 8) + (l & 0x00ff00ff);
-    l = ((l & 0xffff0000) >> 16) + (l & 0x0000ffff);
-    return l;
+  if(p->def == val)
+    return;
+  if(!p->max_rng_len)
+    inisize(p->rng_dat, (p->max_rng_len = 8));
+  if(p->rng_len && p->rng_dat[p->rng_len - 1].high == low - 1 &&
+     p->rng_dat[p->rng_len - 1].dat == val)
+    p->rng_dat[p->rng_len - 1].high = high;
+  else {
+    if(p->rng_len == p->max_rng_len)
+      resize(p->rng_dat, (p->max_rng_len *= 2));
+    p->rng_dat[p->rng_len].low = low;
+    p->rng_dat[p->rng_len].high = high;
+    p->rng_dat[p->rng_len].dat = val;
+    ++p->rng_len;
+  }
 }
 @
 
-Finally, we need to provide a common function to look up data in these
-tables:  given an integer key, return the 8-bit value for that key.
+<<UCD parser local functions>>=
+static uint8_t enum_val(int pno, const char *v)
+{
+  char *s = strdup(v), *t, *d;
+  uni_valueof_t me, *vp;
+  me.name = s;
+
+  d = t = s;
+  for(; *t; t++) {
+    if(isupper(*t))
+      *d++ = tolower(*t);
+    else if(*t != '_' && *t != '-' && !isspace(*t))
+      *d++ = *t;
+  }
+  *d = 0;
+  vp = bsearch(&me, enum_vals[pno], enum_vals_len[pno], sizeof(me),
+               cmp_valueof);
+  /* permit excess prefix of "is" */
+  if(!vp && s[0] == 'i' && s[1] == 's' && s[2]) {
+    me.name = s + 2;
+    vp = bsearch(&me, enum_vals[pno], enum_vals_len[pno], sizeof(me),
+                 cmp_valueof);
+  }
+  free(s);
+  if(!vp) {
+    perror(v);
+    exit(1);
+  }
+  return vp->val;
+}
+@
+
+<<UCD parser local definitions>>=
+#define decl_enum(n, d) \
+  int prop_##n = -1; \
+  const char *def_##n = d
+#define add_enum(n, v) do { \
+  if(prop_##n < 0) { \
+    prop_##n = add_prop(#n); \
+    parsed_props[prop_##n].def = def_##n ? enum_val(prop_##n, def_##n) : 0; \
+  } \
+  if(*v) { \
+    add_enum_rng(&parsed_props[prop_##n], low, high, enum_val(prop_##n, v)); \
+  } \
+} while(0)
+#define add_num(n, val) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  if(isdigit(*val)) \
+    add_enum_rng(&parsed_props[prop_##n], low, high, strtol(val, NULL, 0)); \
+  else \
+    add_enum(n, val); \
+} while(0)
+@
+
+First, [[UnicodeData.txt]] has a few fields.  Field 3 is gc.  Field 4
+is ccc.  Field 5 provides bc. Field 6 provides dt, albeit indirectly.
+Fields 7 through 9 provide nt, even more indirectly.
+
+<<Initialize UCD files>>=
+decl_enum(gc, "Cn");
+decl_enum(ccc, 0);
+decl_enum(bc, "L"); /* default val depends on block */
+                    /* probably ought to use extracted/DerivedBidiClass.txt */
+decl_enum(dt, "None");
+decl_enum(nt, "None");
+@
+
+<<Process a line of [[UnicodeData.txt]]>>=
+add_enum(gc, fields[2]);
+add_num(ccc, fields[3]);
+add_enum(bc, fields[4]);
+if(fields[5][0] == '<') {
+  char *eval = fields[5] + 1;
+  while(*eval && *eval != '>')
+    eval++;
+  if(!*eval) {
+    perror("dt");
+    exit(1);
+  }
+  *eval = 0;
+  add_enum(dt, fields[5] + 1);
+  *eval = '>';
+} else if(fields[5][0])
+  add_enum(dt, "can");
+if(fields[6][0])
+  add_enum(nt, "decimal");
+else if(fields[7][0])
+  add_enum(nt, "digit");
+else if(fields[8][0])
+  add_enum(nt, "numeric");
+@
+
+The other file that has mixed field types is
+[[DerivedNormalizationProps.txt]].  The Boolean parser simply looked
+at the number of fields, and added if the number of fields was too low
+to be boolean.  This parser can't really do the same, without first
+loading the expected default values.  There are only four properties,
+so it's safer to just to them by hand.  In fact, two of them can only
+have two values: Yes and No.  This makes them boolean in my view, so
+that they will become.  There is one other caveat:  the default value
+for those two is Yes, and the listed value is always No, so they need
+to be inverted when finished.
+
+<<Initialize UCD files>>=
+decl_enum(NFC_QC, "Y");
+decl_bool(NFD_QC);
+decl_enum(NFKC_QC, "Y");
+decl_bool(NFKD_QC);
+@
+
+<<Process a line of [[DerivedNormalizationProps.txt]]>>=
+if(num_fields == 4) {
+  if(!strcmp(fields[1], "NFC_QC"))
+    add_enum(NFC_QC, fields[2]);
+  else if(!strcmp(fields[1], "NFD_QC"))
+    add_bool(NFD_QC);
+  else if(!strcmp(fields[1], "NFKC_QC"))
+    add_enum(NFKC_QC, fields[2]);
+  else if(!strcmp(fields[1], "NFKD_QC"))
+    add_bool(NFKD_QC);
+}
+@
+
+<<Parse UCD files>>=
+uni_chrrng_t *new;
+uint32_t new_len;
+uni_chrrng_invert(parsed_props[prop_NFD_QC].rng,
+                  parsed_props[prop_NFD_QC].rng_len, &new, &new_len);
+free(parsed_props[prop_NFD_QC].rng);
+parsed_props[prop_NFD_QC].rng = new;
+parsed_props[prop_NFD_QC].rng_len = new_len;
+uni_chrrng_invert(parsed_props[prop_NFKD_QC].rng,
+                  parsed_props[prop_NFKD_QC].rng_len, &new, &new_len);
+free(parsed_props[prop_NFKD_QC].rng);
+parsed_props[prop_NFKD_QC].rng = new;
+parsed_props[prop_NFKD_QC].rng_len = new_len;
+@
+
+Then there are a number of files that describe just one enumerated
+property.  Many of these follow here.
+
+<<Initialize UCD files>>=
+decl_enum(sc, "Zzzz");
+decl_enum(blk, "No_Block");
+decl_enum(hst, "NA");
+decl_enum(lb, "XX");
+decl_enum(GCB, "XX");
+decl_enum(SB, "XX");
+decl_enum(WB, "XX");
+decl_enum(ea, "N");
+@
+
+<<Parse UCD files>>=
+open_f("Scripts.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(sc, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("Blocks.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(blk, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("HangulSyllableType.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(hst, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("LineBreak.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(lb, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("auxiliary/GraphemeBreakProperty.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+   add_enum(GCB, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("auxiliary/SentenceBreakProperty.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(SB, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("auxiliary/WordBreakProperty.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(WB, fields[1]);
+}
+fclose(f);
+@
+
+<<Parse UCD files>>=
+open_f("EastAsianWidth.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(ea, fields[1]);
+}
+fclose(f);
+@
+
+And there is one file that has two properties per line.
+
+<<Initialize UCD files>>=
+decl_enum(jt, "U"); /* note: Mn, Me, Cf are T */
+decl_enum(jg, "No_Joining_Group");
+@
+
+<<Parse UCD files>>=
+open_f("ArabicShaping.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(jt, fields[2]);
+  add_enum(jg, fields[3]);
+}
+fclose(f);
+@
+
+Once finished, the tables can be dumped.  Just as with boolean
+properties, only range tables have been built, so it's time to
+generate the multi-level table, assuming that the range data is correct.
+
+<<Common uni definitions>>=
+uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
+                           uint32_t *ml_len, uint8_t def);
+@
 
 <<Common uni functions>>=
-uint8_t mtab_lookup(const uint8_t *dat, uint32_t val, uint8_t def)
+uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
+                           uint32_t *ml_len, uint8_t def)
 {
-  <<Look up an entry in optimal table>>
+  uint32_t low, high, len, i;
+  uint32_t *ml;
+  uint8_t *bits;
+
+  /* degenerate case:  always out-of-range */
+  if(!tab_len) {
+    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    return ml;
+  }
+  low = tab[0].low;
+  high = tab[tab_len - 1].high;
+  len = high - low + 1;
+  inisize(bits, len);
+  /* FIXME: only set def on unspecified ranges; may be faster */
+  memset(bits, def, len);
+  for(i = 0; i < tab_len; i++)
+    memset(bits + tab[i].low - low, tab[i].dat, tab[i].high - tab[i].low + 1);
+  bits_to_multi(bits, len, low, high, 0, 0, &ml, ml_len);
+  free(bits);
+  return ml;
 }
 @
 
-First, we need to filter out the main range.  Note that converting a
-pointer to a table of bytes to a 32-bit integer pointer may fail on
-some architectures, although really that is a problem with the C
-compiler rather than the architecture.  In a future revision, I should
-probably make the first entries real structure elements rather than
-bytes to avoid this.  Since the skip value for other levels is read
-after that table, the first skip value can be read while we're at it.
-
-<<Look up an entry in optimal table>>=
-uint32_t low = *(uint32_t *)dat, high;
-if(val < low)
-  return def;
-dat += 4;
-high = *(uint32_t *)dat;
-if(val > high)
-  return def;
-dat += 4;
-val -= low;
-@
-
-Each level is a collection of tables.  For that level, we need to know
-the offset into that collection of the table we're looking at, as well
-as the total length of the collection, in order to skip over it after
-the lookup.  For the first table, the length is the next parameter,
-and there is just one table, at offset zero.
-
-<<Look up an entry in optimal table>>=
-high = *(uint32_t *)dat; /* skip value */
-dat += 4;
-low = 0; /* offset of table to look at */
-@
-
-Next in the data come the tables.  The first byte is zero for the
-lowest level, and the number of bits to shift the value right otherwise.
-
-<<Look up an entry in optimal table>>=
-while(*dat) {
-  <<Search next level of optimal table>>
+<<UCD parser local functions>>=
+static void fixup_rng_dat(prop_t *p)
+{
+  uint32_t i;
+  qsort(p->rng_dat, p->rng_len, sizeof(uni_chrrng_dat_t), uni_cmprng_dat);
+  for(i = 0; i < p->rng_len - 1; i++)
+    if(p->rng_dat[i + 1].low == p->rng_dat[i].high - 1 &&
+       p->rng_dat[i + 1].dat == p->rng_dat[i].dat) {
+      p->rng_dat[i].high = p->rng_dat[i + 1].high;
+      if(i + 2 < p->rng_len) {
+        memmove(p->rng_dat + i + 1, p->rng_dat + i + 2,
+	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_dat_t));
+        p->rng_len--;
+      }
+    }
 }
 @
 
-<<Search next level of optimal table>>=
-uint32_t idx = val >> *dat;
-val -= idx << *dat;
-@
-
-The next two bytes are the number of bytes in a pointer and the log base
-2 of the size of each table at the next level.  Once these are
-skipped, the table lookup may be performed.
-
-<<Search next level of optimal table>>=
-uint8_t psz = dat[1];
-uint32_t nextlen = 1 << dat[2];
-dat += 3;
-@
-
-Actualy, the first pointer is always the size of the next level, so
-that needs to be retrieved first.  Then, the pointer is advanced past
-that and added to the offset to the table we're looking at, and the
-pointer is extracted.  Again, possibly unaligned accesses are being
-performed here.  This can't be solved by simply making the entries
-real structure members.  The only solution is to extract byte-by-byte
-or to always align them manually within the byte array.
-
-<<Search next level of optimal table>>=
-uint32_t nhigh = 0;
-switch(psz) {
-  case 1:
-    nhigh = *dat;
-    if(!nhigh)
-      nhigh = 0x100;
-    dat += low + 1;
-    idx = dat[idx];
-    break;
-  case 2:
-    nhigh = *(uint16_t *)dat;
-    if(!nhigh)
-      nhigh = 0x10000;
-    dat += low + 2;
-    idx = ((uint16_t *)dat)[idx];
-    break;
-  case 4:
-    nhigh = *(uint32_t *)dat;
-    dat += low + 4;
-    idx = ((uint32_t *)dat)[idx];
-    break;
+<<Post-process property data>>=
+for(i = 0; i < nparsed; i++)
+  if(parsed_props[i].rng_dat) {
+    fixup_rng_dat(&parsed_props[i]);
+    parsed_props[i].mt = rng_dat_to_multi(parsed_props[i].rng_dat, parsed_props[i].rng_len,
+                                          &parsed_props[i].mt_len, parsed_props[i].def);
 }
 @
 
-Next, we skip over the rest of the level and prepare for the next.
+In addition to the property tables, a simple query function is
+printed.  This calls a generic search function using the multi-level
+table.
 
-<<Search next level of optimal table>>=
-dat += high - low;
-low = idx * nextlen;
-high = nhigh * nextlen;
+<<Dump character information as C code>>=
+for(i = 0; i < nparsed; i++) {
+  if(parsed_props[i].rng_dat) {
+    const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
+                                              parsed_props[i].name;
+    printf("const uni_chrrng_dat_t uni_%s_rng[] = {\n", name);
+    for(j = 0; j < parsed_props[i].rng_len; j++)
+      printf("\t{ %d, %d, %d }%s\n", parsed_props[i].rng_dat[j].low,
+                                     parsed_props[i].rng_dat[j].high,
+				     (int)parsed_props[i].rng_dat[j].dat,
+				     j < parsed_props[i].rng_len - 1 ? "," : "");
+    puts("};");
+    fprintf(stderr, "#define uni_%s_rng_len %d\n", name,
+                                                   parsed_props[i].rng_len);
+    printf("const uint32_t uni_%s_mtab[] = {\n\t", name);
+    for(j = 0; j < parsed_props[i].mt_len; j++)
+      printf("0x%X%s", parsed_props[i].mt[j], j == parsed_props[i].mt_len - 1 ?
+                                                     "\n" : !((j + 1) % 8) ?
+						           ",\n\t" : ", ");
+    puts("};");
+    fprintf(stderr, "extern const uni_chrrng_dat_t uni_%s_rng[];\n"
+		    "extern const uint32_t uni_%s_mtab[];\n"
+		    "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
+		    name, name, name, name, parsed_props[i].def);
+  }
+}
 @
 
-Once we reach the bottom, the value an be extracted and returned.
-
-<<Look up an entry in optimal table>>=
-dat += low + 1; /* skip to correct table */
-return dat[val];
+<<Common uni definitions>>=
+int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def);
 @
 
-Consider the character type table: 2710 table entries in the range
-table, for a total of 32520 bytes and 12 lookups maximum (11 average).
-In comparison, the table produced by the above code, with pointers
-reduced to the minimum required (e.g. 1 byte to address 256 or fewer
-uniques), takes up 36747 bytes, but only requires 4 lookups. This is
-actually a relative win for the table approach.  However, consider the
-deprecated flag: 9 range entries for a total of 72 bytes and 4 lookups
-maximum (3 average), versus 2615 bytes and 4 lookups every time.  In
-fact, storage requirements are always greater for the table, unless
-there are a large number of relatively short ranges.  While the number
-of lookups is lower (unless there are only a few large ranges), the
-chance for cache thrashing is higher.  It's hard to say which is best.
+<<Common uni functions>>=
+int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
+{
+  const uint8_t *mr;
+  uint8_t mv = multi_tab_lookup(tab, cp, &mr, 0);
+  if(mr)
+    mv = *mr;
+  else if(cp < (tab[0] << 1) || cp > tab[1])
+    mv = def;
+  return mv;
+}
+@
+
+\subsection{Numeric Properties}
+
+Numeric properties are a subset of enumerated properties.  The
+property's primary values are integers or two dot-separated integers
+(i.e., floating point values).  They may have non-numeric values and
+aliases as well.  The main difference is that the sloppy matching
+should also support matching the plain integer against any like-valued
+integer (e.g., 01 matches 1) and the dotted value against any
+like-valued floating point number (e.g., 01.10 matches 1.1).  In
+addition, the age property is meant to match equal to or less than the
+search value.  For example, 3.0 matches 1.1 as well.
+
+\subsection{String Properties}
+
+String properties are those which have a value.  Technically, boolean
+properties have the string values representing true and false, but
+they are never considered this way.  Useful operations include:
+
+\begin{itemize}
+\item Find out the string-valued value \emph{of} the property for a
+character.  For variable-length strings, this should support two-part
+retrieval: first obtain the length, and then obtain the string.  If
+there is a maximum length, it should be listed so that the sizing step
+can be avoided.
+\end{itemize}
+
+The storage methods used for boolean properties can be used for
+strings as well, with some adjustments.  One way to store the string
+would be as a pointer to a zero-terminated string.  However, this
+requires computing string length at every access.  A better way would
+be to store a pointer and a length.  For 64-bit systems, this would
+require at least 8 bytes for the pointer, and probably another 8 bytes
+to align the structure, so 4 bytes for the code point and 4 bytes for
+the length.  However, a more efficient storage method would be to use
+a 32-bit pointer into a single string containing all possible values,
+reducing storage by 4 bytes.  Additional savings can be had if the
+string size can be kept below 64K, in which case 16-bit integers can
+represent the offset and length.  The length could be stored in the
+string as well, eliminating the need for a separate length, and
+generally reducing the space required for that to a byte.  Since fewer
+than 24 bits are used for the code point, the length could be stored
+in the code point's lower byte as well; masking would be required to
+test equality, though.
+
+Since lookup (\emph{of}) is the only supported operation, the
+multi-level table is probably the appropriate data structure for all
+string-valued properties.  The routine to split tables can be given a
+minimum width for the lowest level, which can be set to the width of
+the string descriptor (32 bits for a 16-bit offset and length, for
+example).
+
+From UnicodeData.txt, we have case mappings and decomposition
+mappings.  For normalization, the composition mapping needs to be
+inverted as well, and the composition tables need to be pre-executed
+as much as possible.
+
+<<Common uni definitions>>=
+typedef struct {
+  int32_t cp; /* can use sign bit for extra storage */
+              /* could also add a byte by making this :24 or smaller */
+  uint32_t data; /* have whole word available here */
+} uni_cp_dat_t;
+@
+
+<<Known Data Types>>=
+uni_cp_dat_t,%
+@
+
+<<Common uni functions>>=
+const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
+                                uint32_t tab_len)
+{
+#if 0
+  uni_cp_dat_t d = {cp};
+  return (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
+                                 uni_cmp_cp);
+#else /* twice as fast! */
+  int l = 0, h = tab_len - 1;
+  while(l <= h) {
+    int j = (l + h) / 2;
+    if(cp < tab[j].cp)
+      h = j - 1;
+    else if(cp > tab[j].cp)
+      l = j + 1;
+    else
+      return &tab[j];
+  }
+  return 0;
+#endif
+}
+@
 
 Here is a test program which compares the performance of several tables.
 
@@ -1074,16 +2798,21 @@ static unsigned long tend(void)
 }
 
 static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
-                     const uint8_t *mtab, uint8_t def)
+                     const uint32_t *mtab, uint8_t def)
 {
     uint32_t i;
 
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
       uint8_t b = find_cp_chrrng(i, rng, nent, def);
-      if(b != mtab_lookup(mtab, i, def)) {
-        fprintf(stderr, "mismatch %s@%d\n", name, i);
-	exit(1);
+      const uint8_t *mr;
+      uint8_t mv = multi_tab_lookup(mtab, i, &mr, def);
+      if(mr)
+        mv = *mr;
+      if(b != mv) {
+        fprintf(stderr, "mismatch %s@%d %d %d %p\n", name, i, (int)b, (int)mv, mr);
+	/* exit(1); */
+	return;
       }
     }
     /* check performance */
@@ -1096,24 +2825,29 @@ static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nen
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        mtab_lookup(mtab, i, def);
+      for(i = 0; i < 0x110000; i++) {
+        const uint8_t *mr;
+        uint8_t mv = multi_tab_lookup(mtab, i, &mr, def);
+        if(mr)
+          mv = *mr;
+      }
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
 }
 
 static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
-                      const uint8_t *mtab)
+                      const uint32_t *mtab)
 {
     uint32_t i;
     
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
       int res = is_cp_chrrng(i, rng, nent);
-      uint8_t b = mtab_lookup(mtab, i / 8, 0);
-      if(!(b & (1 << (i & 7))) != !res) {
-        fprintf(stderr, "mismatch %s@%d\n", name, i);
-	exit(1);
+      uint8_t mv = is_uni_x(i, mtab);
+      if(!mv != !res) {
+        fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, res, mv);
+	/*  exit(1); */
+	return;
       }
     }
     /* check performance */
@@ -1127,22 +2861,93 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++) {
-        uint8_t b = mtab_lookup(mtab, i / 8, 0);
-        b &= i & 7;
-        res = b ? 1 : 0;
-      }
+      for(i = 0; i < 0x110000; i++)
+        res = is_uni_x(i, mtab);
     tt = tend();
     printf("%s r%ld t%ld\n", name, tr, tt);
 }
 
 int main(void)
 {
-#define dat(x, d) doit_dat(#x, unirng_##x, unirng_##x##_len, unitab_##x, d)
-#define bool(x) doit_bool(#x, unirng_##x, unirng_##x##_len, unitab_##x)
+#define dat(x, d) doit_dat(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab, d)
+#define bool(x) doit_bool(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
   <<Convert ranges to tables>>
   return 0;
 }
+@
+
+<<Convert ranges to tables>>=
+#if 0
+bool(AHex);
+bool(Alpha);
+bool(Bidi_C);
+bool(Bidi_M);
+bool(CI);
+bool(Cased);
+bool(CWCF);
+bool(CWCM);
+bool(CWL);
+bool(CWKCF);
+bool(CWT);
+bool(CWU);
+bool(CE);
+bool(Dash);
+bool(DI);
+bool(Dep);
+bool(Dia);
+bool(Ext);
+bool(Comp_Ex);
+bool(Gr_Base);
+bool(Gr_Ext);
+bool(Hex);
+bool(IDSB);
+bool(IDST);
+bool(IDC);
+bool(IDS);
+bool(Ideo);
+bool(Join_C);
+bool(LOE);
+bool(Lower);
+bool(Math);
+bool(NChar);
+bool(Pat_Syn);
+bool(Pat_WS);
+bool(QMark);
+bool(Radical);
+bool(STerm);
+bool(SD);
+bool(Term);
+bool(UIdeo);
+bool(Upper);
+bool(VS);
+bool(WSpace);
+bool(XIDC);
+bool(XIDS);
+bool(ASSIGNED);
+#endif
+#if 0
+dat(bc, U_bc_L);
+dat(ccc, 0);
+dat(dt, U_dt_None);
+dat(gc, U_gc_Cn);
+dat(nt, U_nt_None);
+dat(NFC_QC, U_NFC_QC_Y);
+dat(NFKC_QC, U_NFKC_QC_Y);
+#endif
+bool(NFD_QC);
+bool(NFKD_QC);
+#if 0
+dat(sc, U_sc_Zzzz);
+dat(blk, U_blk_No_Block);
+dat(hst, U_hst_NA);
+dat(lb, U_lb_XX);
+dat(GCB, U_GCB_XX);
+dat(SB, U_SB_XX);
+dat(WB, U_WB_XX);
+dat(ea, U_ea_N);
+dat(jg, U_jg_No_Joining_Group);
+dat(jt, U_jt_U);
+#endif
 @
 
 Another possibility would be to use more complex data structures.  I
@@ -1156,7 +2961,9 @@ have good theoretical performance, and in fact the multi-level table
 is just a prefix tree of sorts.  It and many other faster tree
 approaches achieve their performance by assuming a constant time
 parent-to-child traversal with a large set of children, which once
-again equates to large storage penalties.
+again equates to large storage penalties.  I have reduced the penalty
+somewhat in my own implementation by using smaller pointers, at the
+expense of slowing the lookup down a bit.
 
 \section{Unicode Normalization}
 
@@ -1189,24 +2996,26 @@ uni_norm.o
 <<Unicode normalization support functions>>
 @
 
-The UCD (Unicode Character
-Database)\footnote{\url{http://www.unicode.org/Public/6.2.0/ucd}}
-contains files which can be processed to obtain the tables needed for
-normalization.  In particular, UnicodeData.txt, field 6 contains the
-decomposition information, and field 4 contains the canonical ordering
-information.  Case folding information is scattered, but combined into
-the DerivedNormalizationProps.txt file.  The latter file also contains
-information regarding valid compositions.
+The UCD contains files which can be processed to obtain the tables
+needed for normalization.  In particular, UnicodeData.txt, field 6
+contains the decomposition information, and field 4 contains the
+canonical ordering information.  Case folding information is
+scattered, but combined into the DerivedNormalizationProps.txt file.
+The latter file also contains information regarding valid
+compositions.
 
+\lstset{language=make}
 <<makefile.vars>>=
+UNIDATA = $(UCD_LOC)/UnicodeData.txt
 UNINORM = $(UCD_LOC)/DerivedNormalizationProps.txt
 @
 
-Rather than parse these files at run time, they are read in by a
-helper program, and the results are spit out as C code.  The canonical
-ordering information is a table of all reorderable code points, along
-with their canonical combining class (the number indicating its sort
-order), sorted by code point for binary searching ([[ccctab]]).
+The canonical ordering information is a table of all reorderable code
+points, along with their canonical combining class (the number
+indicating its sort order) ([[unirng_ccc]]).  My original implementation
+used a [[uni_cp_dat_t]]-like structure, but upon further examination,
+it appears that there is enough redundancy to justify a range table or
+multi-level table.
 
 The decomposition information is a table of decomposable source code
 points and their destination strings, sorted by source code point for
@@ -1229,9 +3038,10 @@ compatibility decomposition is a superset of canonical decomposition.
 A negative length indicates compatibility decomposition.  However, the
 canonical composition table only operates on pairs, and only one flag
 can be contained in a sign bit anyway, so the canonical composition
-table ([[cancomp]]) is separate.  Case folding is too different  as
+table ([[cancomp]]) is separate.  Case folding is too different as
 well, so it is also separate ([[nfkc_cf]]).
 
+\lstset{language=C}
 <<Unicode normalization support exports>>=
 /* Raw info */
 
@@ -1246,6 +3056,10 @@ typedef struct {
 } uni_decent_t;
 /* The decomposition strings */
 extern const int deccp[];
+@
+
+<<Known Data Types>>=
+uni_decent_t,%
 @
 
 As a convention, the generated file is the same as the C file which
@@ -1325,8 +3139,7 @@ int find_ccc(int cp);
 <<Unicode normalization support functions>>=
 int find_ccc(int cp)
 {
-  const uni_cp_dat_t *ret = find_cp_dat(cp, ccctab, sizeof(ccctab)/sizeof(*ccctab));
-  return ret ? ret->data : 0;
+  return find_cp_chrrng(cp, unirng_ccc, sizeof(unirng_ccc)/sizeof(*unirng_ccc), 0);
 }
 @
 
@@ -1364,6 +3177,7 @@ int find_cancomp(int cp, int cp2)
 {
     int de[2] = {cp, cp2};
     uni_decent_t *res;
+    /* FIXME: change to manual bsearch */
     res = bsearch(&de, cancomp, sizeof(cancomp)/sizeof(*cancomp),
                   sizeof(*cancomp), cmp_comp);
     if(res)
@@ -1389,6 +3203,7 @@ static int cmp_comp1(const void *a, const void *b)
 int is_cancomp1(int cp)
 {
     uni_decent_t de = {cp};
+    /* FIXME: change to manual bsearch */
     return bsearch(&de, cancomp, sizeof(cancomp)/sizeof(*cancomp),
                    sizeof(*cancomp), cmp_comp1) ? 1 : 0;
 }
@@ -1592,7 +3407,7 @@ mkuninorm \
 
 <<makefile.rules>>=
 uninorm.gen: mkuninorm $(UNIDATA) $(UNINORM)
-	$< $(UNIDATA) $(UNINORM) >$@
+	./$< $(UNIDATA) $(UNINORM) >$@
 
 mkuninorm: mkuninorm.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -1638,6 +3453,10 @@ typedef struct {
 } uni_decent_t;
 uni_decent_t *dec;
 int ndec = 0, maxdec;
+@
+
+<<Known Data Types>>=
+uni_decent_t,%
 @
 
 <<Make [[uninorm.gen]]>>=
@@ -1729,15 +3548,12 @@ for(L = 0; L < 19; L++)
     }
 @
 
-UnicodeData.txt is in code point order, so spitting out the ccc as
-soon as it's found generates the table in the right order.  All other
-information is stored, so there is no need to avoid intermingling data.
-
-<<Stuff to do before reading [[unif]]>>=
-/* first spit out the ccc table, so no ccc info needs to be kept */
-puts("static const uni_cp_dat_t ccctab[] = {");
-const char *nxt = ""; /* , for prev. line */
-@
+All relevant information is stored, so there is no need to avoid
+intermingling data.  First, the decomposition mapping field is
+extracted and stored. Compatibility decompositions are denoted by a
+reason in angle brackets; all others are canonical decompositions.  In
+order to retain numerical order, the Hangul syllables are added at the
+appropriate point.
 
 <<Process a line of [[unif]]>>=
 if(isspace(*lbuf) || *lbuf == '#') /* technically impossible */
@@ -1755,33 +3571,12 @@ if(!s)
 s = strchr(s + 1, ';');
 if(!s)
   exit(1);
-/* field 4: ccc */
-char *ccc = s + 1;
-s = strchr(ccc, ';');
+/* field 4 */
+s = strchr(s + 1, ';');
 if(!s)
   exit(1);
-*s++ = 0;
-/* ccc table entry */
-if(strcmp(ccc, "0")) {
-  printf("%s\t{0x%s, %s}", nxt, lbuf, ccc);
-  nxt = ",\n";
-}
 /* field 5 */
-@
-
-<<Make [[uninorm.gen]]>>=
-/* end of ccc tab */
-puts("\n};");
-@
-
-Next, the decomposition mapping field is extracted and stored.
-Compatibility decompositions are denoted by a reason in angle
-brackets; all others are canonical decompositions.  In order to retain
-numerical order, the Hangul syllables are added at the appropriate
-point.
-
-<<Process a line of [[unif]]>>=
-s = strchr(s, ';');
+s = strchr(s + 1, ';');
 if(!s)
    exit(1);
 /* field 6: decomp */
@@ -1941,6 +3736,7 @@ if(ntype < 2) {
   for(j = 0; j < declen; j++) {
     int cp = decbuf[j];
     uni_decent_t de = {cp}, *mdec;
+    /* FIXME: change to manual bsearch */
     if((mdec = bsearch(&de, dec, ondec, sizeof(*dec), cmpdeccp)) &&
        mdec->type < 2) {
       ++didex;
@@ -1973,6 +3769,7 @@ int j;
 for(j = 0; j < declen; j++) {
   int cp = decbuf[j];
   uni_decent_t de = {cp}, *mdec;
+    /* FIXME: change to manual bsearch */
   if((mdec = bsearch(&de, dec, ondec, sizeof(*dec), cmpdeccp))) {
     ++didex;
     if(didex_canon) {
@@ -2213,6 +4010,10 @@ composition table should be next.  This consists of all type 0
 entries.  In order to assist debugging, the pair is displayed in a
 comment after each entry.
 
+<<Stuff to do before reading [[unif]]>>=
+const char *nxt = "";
+@
+
 <<Make [[uninorm.gen]]>>=
 /* Print canonical composition table ordered by decomp */
 puts("static const uni_decent_t cancomp[] = {");
@@ -2329,8 +4130,9 @@ to determine if the flag is set.
     int is_uni_##x(int cp) \
     { \
         uni_chrrng_t cr = {cp, cp}; \
+    /* FIXME: change to manual bsearch */ \
         return bsearch(&cr, unirng_##x, sizeof(unirng_##x)/sizeof(uni_chrrng_t), \
-                       sizeof(uni_chrrng_t), cmprng) ? 1 : 0; \
+                       sizeof(uni_chrrng_t), uni_cmprng) ? 1 : 0; \
     }
 @
 
@@ -2343,8 +4145,9 @@ each range.  The value can be a plain integer or an enumeration.
      uni_##x##_of(int cp) \
     { \
         uni_chrrng_dat_t cr = {cp, cp}, *res; \
+    /* FIXME: change to manual bsearch */ \
         res = bsearch(&cr, unirng_##x, sizeof(unirng_##x)/sizeof(uni_chrrng_dat_t), \
-                      sizeof(uni_chrrng_dat_t), cmprng_dat); \
+                      sizeof(uni_chrrng_dat_t), uni_cmprng_dat); \
         if(!res) \
             return i; \
         return res->dat; \
@@ -2357,8 +4160,6 @@ each range.  The value can be a plain integer or an enumeration.
 #define x_of(x, i) uni_##x##_t range_ret(x, i)
 @
 
-The actual range tables can be automatically generated from the UCD.
-
 <<Character type local definitions>>=
 #include "uni_chartype.gen"
 @
@@ -2369,18 +4170,14 @@ The actual range tables can be automatically generated from the UCD.
 @
 
 \lstset{language=make}
-<<makefile.rules>>=
-uni_chartype.gen: uni_chartype.c <<Character types generation deps>>
+<<makefile.vars>>=
+PARSE_UCD_DEPS = uni_common.c uni_common.h mfgets.c mfgets.h
+@
 
-	echo >$@
-	echo >$@.h
-	<<Generate [[uni_chartype.gen.h]]>>
-	<<Generate [[uni_chartype.gen]]>>
-	<<Post-process [[uni_chartype.gen]]>>
-	mkdir cp.$$$$; \
-	trap "rm -rf cp.$$$$" 0; \
-	touch cp.$$$$/{cproto.h,$<.static_proto}; \
-	cproto -E "$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -E" -v -e -f 0 $< >>$@.h
+<<makefile.rules>>=
+uni_chartype.gen: parse-ucd.c $(PARSE_UCD_DEPS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o parse-ucd $(filter %.c, $^)
+	./parse-ucd $(UCD_LOC) $(UNIHAN_LOC) >uni_chartype.gen 2>uni_chartype.gen.h
 
 # dummy rule to generate this file
 uni_chartype.gen.h: uni_chartype.gen
@@ -2397,87 +4194,21 @@ considered invalid as well.  To generate the table, UnicodeData.txt is
 parsed.  The parsing is too confusing when done directly in the make
 rule, so a script is used instead.
 
-<<Character types generation deps>>=
-$(UNIDATA) ucd-ranges \
-@
-
-<<Generate [[uni_chartype.gen]]>>=
-# filtering valid input
-fgrep -v Surrogate $(UNIDATA) | ./ucd-ranges -n valid 1 >>$@
-@
-
 \lstset{language=C}
-<<Character type exports>>=
-int is_uni_valid(int cp);  /* valid (well-formed) code points */
-@
-
-<<Character type functions>>=
-is_x(valid)
-@
-
-The UnicodeData.txt parser needs to merge consecutive code points and
-correctly process the range psuedo-entries.  To do this, it simply
-tracks the previous code point, and spits it out as the end of the
-range when the current point does not follow.  It then spits out the
-current point as the start of the next range.  It takes an optional
-argument specifying the array name; without that, it just spits out
-the array and not the full C definition, in case the array needs
-further processing.
-
-The sort of post-processing the script supports is adding the values
-and sorting.  For the Unicode General Category (gc), each one is
-extracted and run through the script, tacking on the class to the
-array.  Then, the arrays are all sorted to make one range array for
-the character class.
-
-\lstset{language=C}
-<<Character type exports>>=
-uni_gc_t uni_gc_of(int cp);
-@
-
-<<Character type functions>>=
-x_of(gc, U_GC_Cn)
-@
-
 <<[[uni_chartype.gen]] dependencies>>=
-typedef struct {
-  const char const *shortname, *longname;
-} uni_abbrev_name_t;
 typedef struct {
   const char *name;
   uint32_t mask;
 } uni_gc_desc_t;
 @
 
-<<makefile.vars>>=
-UNIVALALIAS = $(UCD_LOC)/PropertyValueAliases.txt
+<<Known Data Types>>=
+uni_gc_desc_t,%
 @
 
 \lstset{language=make}
-<<Generate [[uni_chartype.gen.h]]>>=
-# standard character classes
-echo "typedef enum {" >>$@.h
-cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
-  grep "^gc ; $$x " $(UNIVALALIAS) | while read d d d d l d; do \
-    echo "  U_GC_$$x, U_GC_$$l = U_GC_$$x,"; \
-  done; \
-done >>$@.h
-echo "  /* Cn means unknown, actually.  Must be > 0 to use as flag */" >>$@.h
-echo " U_GC_Cn, U_GC_Unassigned = U_GC_Cn" >>$@.h
-echo "} uni_gc_t;" >>$@.h
-@
-
 <<Generate [[uni_chartype.gen]]>>=
 # standard character classes
-echo "const uni_abbrev_name_t uni_gc_nameof[] = {" >>$@
-cut -d\; -f3 $(UNIDATA) | sort -u | while read x; do \
-  grep "^gc ; $$x " $(UNIVALALIAS) | while read d d d d l d; do \
-    echo "  {\"$$x\", \"$$l\"},"; \
-  done; \
-done >>$@
-echo '  {"Cn", "Unassigned"}' >>$@
-echo "};" >>$@
-./ucd-ranges -n gc -p U_GC_ 3 < $(UNIDATA) >>$@
 echo "const uni_gc_desc_t uni_gc_names[] = {" >>$@
 grep '^gc ;' $(UNIVALALIAS) | while read -r d d s d l t1 l2 t2 l3; do \
   case "$$t1" in \
@@ -2488,14 +4219,14 @@ grep '^gc ;' $(UNIVALALIAS) | while read -r d d s d l t1 l2 t2 l3; do \
   if [ "#" = "$$t2" ]; then \
     fl=; \
     while :; do \
-      fl="$$fl (1 << U_GC_$${l3%%|*})"; \
+      fl="$$fl (1 << U_gc_$${l3%%|*})"; \
       case "$$l3" in \
         *"|"*) fl="$$fl |"; l3="$${l3#*| }" ;; \
 	*) break ;; \
       esac; \
     done; \
   else \
-    fl="1 << U_GC_$$s"; \
+    fl="1 << U_gc_$$s"; \
   fi; \
   echo "  { \"$$s\", $$fl },"; \
   echo "  { \"$$l\", $$fl },"; \
@@ -2520,66 +4251,8 @@ rngtotab.c uni_chartype.h \
 mkdir cp.$$$$; \
 trap "rm -rf cp.$$$$" 0; \
 touch cp.$$$$/{cproto.h,uni_chartype.gen.h,rngtotab.c.static_proto}; \
-$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -o rngtotab rngtotab.c;
+$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -o rngtotab rngtotab.c uni_common.c;
 ./rngtotab >>$@
-@
-
-<<rngtotab.c>>=
-<<Common C Header>>
-#include "uni_chartype.h"
-#include "uni_chartype.gen"
-// static_proto
-
-<<Split data into multi-level table>>
-
-static void doit_dat(const char *name, const uni_chrrng_dat_t *tab,
-                     uint32_t nent, uint8_t def)
-{
-    uint32_t i, j;
-    uint32_t dlen = tab[nent - 1].high - tab[0].low + 1;
-    uint8_t *dat = malloc(bsz(dlen));
-
-    memset(dat, def, bsz(dlen));
-    for(i = 0; i < nent; i++)
-	for(j = tab[i].low; j <= tab[i].high; j++)
-	    dat[j - tab[0].low] = tab[i].dat;
-    printf("/* %s: %d/%d bytes, %d lookups */\n", name, nent * 12, nent * 9, lg2(nent));
-    doit(name, dat, dlen, tab[0].low, tab[nent - 1].high);
-}
-
-static void doit_bool(const char *name, const uni_chrrng_t *tab, uint32_t nent)
-{
-    uint32_t i, j;
-    uint32_t dbits = tab[nent - 1].high - tab[0].low + 1;
-    uint32_t dlen = (dbits + 7) / 8;
-    uint8_t *dat = malloc(bsz(dlen));
-    uint32_t start = tab[0].low / 8;
-
-    memset(dat, 0, bsz(dlen));
-    for(i = 0; i < nent; i++)
-	for(j = tab[i].low; j <= tab[i].high; j++)
-	    dat[j / 8 - start] |= 1 << (j & 7);
-    printf("/* %s: %d/%d bytes, %d lookups */\n", name, nent * 8, nent * 6, lg2(nent));
-    doit(name, dat, dlen, start, tab[nent - 1].high / 8);
-}
-
-int main(void)
-{
-#define dat(x, d) doit_dat(#x, unirng_##x, sizeof(unirng_##x)/sizeof(unirng_##x[0]), d)
-#define bool(x) doit_bool(#x, unirng_##x, sizeof(unirng_##x)/sizeof(unirng_##x[0]))
-  <<Convert ranges to tables>>
-  return 0;
-}
-@
-
-<<Convert ranges to tables>>=
-dat(gc, U_GC_Cn);
-dat(sc, U_SC_Zzzz);
-dat(scx, ~0);
-/* dat(range, 0); */
-bool(valid);
-bool(depr);
-bool(ign);
 @
 
 For regex:
@@ -2601,145 +4274,62 @@ enum/propname (UAX44-LM3):
   - remove *PREFIX* of is (not entire value if value is "is")
   - remove all spaces, underscores, dashes
 
-General_Category (gc)
-Script (sc)
-Alphabetic (Alpha|alpha) == gc=L or Other_Alphabetic in PropList.txt
-Lowercase (Lower|lower) == gc=Ll or Other_Lowercase in PropList.txt
-Uppercase (Upper|upper) == gc=Lu or Other_Uppercase in PropList.txt
-White_Space (WSpace) == PropList.txt
-Noncharacter_Code_Point (NChar) == PropList.txt
-Default_Ignorable_Code_Point (DI) == DerivedCoreProperties.txt
-punct == gc==P & gc!=S & !alpha
-uni_punct == gc==P
-digit == 0-9
-uni_digit == gc==Nd
-xdigit == 0-9a-fA-F
-uni_xdigit == gc=Nd + Hex_Digit
-Hex_Digit (Hex) == PropList.txt
-alnum == alpha + digit
-uni_alnum == alpha + uni_digit
-blank == gc=Zs + TAB
-graph == anything but White_Space, gc=Cc, gc=Cs, gc=Cn
-print == graph + blank - gc=Cc
-word == alnum + _ (by default)
-uni_word == uni_alnum + gc=M + gc=Pc plus Join_Control
-Join_Control (Join_C) == PropList.txt
+bool:
+  punct == gc==P & gc!=S & !alpha
+  uni_punct == gc==P
+  digit == 0-9
+  uni_digit == gc==Nd
+  xdigit == 0-9a-fA-F
+  uni_xdigit == gc=Nd + Hex_Digit
+  alnum == alpha + digit
+  uni_alnum == alpha + uni_digit
+  blank == gc=Zs + TAB
+  graph == anything but White_Space, gc=Cc, gc=Cs, gc=Cn
+  print == graph + blank - gc=Cc
+  word == alnum + _ (by default)
+  uni_word == uni_alnum + gc=M + gc=Pc plus Join_Control
 l2:
-Name (na) == UnicodeData.txt, field 2
-Name_Alias == NameAliases.txt
-Script_Extensions (scx) == ScriptExtensions.txt (multi)
-Block (blk) == Blocks.txt
-Age (age) == DerivedAge.txt
-Hangul_Syllable_Type (hst) == L, V, T, LV, LVT depending on block
-Deprecated (Dep) == PropList.txt
-Logical_Order_Exception (LOE) == PropList.txt
-Variation_Selector (VS) == PropList.txt
-Numeric_Value (nv) == UnicodeData.txt, field 8
-Numeric_Type (nt) == UnicodeData.txt, Decimal if 6 non-blank, Digit if 7
-                     non-blank (but 6 is blank), Numeric if 6&7 blank
-                     (but 8 non-blank)
-ASCII_Hex_Digit (AHex) == PropList.txt
-ID_Continue (IDC) == DerivedCoreProperties.txt
-ID_Start (IDS) == DerivedCoreProperties.txt
-XID_Continue (XIDC) == DerivedCoreProperties.txt
-XID_Start (XIDS) == DerivedCoreProperties.txt
-Pattern_Syntax (Pat_Syn) == PropList.txt
-Pattern_White_Space (Pat_WS) == PropList.txt
-Lowercase_Mapping (lc) == SpecialCasing.txt (def = Simple_Lowercase_Mapping?)
-Titlecase_Mapping (tc) == SpecialCasing.txt (def = Simple_Titlecase_Mapping?)
-Uppercase_Mapping (uc) == SpecialCasing.txt (def = Simple_Uppercase_Mapping?)
-Case_Folding (cf) == CaseFolding.txt (C + F)
-Simple_Lowercase_Mapping (slc) == UnicodeData.txt, field 13
-Simple_Titlecase_Mapping (stc) == UnicodeData.txt, field 14/12
-Simple_Uppercase_Mapping (suc) == UnicodeData.txt, field 12
-Simple_Case_Folding (scf) == CaseFolding.txt (C + S)
-Soft_Dotted (SD) == PropList.txt
-Cased == DerivedCoreProperties.txt
-Case_Ignorable (CI) == DerivedCoreProperties.txt
-Changes_When_Lowercased (CWL) == DerivedCoreProperties.txt
-Changes_When_Uppercased (CWU) == DerivedCoreProperties.txt
-Changes_When_Titlecased (CWT) == DerivedCoreProperties.txt
-Changes_When_Casefolded (CWCF) == DerivedCoreProperties.txt
-Changes_When_Casemapped (CWCM) == DerivedCoreProperties.txt
-Canonical_Combining_Class (ccc) == UnicodeData.txt, field 3
-Decomposition_Mapping (dm) == UnicodeData.txt, field 5 (w/o <>)
-Composition_Exclusion (CE) == CompositionExclusions.txt
-Full_Composition_Exclusion (Comp_Ex) == DerivedNormalizationProps.txt
-Decomposition_Type (dt) == UnicodeData.txt, field 5 (<> only)
-NFC_Quick_Check (NFC_QC) == DerivedNormalizationProps.txt
-NFKC_Quick_Check (NFKC_QC) == DerivedNormalizationProps.txt
-NFD_Quick_Check (NFD_QC) == DerivedNormalizationProps.txt
-NFKD_Quick_Check (NFKD_QC) == DerivedNormalizationProps.txt
-NFKC_Casefold (NFKC_CF) == DerivedNormalizationProps.txt
-Changes_When_NFKC_Casefolded (CWKCF) == DerivedNormalizationProps.txt
-Joining_Group (jg) == ArabicShaping.txt, field 2
-Joining_Type (jt) == ArabicShaping.txt, field 3
-Line_Break (lb) == LineBreak.txt
-Grapheme_Cluster_Break (GCB) == auxiliary/GraphemeBreakProperty.txt
-Sentence_Break (SB) == auxiliary/SentenceBreakProperty.txt
-Word_Break (WB) == auxiliary/WordBreakProperty.txt
-East_Asian_Width (ea) == EastAsianWidth.txt
-Bidi_Class (bc) == UnicodeData.txt, field 4
-Bidi_Control (Bidi_C) == PropList.txt
-Bidi_Mirrored (Bidi_M) == UnicodeData.txt, field 9
-Bidi_Mirroring_Glyph (bmg) == BidiMirroring.txt
-Ideographic (Ideo) == PropList.txt
-Unified_Ideograph == PropList.txt
-Radical == PropList.txt
-IDS_Binary_Operator == PropList.txt
-IDS_Trinary_Operator == PropList.txt
-Math == DerivedCoreProperties.txt
-Quotation_Mark (QMark) == PropList.txt
-Dash == PropList.txt
-STerm == PropList.txt
-Terminal\_Punctuation (Term) == PropList.txt
-Diacritic (Dia) == PropList.txt
-Extender (Ext) == PropList.txt
-Grapheme_Base == DerivedCoreProperties.txt
+other:
+  Name (na) == UnicodeData.txt, field 2
+  Name_Alias == NameAliases.txt
+  Script_Extensions (scx) == ScriptExtensions.txt (multi)
+numeric:
+  Age (age) == DerivedAge.txt
+  Numeric_Value (nv) == UnicodeData.txt, field 8
+string:
+  Lowercase_Mapping (lc) == SpecialCasing.txt (def = Simple_Lowercase_Mapping?)
+  Titlecase_Mapping (tc) == SpecialCasing.txt (def = Simple_Titlecase_Mapping?)
+  Uppercase_Mapping (uc) == SpecialCasing.txt (def = Simple_Uppercase_Mapping?)
+  Case_Folding (cf) == CaseFolding.txt (C + F)
+  Simple_Lowercase_Mapping (slc) == UnicodeData.txt, field 13
+  Simple_Titlecase_Mapping (stc) == UnicodeData.txt, field 14/12
+  Simple_Uppercase_Mapping (suc) == UnicodeData.txt, field 12
+  Simple_Case_Folding (scf) == CaseFolding.txt (C + S)
+  Decomposition_Mapping (dm) == UnicodeData.txt, field 5 (w/o <>)
+  NFKC_Casefold (NFKC_CF) == DerivedNormalizationProps.txt
+  Bidi_Mirroring_Glyph (bmg) == BidiMirroring.txt
 ----
-isxxx; xxx == Cased, Lowercase, Uppercase, Titlecase -> xxx above
-toxxx; xxx == Lowercase, Uppercase, Titlecase -> xxx_Mapping above
-cjkTraditionalVariant == unihan/Unihan_Variants, kTraditionalVariant
-cjkSimplifiedVariant == unihan/Unihan_Variants, kSimplifiedVariant
-CJK_Radical == unihan/Unihan_RadicalStrokeCounts.txt, kRSUnicode
-exemplar == DUCET://ldml/characters/exemplarCharacters (UnicodeSet)
-IDNA_Status == idna/IdnaMappingTable.txt, field 2
-IDNA_Mapping == idna/IdnaMappingTable.txt, field 3
-ID_Restrict_Status == security/xidmodifications.txt, field 2
-ID_Restrict_Type == security/xidmodifications.txt, field 3
-Collation_Primary == DUCET: collation order (from various)
+boolean
+  isxxx; xxx == Cased, Lowercase, Uppercase, Titlecase -> xxx above
+string
+  toxxx; xxx == Lowercase, Uppercase, Titlecase -> xxx_Mapping above
+  cjkTraditionalVariant == unihan/Unihan_Variants, kTraditionalVariant
+  cjkSimplifiedVariant == unihan/Unihan_Variants, kSimplifiedVariant
+  exemplar == DUCET://ldml/characters/exemplarCharacters (UnicodeSet)
+  IDNA_Mapping == idna/IdnaMappingTable.txt, field 3
+  Collation_Primary == DUCET: collation order (from various)
+numeric
+  CJK_Radical == unihan/Unihan_RadicalStrokeCounts.txt, kRSUnicode
+enumerated
+  IDNA_Status == idna/IdnaMappingTable.txt, field 2
+  ID_Restrict_Status == security/xidmodifications.txt, field 2
+  ID_Restrict_Type == security/xidmodifications.txt, field 3
 \end{verbatim}
 
 Some other standard categories which might be useful are ignored and
 deprecated code points.  These are extracted from PropList.txt and
 DerivedCoreProperties.txt, which is in a different format, requiring a
 different parser script.
-
-<<makefile.vars>>=
-UNIDER = $(UCD_LOC)/DerivedCoreProperties.txt
-UNIPROP = $(UCD_LOC)/PropList.txt
-@
-
-<<Character types generation deps>>=
-$(UNIDER) $(UNIPROP) \
-@
-
-<<Generate [[uni_chartype.gen]]>>=
-# other features
-./ucd-ranges -n depr 2 Deprecated < $(UNIPROP) >>$@
-./ucd-ranges -n ign 2 Default_Ignorable_Code_Point < $(UNIDER) >>$@
-@
-
-\lstset{language=C}
-<<Character type exports>>=
-int is_uni_depr(int cp);
-int is_uni_ign(int cp);
-@
-
-<<Character type functions>>=
-is_x(depr)
-is_x(ign)
-@
 
 The Script (sc) property comes from Scripts.txt in a similar way.  It
 is a one-to-one mapping, so the same technique can be used as with the
@@ -2750,15 +4340,17 @@ default value for scx.
 \lstset{language=C}
 <<Character type exports>>=
 /* need to manually convert U_SC_Hrkt to U_SC_Hira+U_SC_Kana */
-uni_sc_t uni_sc_of(int cp);
+/* uni_sc_t uni_sc_of(int cp); */
 /* if -1, use uni_sc_of() instead */
 /* otherwise, use uni_scx_exp[] */
 int uni_scx_of(int cp);
 @
 
 <<Character type functions>>=
+#if 0
 x_of(sc, U_SC_Zzzz)
 int range_ret(scx, -1)
+#endif
 @
 
 <<makefile.vars>>=
@@ -2791,11 +4383,19 @@ done < scriptnames.gen | sed '$$s/,$$//' >>$@.h
 echo "} uni_sc_t;" >>$@.h
 @
 
+<<Known Data Types>>=
+uni_sc_t,%
+@
+
 <<[[uni_chartype.gen]] dependencies>>=
 typedef struct {
   const char *name;
   /* uni_sc_t */int script;
 } uni_sc_desc_t;
+@
+
+<<Known Data Types>>=
+uni_sc_desc_t,%
 @
 
 <<Generate [[uni_chartype.gen]]>>=
@@ -2895,7 +4495,7 @@ for(i = 0; i < 0x110000; i++) {
 
 <<Print flags and classes of cp [[i]]>>=
 /* standard character class */
-fputs(uni_gc_nameof[uni_gc_of(i)].shortname, stdout);
+fputs(uni_gc_nameof[uni_gc_of(i)].short_name, stdout);
 putchar(' ');
 @
 
@@ -2903,11 +4503,11 @@ putchar(' ');
 /* other flags */
 if(find_ccc(i))
   putchar('-'); /* can be moved by canon_order */
-if(!is_uni_valid(i))
+if(!is_uni_ASSIGNED(i))
   putchar('?');
-if(is_uni_depr(i))
+if(is_uni_Dep(i))
   putchar('D');
-if(is_uni_ign(i))
+if(is_uni_DI(i))
   putchar('!');
 @
 
@@ -3063,23 +4663,25 @@ is done by sed above.
 So, what do we do with all of these names?  The obvious thing is to
 create a hash table to look up the code point using the name, and
 another hash table to look up the name using the code point.  Since
-the cost of comparing integers is small, a binary search might
-suffice for the code point-to-name lookup.  For the hash table, we
-could either use some random hash function and hash table
-implementation, or we could generate a perfect hash function using
-[[gperf]].\footnote{After I wrote this, a program called [[cmph]]
+the cost of comparing integers is small, a binary search might suffice
+for the code point-to-name lookup.  For the hash table, we could
+either use some random hash function and hash table implementation, or
+we could generate a perfect hash function using [[gperf]].%
+\footnote{After I wrote this, a program called [[cmph]]
 (\url{http://sourceforge.net/projects/cmph}) caught my attention. This
 generates minimal perfect hash functions in linear time (sub second
-time for the entire Unicode name set!).  Its main problems are
-that it generates data files rather than code (requiring changes to
-the library to support code generation instead), and that it does not
-perform the final comparison step, essentially just returning the
-integer index of a possible hashed string (easily correctable).} My
-initial implementation used [[gperf]], but generating a perfect hash
-for the full Unicode set took 2 hours on my machine, and an additional
-1 hour to compile.  Instead, I decided to go with the first thing I
-ever implemented in a compiler: a single hash table used for all
-strings in the system, preloaded with known symbols.
+time for the entire Unicode name set!).  Its main problems are that it
+generates data files rather than code (requiring changes to the
+library to support code generation instead; see
+\url{http://sourceforge.net/tracker/?func=detail\&aid=3590339\&group_id=126608\&atid=706189}),
+and that it does not perform the final comparison step, essentially
+just returning the integer index of a possible hashed string (easily
+correctable).}
+My initial implementation used [[gperf]], but generating a perfect
+hash for the full Unicode set took 2 hours on my machine, and an
+additional 1 hour to compile.  Instead, I decided to go with the first
+thing I ever implemented in a compiler: a single hash table used for
+all strings in the system, preloaded with known symbols.
 
 Of course a hash function may not even be ideal.  For example, Unicode
 regular expressions may allow searching for a name using a pattern.
@@ -3225,6 +4827,10 @@ typedef struct {
   uint32_t off; /* offset into string data */
   uint32_t nextent;
 } hashent_t;
+@
+
+<<Known Data Types>>=
+hashent_t,%
 @
 
 There are actually two sources of hash table entries:  built-in and
@@ -3755,6 +5361,10 @@ static void put_str(const char *buf, int len, FILE *f)
       fputc(*buf, f);
   }
 }
+@
+
+<<Known Data Types>>=
+uchar,%
 @
 
 <<Parse and append old builtin string>>=
@@ -5055,6 +6665,7 @@ name.  Like with XML, the table is generated from the string data.
 uint32_t str;
 struct chrnm cps = { 0, cp }, *res;
 
+/* FIXME: change to manual bsearch */
 if((res = bsearch(&cps, uni_nmord, sizeof(uni_nmord)/sizeof(*uni_nmord), sizeof(*uni_nmord), nmcmp)))
   str = res->name;
 else
@@ -5129,6 +6740,7 @@ struct dashloc {
 <<Post-process regular Unicode character name>>=
 const struct dashloc dl = {cp}, *dash;
 
+/* FIXME: change to manual bsearch */
 dash = bsearch(&dl, dashloc, sizeof(dashloc)/sizeof(*dashloc), sizeof(*dashloc),
                cmpdl);
 if(dash) {
@@ -5859,6 +7471,9 @@ typedef struct {
 } unifile_t;
 @
 
+<<Known Data Types>>=
+unifile_t,%
+@
 
 Rather than automatically attaching state to a file on first access
 and never really knowing when to free it, explicit routines are
@@ -5979,6 +7594,10 @@ typedef struct {
   int optr, olen;
 } iconv_supt_t;
 #endif
+@
+
+<<Known Data Types>>=
+iconv_supt_t,%
 @
 
 <<Initialize unicode file buffer state>>=
@@ -6191,7 +7810,7 @@ while(1) {
 }
 @
 
-\section{Generic Normalized Unicode Input}
+\subsection{Generic Normalized Unicode Input}
 
 To make things even easier, we can make a function which returns a
 normalized character.  Any normalization type we have code for, we
@@ -6201,6 +7820,10 @@ support.
 typedef enum {
   UN_NONE, UN_NFD, UN_NFKD, UN_NFC, UN_NFKC, UN_NFKC_CF
 } uni_normtype_t;
+@
+
+<<Known Data Types>>=
+uni_normtype_t,%
 @
 
 <<Unicode normalization support exports>>=
@@ -6235,6 +7858,10 @@ typedef struct unifile_norm {
   <<Normalized input buffer state>>
 } unifile_norm_t;
 static unifile_norm_t *norm_files = NULL;
+@
+
+<<Known Data Types>>=
+unifile_norm_t,%
 @
 
 <<Get normalized character>>=
