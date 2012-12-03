@@ -183,45 +183,63 @@ Boolean properties are either true or false.  They define a subset of
 characters: those for which the value is true.  As with any set, the
 desirable operations are:
 
+%% l2h substitution ominus &ominus;
+% tidy doesn't understand &ominus
+%% l2h substitution ominus &#8854;
+% substitution replaces # with space, so use 0-arg macro instead
+% l2h macro ominus 0 &##8854;
 % l2h substitution oplus &oplus;
 % l2h substitution wedge &and;
 % l2h substitution vee &or;
 % l2h substitution neg &not;
-% l2h macro bar 1 #1&##773;
+% l2h macro overline 1 <span style="text-decoration:overline">#1</span>
+% l2h substitution emptyset &empty;
+% l2h substitution alpha &alpha;
+% l2h substitution in &isin;
+% l2h substitution cap &cap;
+% l2h substitution cup &cup;
 
 \begin{itemize}
 \item Finding out if a character \emph{is} or is not an element of the
 set.
 \item Querying the \emph{members} of a set.
-\item Applying \emph{logical} operators on a set.  There are 16
-possible logical operators on two sets.  Operation numbers are
-assigned using the formula $o_0 \oplus A\wedge o_1 \oplus B\wedge o_2
-\oplus A\wedge B\wedge o_3$, where $o_n$ is true if bit $n$ is
-true in the operation number.
+\item Applying \emph{logical} operators on a pair of sets.  There are
+16 possible logical operations between two sets (2 set members with 2
+values each = $2^2$ value combinations; 4 value combinations with 2
+possible result values each = $4^2$ result combinations).  See table
+\ref{tab:logical} for a complete list of operations.
 
+\begin{table}
 \begin{quote}
 \begin{tabular}{lllllrl}
-$A$&false&false&true&true&\multicolumn{2}{l}{}\\
-$B$&false&true&false&true&\multicolumn{2}{l}{}\\
-&&&&&\multicolumn{2}{l}{Operation}\\
-&false&false&false&false& 0&(false)\\
-&true&true&true&true&     1&(true)\\
-&false&false&true&true&   2&($A$)\\
-&true&true&false&false&   3&($\neg A$)\\
-&false&true&false&true&   4&($B$)\\
-&true&false&true&false&   5&($\neg B$)\\
-&false&true&true&false&   6&($A \oplus B$)\\
-&true&false&false&true&   7&($A \bar \oplus B$)\\
-&false&false&false&true&  8&($A \wedge B$)\\
-&true&true&true&false&    9&($A \bar \wedge B$)\\
-&false&false&true&false& 10&($A - B$)\\
-&true&true&false&true&   11&($\neg(A - B)$)\\
-&false&true&false&false& 12&($B - A$)\\
-&true&false&true&true&   13&($\neg(B - A)$)\\
-&false&true&true&true&   14&($A \vee B$)\\
-&true&false&false&false& 15&($A \bar \vee B$)\\
+$x\in A$&false&false&true&true&\\
+$x\in B$&false&true&false&true&\\
+&\multicolumn{4}{c}{$x\in A\textrm{ op }B$}&\multicolumn{2}{l}{Op \#}\\
+$\emptyset$&false&false&false&false&0&\\
+$\alpha$&true&true&true&true&1&\\
+$A$&false&false&true&true&2&\\
+$\overline A$&true&true&false&false&3&\\
+$B$&false&true&false&true&4&\\
+$\overline B$&true&false&true&false&5&\\
+$A \ominus B$&false&true&true&false&6&\\
+$\overline{A \ominus B}$&true&false&false&true&7&\\
+$A \cap B$&false&false&false&true&8&\\
+$\overline{A \cap B}$&true&true&true&false&9&\\
+$A - B$&false&false&true&false&10&\\
+$\overline{A - B}$&true&true&false&true&11&\\
+$B - A$&false&true&false&false&12&\\
+$\overline{B - A}$&true&false&true&true&13&\\
+$A \cup B$&false&true&true&true&14&\\
+$\overline{A \cup B}$&true&false&false&false&15&\\
 \end{tabular}
+
+{\small Operation numbers are assigned using the formula $o_0 \oplus
+(x \in A)\wedge o_1 \oplus (x \in B)\wedge o_2 \oplus (x \in A \cap
+B)\wedge o_3$, where $o_n$ is true if bit $n$ is true in the operation
+number.}
 \end{quote}
+\caption{\label{tab:logical}Logical Operations}
+\end{table}
 \end{itemize}
 
 All of the above require that every member be stored.  The \emph{is}
@@ -312,19 +330,20 @@ latter eight:  inversion may be more expensive than with bit arrays.
 This does not save much space for properties which apply to
 a large number of characters; in fact, it might even take more space.
 
-<<Common uni functions>>=
-int uni_cmp_cp(const void *a, const void *b)
-{
-  return *(int32_t *)a - *(int32_t *)b;
-}
-@
-
 <<Common uni definitions>>=
+extern int uni_cmp_cp(const void *a, const void *b); /* for qsort/bsearch */
 #define uni_is_cp(c, tab, tab_len) \
   bsearch(&c, tab, tab_len, sizeof(tab[0]), uni_cmp_cp)
 
 /* members are already in list */
 /* logical operations not directly supported */
+@
+
+<<Common uni functions>>=
+int uni_cmp_cp(const void *a, const void *b)
+{
+  return *(int32_t *)a - *(int32_t *)b;
+}
 @
 
 <<Common uni functions>>=
@@ -1229,6 +1248,134 @@ be read-only and only provide the \emph{in} function.
 % FIXME: invert(table) (easy: doesn't need duplicate scanning)
 % FIXME: logical(table) (hard: needs duplicate scanning, but maybe not)
 
+In order to actually compare performance and size, a separate test
+program is provided.
+
+<<C Test Support Executables>>=
+tsttab \
+@
+
+<<makefile.rules>>=
+tsttab.o: uni_chartype.gen.h
+@
+
+<<tsttab.c>>=
+<<Common C Header>>
+
+#include "uni_chartype.h"
+// static_proto
+
+#include <sys/resource.h>
+struct rusage ru;
+
+static void tstart(void)
+{
+  getrusage(RUSAGE_SELF, &ru);
+}
+
+static unsigned long tend(void)
+{
+  struct rusage ru2;
+  getrusage(RUSAGE_SELF, &ru2);
+  return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
+            (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
+}
+
+<<Functions to help test generated tables>>
+
+int main(void)
+{
+  <<Test generated tables>>
+  return 0;
+}
+@
+
+To test a boolean, a function is provided to run the entire test, and
+a call to that function is done in the mainline.  The function is
+passed the range table, the multi-level table, and the name of the
+property.  These can all be generated from the property name with a
+preprocessor macro.
+
+<<Functions to help test generated tables>>=
+volatile int32_t tres;
+
+#define bool(x) doit_bool(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
+static void print_mtab_info(const uint32_t *, uint32_t);
+static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
+                      const uint32_t *mtab)
+{
+    uint32_t i;
+    
+    /* print stats */
+    printf("%s:\n"
+           "  rng: %d entries (%d bytes; %d lookups max)\n",
+           name, nent, nent * 8, lg2(nent));
+    print_mtab_info(mtab, nent * 8);
+    /* check integrity */
+    for(i = 0; i < 0x110000; i++) {
+      int rv = is_cp_chrrng(i, rng, nent);
+      int mv = <<range table result for [[i]]>>;
+      if(!rv != !mv) {
+        fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, rv, mv);
+	/*  exit(1); */
+	return;
+      }
+    }
+    /* check performance */
+    int j;
+    unsigned long tr, tt;
+    tstart();
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        tres = is_cp_chrrng(i, rng, nent);
+    tr = tend();
+    tstart();
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        tres = <<range table result for [[i]]>>;
+    tt = tend();
+    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+}
+@
+
+<<Functions to help test generated tables>>=
+static void print_mtab_info(const uint32_t *mt, uint32_t rsize)
+{
+  uint32_t i, l;
+  uint32_t skip, desc, nskip, psz;
+
+  fputs("  mtab: ", stdout);
+  if(mt[0] & 1)
+    fputs("*inv* ", stdout);
+  nskip = mt[2];
+  i = 3;
+  printf(" %d", nskip);
+  for(l = 0; (desc = mt[i]); l++) {
+    printf("/%d", desc >> 16);
+    psz = (desc >> 8) & 0xff;
+    switch(psz) {
+      case 1:
+	skip = nskip / 4 + 1;
+        nskip = *(uint8_t *)&mt[++i];
+	break;
+      case 2:
+	skip = nskip / 2 + 1;
+        nskip = *(uint16_t *)&mt[++i];
+	break;
+      default:
+	skip = nskip + 1;
+        nskip = mt[++i];
+    }
+    nskip *= desc >> 16;
+    i += skip;
+  }
+  skip = (nskip + 3) / 4;
+  i += skip;
+  printf(" (%d bytes, %d lookups max) (%.2fx rng)\n", i * 4, l + 1,
+         (double)(i * 4) / rsize);
+}
+@
+
 A parser program is used to generate these tables as static,
 compilable C code from the UCD tables.  One of the advantages of the
 range table method is that creating range tables is trival, and could
@@ -1309,15 +1456,15 @@ ucd_loc = *++argv;
 unihan_loc = *++argv;
 @
 
-Rather than construct file names using the provided paths, they are
-assumed to be absolute, and the program just changes to the location
-directory before reading files, and all files are read relative to the
-current directory.
+Rather than construct file names using the provided paths, the program
+just changes to the location directory before reading files, and all
+files are read relative to the current directory.
 
 <<UCD parser variables>>=
 FILE *f;
 char *lbuf = NULL;
 unsigned int lbuflen, llen;
+char *cwd = getcwd_full();
 @
 
 <<Parse character data files>>=
@@ -1339,6 +1486,7 @@ chdir(ucd_loc);
 @
 
 <<Initialize Unihan files>>=
+chdir(cwd); /* in case unihan_loc is relative */
 chdir(unihan_loc);
 @
 
@@ -1569,27 +1717,32 @@ uint32_t *rng_to_multi(const uni_chrrng_t *tab, uint32_t tab_len,
   low &= ~7;
   len = ((high - low + 1 + 7) / 8);
   inisize(bits, len);
+  /* FIXME: only set def on unspecified ranges; may be faster */
   clearbuf(bits, len);
-  /* FIXME: use quick mask calculation instead of loops */
   if(def)
     /* fill in ones if low not aligned with byte boundary */
-    for(i = 0; i < (tab[0].high + 1) % 8; i++)
-      BSET_SET(bits, i);
+    bits[0] = (1 << (tab[0].high + 1) % 8) - 1;
   for(i = def; i < tab_len - def; i++) {
-    uint32_t j;
-    for(j = tab[i].low; j <= tab[i].high && (j & 7); j++)
-      BSET_SET(bits, j - low);
-    if(j < ((tab[i].high + 1) &~7)) {
-      memset(&BSET_ELT(bits, j - low), 0xff, (tab[i].high + 1) / 8 - j / 8);
-      j += ((tab[i].high + 1) / 8 - j / 8) * 8;
+    uint32_t l = tab[i].low - low, h = tab[i].high - low + 1;
+    uint8_t hm = (1 << h % 8) - 1;
+    uint8_t lm = ~((1 << l % 8) - 1);
+    if(h / 8 == l / 8) {
+      BSET_ELT(bits, l) |= lm & hm;
+      continue;
     }
-    for(; j <= tab[i].high; j++)
-      BSET_SET(bits, j - low);
+    if(lm != (uint8_t)~0) {
+      BSET_ELT(bits, l) |= lm;
+      l += 8 - (l & 7);
+    }
+    if(l < (h & ~7))
+      memset(&BSET_ELT(bits, l), 0xff, h / 8 - l / 8);
+    if(hm)
+      BSET_ELT(bits, h) |= hm;
   }
-  if(def && tab[tab_len - 1].low % 8)
+  if(def && (tab[tab_len - 1].low - low) % 8)
     /* fill in ones if high + 1 not aligned with byte boundary */
-    for(i = tab[tab_len - 1].low % 8; i < 8; i++)
-      BSET_SET(bits, tab[tab_len - 1].low - i);
+    bits[(tab[tab_len - 1].low - low) / 8] |=
+                         ~((1 << (tab[tab_len - 1].low - low) % 8) - 1);
   bits_to_multi(bits, len, low / 8, high / 8, def, 0, &ml, ml_len);
   free(bits);
   return ml;
@@ -1610,7 +1763,7 @@ fclose(f);
 The first field is a code point.  While it appears that each line only
 deals with one code point, there are actually ranges as well.  These
 are specified by two consecutive entries with names ending in \texttt{,
-First>} and \textt{, Last>}, respectively.
+First>} and \texttt{, Last>}, respectively.
 
 <<UCD parser variables>>=
 uint32_t low, high;
@@ -1643,7 +1796,7 @@ place, the storage size of the range table is kept as well.
 <<Property parsed contents>>=
 uni_chrrng_t *rng;
 uint32_t rng_len, max_rng_len;
-uint32_t *mt, mt_len;
+uint32_t *mt;
 @
 
 <<UCD parser variables>>=
@@ -1842,10 +1995,11 @@ anything I use.
 Now, to finish up post-processing, the multi-level table is generated.
 
 <<Post-process property data>>=
+uint32_t ml_len;
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng)
     parsed_props[i].mt = rng_to_multi(parsed_props[i].rng, parsed_props[i].rng_len,
-                                      &parsed_props[i].mt_len);
+                                      &ml_len);
 @
 
 The boolean properties can now be printed, using the canonical short
@@ -1854,13 +2008,29 @@ once the name is known, casing shouldn't really matter.  A header
 needs to be generated as well, to contain the external variable
 declarations.  This is written to standard error.  It can still be
 distinguished from error messages by the fact that no error code is
-returned by the program.
+returned by the program.  Finally, a list of boolean properties needs
+to be converted into calls to [[bool()]] for the test program.  This
+is generated directly into a fixed-named C file, [[tsttab.c.tests]].
 
 In addition to the property tables, a simple query function is
 printed.  This calls a generic search function using the multi-level
 table.
 
+<<Plain Built Files>>=
+tsttab.c.tests \
+@
+
+<<Test generated tables>>=
+#include "tsttab.c.tests"
+@
+
 <<Dump character information as C code>>=
+chdir(cwd);
+FILE *tstf = fopen("tsttab.c.tests", "w");
+if(!tstf) {
+  perror("tsttab.c.tests");
+  exit(1);
+}
 for(i = 0; i < nparsed; i++) {
   if(parsed_props[i].rng) {
     const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
@@ -1871,20 +2041,17 @@ for(i = 0; i < nparsed; i++) {
                                  parsed_props[i].rng[j].high,
 				 j < parsed_props[i].rng_len - 1 ? "," : "");
     puts("};");
-    fprintf(stderr, "#define uni_%s_rng_len %d\n", name,
-                                                   parsed_props[i].rng_len);
-    printf("const uint32_t uni_%s_mtab[] = {\n\t", name);
-    for(j = 0; j < parsed_props[i].mt_len; j++)
-      printf("0x%X%s", parsed_props[i].mt[j], j == parsed_props[i].mt_len - 1 ?
-                                                     "\n" : !((j + 1) % 8) ?
-						           ",\n\t" : ", ");
-    puts("};");
-    fprintf(stderr, "extern const uni_chrrng_t uni_%s_rng[];\n"
-		    "extern const uint32_t uni_%s_mtab[];\n"
-		    "#define is_uni_%s(x) is_uni_x(x, uni_%s_mtab)\n",
-		    name, name, name, name);
+    fprintf(stderr, "/* %d lookups max */\n"
+		    "extern const uni_chrrng_t uni_%s_rng[];\n"
+		    "#define uni_%s_rng_len %d\n"
+                    "#define is_uni_%s(x) is_uni_x(x, uni_%s_mtab)\n",
+		    lg2(parsed_props[i].rng_len),
+		    name, name, parsed_props[i].rng_len, name, name);
+    print_mtab(name, parsed_props[i].mt);
+    fprintf(tstf, "bool(%s);\n", name);
   }
 }
+fclose(tstf);
 @
 
 <<Common uni definitions>>=
@@ -1899,6 +2066,59 @@ int is_uni_x(uint32_t cp, const uint32_t *tab)
   if(mr)
     mv = *mr;
   return mv & BSET_MASK(mr, cp) ? 1 : 0;
+}
+@
+
+<<range table result for [[i]]>>=
+is_uni_x(i, mtab)
+@
+
+When printing the multi-level table, comments are added to indicate
+the struture.
+
+<<UCD parser local functions>>=
+static void print_mtab(const char *name, const uint32_t *mt)
+{
+  uint32_t i, j, l;
+  uint32_t skip, desc, nskip, psz;
+  printf("const uint32_t uni_%s_mtab[] = {\n", name);
+  printf("\t/* low/inv, high, l0len */\n"
+         "\t(0x%X << 1) + %d, 0x%X, %d,\n",
+	 mt[0] >> 1, mt[0] & 1, mt[1], (nskip = mt[2]));
+  i = 3;
+  fprintf(stderr, "/* %d", nskip);
+  for(l = 0; (desc = mt[i]); l++) {
+    printf("\t/* level %d (pointers) */\n"
+           "\t0x%X, /* shift=%d psz=%d nextblk=%d */\n",
+           l, desc, desc & 0xff, (psz = (desc >> 8) & 0xff), desc >> 16);
+    fprintf(stderr, "/%d", desc >> 16);
+    switch(psz) {
+      case 1:
+	skip = nskip / 4 + 1;
+        nskip = *(uint8_t *)&mt[++i];
+	break;
+      case 2:
+	skip = nskip / 2 + 1;
+        nskip = *(uint16_t *)&mt[++i];
+	break;
+      default:
+	skip = nskip + 1;
+        nskip = mt[++i];
+    }
+    printf("\t/* raw pointers; pointer[0] = l%dlen = %d */\n\t", l + 1, nskip);
+    nskip *= desc >> 16;
+    for(j = 0; j < skip - 1; j++, i++)
+      printf("0x%X,%s", mt[i], !((j + 1) % 8) ? "\n\t" : " ");
+    printf("0x%X,\n", mt[i++]);
+  }
+  skip = (nskip + 3) / 4;
+  printf("\t/* level %d (raw data) */\n"
+         "\t0%s", l, skip ? ",\n\t" : "\n");
+  for(j = 0, i++; j < skip; j++, i++)
+    printf("0x%X%s", mt[i], j == skip - 1 ? "\n" : !((j + 1) % 8) ? ",\n\t" : ", ");
+  puts("};");
+  fprintf(stderr, " (%d-level); len = %d */\n"
+                  "extern const uint32_t uni_%s_mtab[];\n", l + 1, i, name);
 }
 @
 
@@ -2183,9 +2403,15 @@ fprintf(stderr, "extern const uni_alias_t uni_%s_nameof[];\n", pn);
 printf("const uni_alias_t uni_%s_nameof[] = {\n", pn);
 /* generating enum on stderr */
 fputs("typedef enum {\n", stderr);
+int last_nameof = -1;
 for(j = 0; j < num_val_aliases[i]; j++) {
   const uni_alias_t *va = &val_aliases[i][j];
   /* print nameof table entry */
+  char *e_nameof;
+  int cur_nameof = strtol(va->short_name, &e_nameof, 10);
+  if(!*e_nameof)
+    while(++last_nameof != cur_nameof)
+      fputs("\t{ NULL },\n", stdout);
   printf("\t{ \"%s\"", va->short_name);
   if(strcmp(va->long_name, va->short_name))
     printf(", \"%s\"", va->long_name);
@@ -2364,7 +2590,7 @@ static uint8_t enum_val(int pno, const char *v)
     add_enum_rng(&parsed_props[prop_##n], low, high, enum_val(prop_##n, v)); \
   } \
 } while(0)
-#define add_num(n, val) do { \
+#define add_int(n, val) do { \
   if(prop_##n < 0) \
     prop_##n = add_prop(#n); \
   if(isdigit(*val)) \
@@ -2372,6 +2598,49 @@ static uint8_t enum_val(int pno, const char *v)
   else \
     add_enum(n, val); \
 } while(0)
+@
+
+To test the table implementations, a different, but nearly identical,
+set of routines is used compared to the ones one for booleans.
+
+<<Functions to help test generated tables>>=
+#define dat(x, d) doit_dat(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab, d)
+
+static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
+                     const uint32_t *mtab, uint8_t def)
+{
+    uint32_t i;
+
+    /* print stats */
+    printf("%s:\n"
+           "  rng: %d entries (%d bytes; %d lookups max)\n",
+           name, nent, nent * 8, lg2(nent));
+    print_mtab_info(mtab, nent * 8);
+    /* check integrity */
+    for(i = 0; i < 0x110000; i++) {
+      uint8_t rv = find_cp_chrrng(i, rng, nent, def);
+      uint8_t mv = <<range table data for [[i]]>>;
+      if(rv != mv) {
+        fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, (int)rv, (int)mv);
+	/* exit(1); */
+	return;
+      }
+    }
+    /* check performance */
+    int j;
+    unsigned long tr, tt;
+    tstart();
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        tres = find_cp_chrrng(i, rng, nent, def);
+    tr = tend();
+    tstart();
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        tres = <<range table data for [[i]]>>;
+    tt = tend();
+    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+}
 @
 
 First, [[UnicodeData.txt]] has a few fields.  Field 3 is gc.  Field 4
@@ -2389,7 +2658,7 @@ decl_enum(nt, "None");
 
 <<Process a line of [[UnicodeData.txt]]>>=
 add_enum(gc, fields[2]);
-add_num(ccc, fields[3]);
+add_int(ccc, fields[3]);
 add_enum(bc, fields[4]);
 if(fields[5][0] == '<') {
   char *eval = fields[5] + 1;
@@ -2470,6 +2739,7 @@ decl_enum(GCB, "XX");
 decl_enum(SB, "XX");
 decl_enum(WB, "XX");
 decl_enum(ea, "N");
+decl_enum(age, "unassigned");
 @
 
 <<Parse UCD files>>=
@@ -2544,6 +2814,15 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+<<Parse UCD files>>=
+open_f("DerivedAge.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(age, fields[1]);
+}
+fclose(f);
+@
+
 And there is one file that has two properties per line.
 
 <<Initialize UCD files>>=
@@ -2563,7 +2842,13 @@ fclose(f);
 
 Once finished, the tables can be dumped.  Just as with boolean
 properties, only range tables have been built, so it's time to
-generate the multi-level table, assuming that the range data is correct.
+generate the multi-level table, assuming that the range data is
+correct.  Since the way that the automatic enumerations are generated
+does not guarantee that zero is the default value, and zero is stored
+more efficiently than any other value, all values are incremented by
+one and the default value is aliased to zero as well.  The default
+value itself is never stored in the table; it is supplied in the
+lookup function as well.
 
 <<Common uni definitions>>=
 uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
@@ -2583,14 +2868,21 @@ uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
     bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
-  low = tab[0].low;
-  high = tab[tab_len - 1].high;
+  for(i = tab_len; i > 0; i--)
+    if(tab[i - 1].dat != def)
+      break;
+  high = tab[i - 1].high;
+  for(i = 0; i < tab_len; i++)
+    if(tab[i].dat != def)
+      break;
+  low = tab[i].low;
   len = high - low + 1;
   inisize(bits, len);
   /* FIXME: only set def on unspecified ranges; may be faster */
-  memset(bits, def, len);
-  for(i = 0; i < tab_len; i++)
-    memset(bits + tab[i].low - low, tab[i].dat, tab[i].high - tab[i].low + 1);
+  clearbuf(bits, len);
+  for(; i < tab_len; i++)
+    if(tab[i].dat != def)
+      memset(bits + tab[i].low - low, tab[i].dat + 1, tab[i].high - tab[i].low + 1);
   bits_to_multi(bits, len, low, high, 0, 0, &ml, ml_len);
   free(bits);
   return ml;
@@ -2620,40 +2912,57 @@ for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat) {
     fixup_rng_dat(&parsed_props[i]);
     parsed_props[i].mt = rng_dat_to_multi(parsed_props[i].rng_dat, parsed_props[i].rng_len,
-                                          &parsed_props[i].mt_len, parsed_props[i].def);
+                                          &ml_len, parsed_props[i].def);
 }
 @
 
 In addition to the property tables, a simple query function is
 printed.  This calls a generic search function using the multi-level
-table.
+table.  The test cases are printed as well, and added to the boolean
+tests.
 
 <<Dump character information as C code>>=
+tstf = fopen("tsttab.c.tests", "a");
+if(!tstf) {
+  perror("tsttab.c.tests");
+  exit(1);
+}
 for(i = 0; i < nparsed; i++) {
   if(parsed_props[i].rng_dat) {
     const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
                                               parsed_props[i].name;
     printf("const uni_chrrng_dat_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].rng_len; j++)
-      printf("\t{ %d, %d, %d }%s\n", parsed_props[i].rng_dat[j].low,
-                                     parsed_props[i].rng_dat[j].high,
-				     (int)parsed_props[i].rng_dat[j].dat,
-				     j < parsed_props[i].rng_len - 1 ? "," : "");
+    for(j = 0; j < parsed_props[i].rng_len; j++) {
+      uint8_t val = parsed_props[i].rng_dat[j].dat;
+      uni_alias_t *aliases = i < num_prop_aliases ? val_aliases[i] : NULL;
+      printf("\t{ %d, %d, ",
+             parsed_props[i].rng_dat[j].low,
+	     parsed_props[i].rng_dat[j].high);
+      if(!aliases || (isdigit(aliases[0].short_name[0]) &&
+                      !strchr(aliases[0].short_name, '.')))
+        printf("%d", (int)val);
+      else {
+        const uni_alias_t *alias = &aliases[val];
+	const char *val_name = alias->short_name;
+        if(isdigit(val_name[0]))
+	  val_name = alias->long_name;
+	printf("U_%s_%s", name, val_name);
+      }
+      printf(" }%s\n", j < parsed_props[i].rng_len - 1 ? "," : "");
+    }
     puts("};");
-    fprintf(stderr, "#define uni_%s_rng_len %d\n", name,
-                                                   parsed_props[i].rng_len);
-    printf("const uint32_t uni_%s_mtab[] = {\n\t", name);
-    for(j = 0; j < parsed_props[i].mt_len; j++)
-      printf("0x%X%s", parsed_props[i].mt[j], j == parsed_props[i].mt_len - 1 ?
-                                                     "\n" : !((j + 1) % 8) ?
-						           ",\n\t" : ", ");
-    puts("};");
-    fprintf(stderr, "extern const uni_chrrng_dat_t uni_%s_rng[];\n"
-		    "extern const uint32_t uni_%s_mtab[];\n"
+    fprintf(stderr, "/* %d lookups max */\n"
+		    "extern const uni_chrrng_dat_t uni_%s_rng[];\n"
+		    "#define uni_%s_rng_len %d\n"
 		    "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
-		    name, name, name, name, parsed_props[i].def);
+		    lg2(parsed_props[i].rng_len),
+		    name, name, parsed_props[i].rng_len, name, name,
+		    parsed_props[i].def);
+    print_mtab(name, parsed_props[i].mt);
+    fprintf(tstf, "dat(%s, %d);\n", name, parsed_props[i].def);
   }
 }
+fclose(tstf);
 @
 
 <<Common uni definitions>>=
@@ -2667,10 +2976,15 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
   uint8_t mv = multi_tab_lookup(tab, cp, &mr, 0);
   if(mr)
     mv = *mr;
-  else if(cp < (tab[0] << 1) || cp > tab[1])
-    mv = def;
-  return mv;
+  if(!mv)
+    return def;
+  else
+    return mv - 1;
 }
+@
+
+<<range table data for [[i]]>>=
+uni_x_of(i, mtab, def)
 @
 
 \subsection{Numeric Properties}
@@ -2684,6 +2998,380 @@ integer (e.g., 01 matches 1) and the dotted value against any
 like-valued floating point number (e.g., 01.10 matches 1.1).  In
 addition, the age property is meant to match equal to or less than the
 search value.  For example, 3.0 matches 1.1 as well.
+
+Numeric values are stored as rational numbers (fractions).  Since the
+current standard has no numbers requiring denominators over 127, the
+denominator is stored in a single byte.  The numerator needs no more
+than 19 bits, so it is stored in the remaining 3 bytes.
+
+<<Common uni definitions>>=
+typedef struct {
+    uint32_t low, high;
+    int32_t num:24, denom:8;
+} uni_chrrng_num_t;
+void cp_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
+                   uint32_t tab_len, int32_t *num, uint8_t *denom);
+@
+
+<<Known Data Types>>=
+uni_chrrng_num_t,%
+@
+
+<<Common uni functions>>=
+void cp_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
+                   uint32_t tab_len, int32_t *num, uint8_t *denom)
+{
+#if 0
+  uni_chrrng_num_t cr = {cp, cp}, *tab_el;
+  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_num_t), uni_cmprng);
+  if(!tab_el)
+    *num = 0;
+  else {
+    *num = tab_el->num;
+    *denom = tab_el->denom;
+  }
+#else /* twice as fast! */
+  int l = 0, h = tab_len - 1;
+  while(l <= h) {
+    int j = (l + h) / 2;
+    if(cp < tab[j].low)
+      h = j - 1;
+    else if(cp > tab[j].high)
+      l = j + 1;
+    else {
+      *num = tab[j].num;
+      *denom = tab[j].denom;
+      return;
+    }
+  }
+  *num = 0;
+#endif
+  if(!*num)
+    *denom = 1;
+}
+@
+
+<<Property parsed contents>>=
+uni_chrrng_num_t *rng_num;
+@
+
+<<UCD parser local functions>>=
+static void add_num_rng(prop_t *p, uint32_t low, uint32_t high,
+                        int32_t num, uint8_t denom)
+{
+  if(!p->max_rng_len)
+    inisize(p->rng_num, (p->max_rng_len = 8));
+  if(p->rng_len && p->rng_num[p->rng_len - 1].high == low - 1 &&
+     p->rng_num[p->rng_len - 1].num == num &&
+     p->rng_num[p->rng_len - 1].denom == denom)
+    p->rng_num[p->rng_len - 1].high = high;
+  else {
+    if(p->rng_len == p->max_rng_len)
+      resize(p->rng_num, (p->max_rng_len *= 2));
+    p->rng_num[p->rng_len].low = low;
+    p->rng_num[p->rng_len].high = high;
+    p->rng_num[p->rng_len].num = num;
+    p->rng_num[p->rng_len].denom = denom;
+    ++p->rng_len;
+  }
+}
+@
+
+<<UCD parser local definitions>>=
+#define decl_num(n) int prop_##n = -1
+#define add_num(n, num, denom) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  add_num_rng(&parsed_props[prop_##n], low, high, num, denom); \
+} while(0)
+@
+
+To test the table implementations, a different, but nearly identical,
+set of routines is used compared to the ones one for booleans.
+
+<<Functions to help test generated tables>>=
+#define num(x) doit_num(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
+
+static void doit_num(const char *name, const uni_chrrng_num_t *rng, uint32_t nent,
+                     const uint32_t *mtab)
+{
+    uint32_t i;
+
+    /* print stats */
+    printf("%s:\n"
+           "  rng: %d entries (%d bytes; %d lookups max)\n",
+           name, nent, nent * 12, lg2(nent));
+    print_mtab_info(mtab, nent * 12);
+    /* check integrity */
+    for(i = 0; i < 0x110000; i++) {
+      int32_t rn, mn;
+      uint8_t rd, md;
+      cp_chrrng_val(i, rng, nent, &rn, &rd);
+      <<range table val for [[i]]>>;
+      if(rn != mn || rd != md) {
+        fprintf(stderr, "mismatch %s@%d %d/%d %d/%d\n", name, i,
+	                (int)rn, (int)rd, (int)mn, (int)md);
+	/* exit(1); */
+	return;
+      }
+    }
+    /* check performance */
+    int j;
+    unsigned long tr, tt;
+    tstart();
+    int32_t mn;
+    uint8_t md;
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        cp_chrrng_val(i, rng, nent, &mn, &md);
+    tr = tend();
+    tstart();
+    for(j = 0; j < 10; j++)
+      for(i = 0; i < 0x110000; i++)
+        <<range table val for [[i]]>>;
+    tt = tend();
+    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+}
+@
+
+Numeric properties from [[UnicodeData.txt]] are ccc (field 4) and nv
+(field 9).  Since ccc has aliases, it is already added as an
+enumeration.  The nv field is already in normal rational form.
+
+<<Initialize UCD files>>=
+decl_num(nv);
+@
+
+<<Process a line of [[UnicodeData.txt]]>>=
+if(*fields[8]) {
+  int32_t num = strtol(fields[8], &s, 10);
+  uint8_t denom = *s ? strtol(s + 1, NULL, 10) : 1;
+  add_num(nv, num, denom);
+}
+@
+
+An optional numeric property comes from
+[[Unihan_RadicalStrokeCounts.txt]]: cjkRSUnicode.  It is, like all
+unihan files, a tab-separated file, with the single code point in U+
+notation in field 1.  Note that the actual optional property is
+CJK\_Radical, which I interpret as meaning the same as cjkRSUnicode.
+However, I will not add a non-normative alias (especially considering
+that the library currently only supports four names, and there are
+already four names for this property).
+
+<<UCD parser local functions>>=
+static void split_line_tab(char *buf)
+{
+  if(!max_fields)
+    inisize(fields, (max_fields = 16));
+  num_fields = 0;
+  while(*buf != '\t' && isspace(*buf)) buf++;
+  if(!*buf || *buf == '#')
+    return;
+  while(1) {
+    while(isspace(*buf) && *buf != '\t')
+      buf++;
+    char *f = buf, *nf, fc;
+    for(nf = buf; *nf && *nf != '\t'; nf++);
+    fc = *nf;
+    buf = nf + 1;
+    while(nf > f && isspace(nf[-1])) --nf;
+    *nf = 0;
+    if(num_fields == max_fields)
+      resize(fields, (max_fields *= 2));
+    fields[num_fields++] = f;
+    if(!fc)
+      return;
+  }
+}
+@
+
+<<Initialize Unihan files>>=
+decl_num(cjkRSUnicode);
+@
+
+<<Parse Unihan files>>=
+open_f("Unihan_RadicalStrokeCounts.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse Unihan cp>>
+  if(!strcmp(fields[1], "kRSUnicode")) {
+    /* due to complexity of this field, the num/denom is interpreted */
+    /* differently: */
+    /* denom is number after .; if after !., then it is negated */
+    /* num is 3 byte fields; lowest field is left of . or !. */
+    /* if there are two values, then the 2nd value is in the upper bytes */
+    int32_t num;
+    uint8_t denom;
+    num = strtol(fields[2], &s, 10);
+    if(*s == '!')
+      denom = -strtol(s + 2, &s, 10);
+    else
+      denom = strtol(s + 1, &s, 10);
+    if(*s) {
+      num |= strtol(s, &s, 10) << 8;
+      if(*s == '!')
+        num |= -strtol(s + 2, &s, 10) << 16;
+      else
+        num |= strtol(s + 1, &s, 10) << 16;
+    }
+    add_num(cjkRSUnicode, num, denom);
+  }
+}
+fclose(f);
+@
+
+<<Parse Unihan cp>>=
+split_line_tab(lbuf);
+if(num_fields < 2)
+  continue;
+low = high = strtol(lbuf + 2, NULL, 16);
+@
+
+<<Dump character information as C code>>=
+fputs("/* extract l.r value; l!.r is encoded as l.-r */\n"
+      "#define uni_kRSUnicode_val1(n, d, l, r) do { \\\n"
+      "  l = (uint8_t)(n); \\\n"
+      "  r = (int8_t)d; \\\n"
+      "} while(0)\n"
+      "#define uni_kRSUnicode_val2(n, d, l, r) do { \\\n"
+      "  l = (uint8_t)(n >> 8); \\\n"
+      "  r = (int32_t)d >> 16; \\\n"
+      "} while(0)\n", stderr);
+@
+
+The only other numeric property currently supported is age, which
+comes from [[DerivedAge.txt]].  Since it has aliases, it is already
+added as an enumeration.
+
+Once finished, the tables can be dumped.  Just as with other
+properties, only range tables have been built, so it's time to
+generate the multi-level table, assuming that the range data is correct.
+
+<<Common uni definitions>>=
+uint32_t *rng_num_to_multi(const uni_chrrng_num_t *tab, uint32_t tab_len,
+                           uint32_t *ml_len);
+@
+
+<<Common uni functions>>=
+uint32_t *rng_num_to_multi(const uni_chrrng_num_t *tab, uint32_t tab_len,
+                           uint32_t *ml_len)
+{
+  uint32_t low, high, len, i, j;
+  uint32_t *ml;
+  uint32_t *bits;
+
+  /* degenerate case:  always out-of-range */
+  if(!tab_len) {
+    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    return ml;
+  }
+  low = tab[0].low;
+  high = tab[tab_len - 1].high;
+  len = high - low + 1;
+  inisize(bits, len);
+  /* FIXME: only set def on unspecified ranges; may be faster */
+  clearbuf(bits, len);
+  for(i = 0; i < tab_len; i++) {
+    uint32_t v = (tab[i].num << 8) + (tab[i].denom & 0xff);
+    if(!tab[i].num) /* default value: 0/anything */
+      continue;
+    for(j = tab[i].low; j <= tab[i].high; j++)
+      bits[j - low] = v;
+  }
+  bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 4, &ml, ml_len);
+  free(bits);
+  return ml;
+}
+@
+
+<<UCD parser local functions>>=
+static void fixup_rng_num(prop_t *p)
+{
+  uint32_t i;
+  qsort(p->rng_num, p->rng_len, sizeof(uni_chrrng_num_t), uni_cmprng);
+  for(i = 0; i < p->rng_len - 1; i++)
+    if(p->rng_num[i + 1].low == p->rng_num[i].high - 1 &&
+       p->rng_num[i + 1].num == p->rng_num[i].num &&
+       p->rng_num[i + 1].denom == p->rng_num[i].denom) {
+      p->rng_num[i].high = p->rng_num[i + 1].high;
+      if(i + 2 < p->rng_len) {
+        memmove(p->rng_num + i + 1, p->rng_num + i + 2,
+	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_num_t));
+        p->rng_len--;
+      }
+    }
+}
+@
+
+<<Post-process property data>>=
+for(i = 0; i < nparsed; i++)
+  if(parsed_props[i].rng_num) {
+    fixup_rng_num(&parsed_props[i]);
+    parsed_props[i].mt = rng_num_to_multi(parsed_props[i].rng_num, parsed_props[i].rng_len,
+                                          &ml_len);
+}
+@
+
+In addition to the property tables, a simple query function is
+printed.  This calls a generic search function using the multi-level
+table.
+
+<<Dump character information as C code>>=
+tstf = fopen("tsttab.c.tests", "a");
+if(!tstf) {
+  perror("tsttab.c.tests");
+  exit(1);
+}
+for(i = 0; i < nparsed; i++) {
+  if(parsed_props[i].rng_num) {
+    const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
+                                              parsed_props[i].name;
+    printf("const uni_chrrng_num_t uni_%s_rng[] = {\n", name);
+    for(j = 0; j < parsed_props[i].rng_len; j++)
+      printf("\t{ %d, %d, %d, %d }%s\n",
+             parsed_props[i].rng_num[j].low,
+	     parsed_props[i].rng_num[j].high,
+	     parsed_props[i].rng_num[j].num,
+	     parsed_props[i].rng_num[j].denom,
+	     j < parsed_props[i].rng_len - 1 ? "," : "");
+    puts("};");
+    fprintf(stderr, "/* %d lookups max */\n"
+		    "extern const uni_chrrng_num_t uni_%s_rng[];\n"
+		    "#define uni_%s_rng_len %d\n"
+		    "#define uni_%s_val(x, n, d) uni_x_val(x, uni_%s_mtab, n, d)\n",
+		    lg2(parsed_props[i].rng_len),
+		    name, name, parsed_props[i].rng_len, name, name);
+    print_mtab(name, parsed_props[i].mt);
+    fprintf(tstf, "num(%s);\n", name);
+  }
+}
+fclose(tstf);
+@
+
+<<Common uni definitions>>=
+void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom);
+@
+
+<<Common uni functions>>=
+void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
+{
+  const uint8_t *mr;
+  multi_tab_lookup(tab, cp * 4, &mr, 0);
+  if(!mr)
+    *num = 0;
+  else {
+    int32_t v = *(int32_t *)mr;
+    *num = v >> 8;
+    *denom = v & 0xff;
+  }
+  if(!*num)
+    *denom = 1;
+}
+@
+
+<<range table val for [[i]]>>=
+uni_x_val(i, mtab, &mn, &md);
+@
 
 \subsection{String Properties}
 
@@ -2735,6 +3423,8 @@ typedef struct {
               /* could also add a byte by making this :24 or smaller */
   uint32_t data; /* have whole word available here */
 } uni_cp_dat_t;
+const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
+                                uint32_t tab_len);
 @
 
 <<Known Data Types>>=
@@ -2763,191 +3453,6 @@ const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
   return 0;
 #endif
 }
-@
-
-Here is a test program which compares the performance of several tables.
-
-<<C Test Executables>>=
-tsttab \
-@
-
-<<makefile.rules>>=
-tsttab.o: uni_chartype.gen.h
-@
-
-<<tsttab.c>>=
-<<Common C Header>>
-
-#include "uni_chartype.h"
-// static_proto
-
-#include <sys/resource.h>
-struct rusage ru;
-
-static void tstart(void)
-{
-  getrusage(RUSAGE_SELF, &ru);
-}
-
-static unsigned long tend(void)
-{
-  struct rusage ru2;
-  getrusage(RUSAGE_SELF, &ru2);
-  return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
-            (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
-}
-
-static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nent,
-                     const uint32_t *mtab, uint8_t def)
-{
-    uint32_t i;
-
-    /* check integrity */
-    for(i = 0; i < 0x110000; i++) {
-      uint8_t b = find_cp_chrrng(i, rng, nent, def);
-      const uint8_t *mr;
-      uint8_t mv = multi_tab_lookup(mtab, i, &mr, def);
-      if(mr)
-        mv = *mr;
-      if(b != mv) {
-        fprintf(stderr, "mismatch %s@%d %d %d %p\n", name, i, (int)b, (int)mv, mr);
-	/* exit(1); */
-	return;
-      }
-    }
-    /* check performance */
-    int j;
-    unsigned long tr, tt;
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        find_cp_chrrng(i, rng, nent, def);
-    tr = tend();
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++) {
-        const uint8_t *mr;
-        uint8_t mv = multi_tab_lookup(mtab, i, &mr, def);
-        if(mr)
-          mv = *mr;
-      }
-    tt = tend();
-    printf("%s r%ld t%ld\n", name, tr, tt);
-}
-
-static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
-                      const uint32_t *mtab)
-{
-    uint32_t i;
-    
-    /* check integrity */
-    for(i = 0; i < 0x110000; i++) {
-      int res = is_cp_chrrng(i, rng, nent);
-      uint8_t mv = is_uni_x(i, mtab);
-      if(!mv != !res) {
-        fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, res, mv);
-	/*  exit(1); */
-	return;
-      }
-    }
-    /* check performance */
-    volatile int res;
-    int j;
-    unsigned long tr, tt;
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        res = is_cp_chrrng(i, rng, nent);
-    tr = tend();
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        res = is_uni_x(i, mtab);
-    tt = tend();
-    printf("%s r%ld t%ld\n", name, tr, tt);
-}
-
-int main(void)
-{
-#define dat(x, d) doit_dat(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab, d)
-#define bool(x) doit_bool(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
-  <<Convert ranges to tables>>
-  return 0;
-}
-@
-
-<<Convert ranges to tables>>=
-#if 0
-bool(AHex);
-bool(Alpha);
-bool(Bidi_C);
-bool(Bidi_M);
-bool(CI);
-bool(Cased);
-bool(CWCF);
-bool(CWCM);
-bool(CWL);
-bool(CWKCF);
-bool(CWT);
-bool(CWU);
-bool(CE);
-bool(Dash);
-bool(DI);
-bool(Dep);
-bool(Dia);
-bool(Ext);
-bool(Comp_Ex);
-bool(Gr_Base);
-bool(Gr_Ext);
-bool(Hex);
-bool(IDSB);
-bool(IDST);
-bool(IDC);
-bool(IDS);
-bool(Ideo);
-bool(Join_C);
-bool(LOE);
-bool(Lower);
-bool(Math);
-bool(NChar);
-bool(Pat_Syn);
-bool(Pat_WS);
-bool(QMark);
-bool(Radical);
-bool(STerm);
-bool(SD);
-bool(Term);
-bool(UIdeo);
-bool(Upper);
-bool(VS);
-bool(WSpace);
-bool(XIDC);
-bool(XIDS);
-bool(ASSIGNED);
-#endif
-#if 0
-dat(bc, U_bc_L);
-dat(ccc, 0);
-dat(dt, U_dt_None);
-dat(gc, U_gc_Cn);
-dat(nt, U_nt_None);
-dat(NFC_QC, U_NFC_QC_Y);
-dat(NFKC_QC, U_NFKC_QC_Y);
-#endif
-bool(NFD_QC);
-bool(NFKD_QC);
-#if 0
-dat(sc, U_sc_Zzzz);
-dat(blk, U_blk_No_Block);
-dat(hst, U_hst_NA);
-dat(lb, U_lb_XX);
-dat(GCB, U_GCB_XX);
-dat(SB, U_SB_XX);
-dat(WB, U_WB_XX);
-dat(ea, U_ea_N);
-dat(jg, U_jg_No_Joining_Group);
-dat(jt, U_jt_U);
-#endif
 @
 
 Another possibility would be to use more complex data structures.  I
@@ -3012,7 +3517,7 @@ UNINORM = $(UCD_LOC)/DerivedNormalizationProps.txt
 
 The canonical ordering information is a table of all reorderable code
 points, along with their canonical combining class (the number
-indicating its sort order) ([[unirng_ccc]]).  My original implementation
+indicating its sort order) ([[uni_ccc_rng]]).  My original implementation
 used a [[uni_cp_dat_t]]-like structure, but upon further examination,
 it appears that there is enough redundancy to justify a range table or
 multi-level table.
@@ -3077,7 +3582,7 @@ uni_norm.o: uninorm.gen
 @
 
 <<Plain Built Files>>=
-*.gen \
+uninorm.gen \
 @
 
 Functions are then provided to look up this information.  To look up
@@ -3124,22 +3629,6 @@ const uni_decent_t *find_nfkc_cf(int cp)
 {
   return (uni_decent_t *)find_cp_dat(cp, (uni_cp_dat_t *)nfkc_cf,
                                      sizeof(nfkc_cf)/sizeof(*nfkc_cf));
-}
-@
-
-The canonical combining class table only holds one value, so the
-structure is private and the function returns the actuall ccc.  The
-ccc is zero for anything not in the table.
-
-<<Unicode normalization support exports>>=
-/* the ccc for canonical ordering and composition */
-int find_ccc(int cp);
-@
-
-<<Unicode normalization support functions>>=
-int find_ccc(int cp)
-{
-  return find_cp_chrrng(cp, unirng_ccc, sizeof(unirng_ccc)/sizeof(*unirng_ccc), 0);
 }
 @
 
@@ -3265,6 +3754,9 @@ int Canon_Order(int *buf, int blen, int last);
 @
 
 <<Unicode normalization support local definitions>>=
+/* uni_ccc_of */
+#include "uni_chartype.h"
+
 /* for stable sort */
 struct ccs {
     int cp, ccc;
@@ -3289,11 +3781,11 @@ int Canon_Order(int *buf, int blen, int last)
 {
     int i;
     for(i = 0; i < blen; i++) {
-        int cc = find_ccc(buf[i]);
+        int cc = uni_ccc_of(buf[i]);
         if(cc) {
             int j;
             for(j = i + 1; j < blen; j++) {
-                int cc2 = find_ccc(buf[j]);
+                int cc2 = uni_ccc_of(buf[j]);
                 if(!cc2)
                     break;
             }
@@ -3305,7 +3797,7 @@ int Canon_Order(int *buf, int blen, int last)
             ccbuf[0].opos = i;
             int k;
             for(k = i + 1; k < j; k++) {
-                ccbuf[k-i].ccc = find_ccc(buf[k]);
+                ccbuf[k-i].ccc = uni_ccc_of(buf[k]);
                 ccbuf[k-i].cp = buf[k];
                 ccbuf[k-i].opos = k;
             }
@@ -3338,7 +3830,7 @@ int NFC_comp(int *buf, int blen, int *nok)
 {
   int i, last0 = -1;
   for(i = 0; i < blen; i++) {
-    int ccc = find_ccc(buf[i]);
+    int ccc = uni_ccc_of(buf[i]);
     /* first char must be ccc=0 */
     if(ccc)
       continue;
@@ -3347,7 +3839,7 @@ int NFC_comp(int *buf, int blen, int *nok)
     int lastccc = 0;
     int j;
     for(j = i + 1; j < blen; j++) {
-      ccc = find_ccc(buf[j]);
+      ccc = uni_ccc_of(buf[j]);
       /* second char must have no intervening equal ccc */
       /* this assumes canonical ordering has been done */
       if(ccc && lastccc && ccc == lastccc)
@@ -4118,48 +4610,6 @@ uni_chartype.o
 <<Character type functions>>
 @
 
-Unicode is a 32-bit encoding, leaving 4 billion possible values.
-Filtering for valid code points still leaves over 1 million possible
-values.  Rather than having huge lookup tables for character types as
-would be done with only 256 code points, each flag is represented as
-an array of ranges, in numerical order.  Binary searches can be used
-to determine if the flag is set.
-
-<<Character type functions>>=
-#define is_x(x) \
-    int is_uni_##x(int cp) \
-    { \
-        uni_chrrng_t cr = {cp, cp}; \
-    /* FIXME: change to manual bsearch */ \
-        return bsearch(&cr, unirng_##x, sizeof(unirng_##x)/sizeof(uni_chrrng_t), \
-                       sizeof(uni_chrrng_t), uni_cmprng) ? 1 : 0; \
-    }
-@
-
-For classification, the array of ranges is augmented by a value for
-each range.  The value can be a plain integer or an enumeration.
-
-<<Return table lookup for range table>>=
-/* prefix with return type */
-#define range_ret(x, i) \
-     uni_##x##_of(int cp) \
-    { \
-        uni_chrrng_dat_t cr = {cp, cp}, *res; \
-    /* FIXME: change to manual bsearch */ \
-        res = bsearch(&cr, unirng_##x, sizeof(unirng_##x)/sizeof(uni_chrrng_dat_t), \
-                      sizeof(uni_chrrng_dat_t), uni_cmprng_dat); \
-        if(!res) \
-            return i; \
-        return res->dat; \
-    }
-@
-
-<<Character type local definitions>>=
-<<Return table lookup for range table>>
-/* enum return type */
-#define x_of(x, i) uni_##x##_t range_ret(x, i)
-@
-
 <<Character type local definitions>>=
 #include "uni_chartype.gen"
 @
@@ -4171,12 +4621,15 @@ each range.  The value can be a plain integer or an enumeration.
 
 \lstset{language=make}
 <<makefile.vars>>=
-PARSE_UCD_DEPS = uni_common.c uni_common.h mfgets.c mfgets.h
+PARSE_UCD_DEPS := uni_common.c uni_common.h mfgets.c mfgets.h
+PARSE_UCD_DEPS := $(PARSE_UCD_DEPS) \
+                  $(patsubst %, %.static_proto, $(filter %.c, $(PARSE_UCD_DEPS)))
 @
 
 <<makefile.rules>>=
 uni_chartype.gen: parse-ucd.c $(PARSE_UCD_DEPS)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -o parse-ucd $(filter %.c, $^)
+	mkdir cp.$$$$; touch cp.$$$$/cproto.h; trap "rm -rf cp.$$$$" 0; \
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -o parse-ucd $(filter %.c, $^)
 	./parse-ucd $(UCD_LOC) $(UNIHAN_LOC) >uni_chartype.gen 2>uni_chartype.gen.h
 
 # dummy rule to generate this file
@@ -4188,71 +4641,8 @@ uni_chartype.gen.h: uni_chartype.gen
 uni_chartype.gen.h \
 @
 
-First, although technically all code points from 0000 through 10FFFF
-are valid, some do not have an entry in the UCD.  These should be
-considered invalid as well.  To generate the table, UnicodeData.txt is
-parsed.  The parsing is too confusing when done directly in the make
-rule, so a script is used instead.
-
-\lstset{language=C}
-<<[[uni_chartype.gen]] dependencies>>=
-typedef struct {
-  const char *name;
-  uint32_t mask;
-} uni_gc_desc_t;
-@
-
-<<Known Data Types>>=
-uni_gc_desc_t,%
-@
-
-\lstset{language=make}
-<<Generate [[uni_chartype.gen]]>>=
-# standard character classes
-echo "const uni_gc_desc_t uni_gc_names[] = {" >>$@
-grep '^gc ;' $(UNIVALALIAS) | while read -r d d s d l t1 l2 t2 l3; do \
-  case "$$t1" in \
-    ";") ;; \
-    "#") l3="$$l2 $$t2 $$l3"; l2=; t2="#" ;; \
-    *) l2=; t2=; ;; \
-  esac; \
-  if [ "#" = "$$t2" ]; then \
-    fl=; \
-    while :; do \
-      fl="$$fl (1 << U_gc_$${l3%%|*})"; \
-      case "$$l3" in \
-        *"|"*) fl="$$fl |"; l3="$${l3#*| }" ;; \
-	*) break ;; \
-      esac; \
-    done; \
-  else \
-    fl="1 << U_gc_$$s"; \
-  fi; \
-  echo "  { \"$$s\", $$fl },"; \
-  echo "  { \"$$l\", $$fl },"; \
-  test -n "$$l2" && echo "  { \"$$l2\", $$fl },"; \
-done | LANG=C sort >>$@
-echo "};" >>$@
-echo "const uint32_t uni_gc_names_len = sizeof(uni_gc_names)/sizeof(uni_gc_names[0]);" >>$@
-@
-
-After creating all of the range structures, we can convert them to
-multi-level tables as well.
-
-<<C Build Executables>>=
-rngtotab \
-@
-
-<<Character types generation deps>>=
-rngtotab.c uni_chartype.h \
-@
-
-<<Post-process [[uni_chartype.gen]]>>=
-mkdir cp.$$$$; \
-trap "rm -rf cp.$$$$" 0; \
-touch cp.$$$$/{cproto.h,uni_chartype.gen.h,rngtotab.c.static_proto}; \
-$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ -o rngtotab rngtotab.c uni_common.c;
-./rngtotab >>$@
+<<Plain Built Files>>=
+uni_chartype.gen \
 @
 
 For regex:
@@ -4293,9 +4683,6 @@ other:
   Name (na) == UnicodeData.txt, field 2
   Name_Alias == NameAliases.txt
   Script_Extensions (scx) == ScriptExtensions.txt (multi)
-numeric:
-  Age (age) == DerivedAge.txt
-  Numeric_Value (nv) == UnicodeData.txt, field 8
 string:
   Lowercase_Mapping (lc) == SpecialCasing.txt (def = Simple_Lowercase_Mapping?)
   Titlecase_Mapping (tc) == SpecialCasing.txt (def = Simple_Titlecase_Mapping?)
@@ -4501,7 +4888,7 @@ putchar(' ');
 
 <<Print flags and classes of cp [[i]]>>=
 /* other flags */
-if(find_ccc(i))
+if(uni_ccc_of(i))
   putchar('-'); /* can be moved by canon_order */
 if(!is_uni_ASSIGNED(i))
   putchar('?');
@@ -5150,6 +5537,10 @@ strs.gen: mkstrs <<Built-in string table components>>
 
 	<<Generate built-in string table using [[mkstrs]]>>
 	<<Post-process built-in string table>>
+@
+
+<<Plain Built Files>>=
+strs.gen strs-hash.gen strs-strs.gen \
 @
 
 <<C Build Executables>>=
@@ -6272,19 +6663,38 @@ value matches the symbol lookup after extracting the code point.
 charnames.unirng \
 @
 
+<<Initialize UCD files>>=
+int prop_range = -1;
+int range_num = 0;
+@
+
+<<Process a line of [[UnicodeData.txt]]>>=
+if(low != high) {
+  if(prop_range < 0)
+    prop_range = add_prop("range");
+  add_enum_rng(&parsed_props[prop_range], low, high, range_num++);
+}
+@
+
+<<Parse character data files>>=
+parsed_props[prop_range].def = range_num;
+@
+
+<<Dump character information as C code>>=
+fprintf(stderr, "#define uni_range_invalid %d\n"
+                "#undef uni_range_of\n", range_num);
+@
+
 \lstset{language=make}
 <<Generate character name data>>=
 # Unicode range reverse lookup
 echo '#include "builtin-strings.h"' >>$@
-echo "const uni_chrrng_dat_t unirng_range[] = {" >>$@
-tr 'A-Z' 'a-z' < charnames.unirng | sed 's/[ -]/__/g;s/\^/_x5e/' | \
+echo "const uint32_t unirng_range[] = {" >>$@
+tr 'A-Z' 'a-z' < charnames.unirng | sed -n 's/[ -]/__/g;s/\^/_x5e/p' | \
  while IFS=, read n cp; do \
-   printf '\t{%s, ' $$cp; \
-   IFS=, read ign cp; \
-   echo "$$cp, UNI_RANGE_$${n}},"; \
+   echo "UNI_RANGE_$${n},"; \
 done | sed '$$s/,$$//' >>$@
 echo "};" >>$@
-echo "const uint32_t unirng_range_len = sizeof(unirng_range)/sizeof(unirng_range[0]);" >>$@
 @
 
 \lstset{language=C}
@@ -6294,8 +6704,13 @@ int uni_range_of(int cp);
 @
 
 <<Character name lookup functions>>=
-<<Return table lookup for range table>>
-int range_ret(range, 0)
+int uni_range_of(int cp)
+{
+  uint8_t i = uni_x_of(cp, uni_range_mtab, uni_range_invalid);
+  if(i == uni_range_invalid)
+    return 0;
+  return unirng_range[i];
+}
 @
 
 Now enough pieces are together to create some routines for character
@@ -6384,6 +6799,10 @@ charnames.gen: <<Character name data generation dependencies>>
 	echo >$@
 	<<Generate character name data>>
 uni_charname.o: charnames.gen
+@
+
+<<Plain Built Files>>=
+charnames.gen \
 @
 
 Looking up Unicode names is much more difficult.  On a lookup failure,
