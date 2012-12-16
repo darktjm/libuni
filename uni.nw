@@ -197,6 +197,7 @@ desirable operations are:
 % l2h substitution emptyset &empty;
 % l2h substitution alpha &alpha;
 % l2h substitution in &isin;
+% l2h substitution notin &notin;
 % l2h substitution cap &cap;
 % l2h substitution cup &cup;
 
@@ -204,42 +205,43 @@ desirable operations are:
 \item Finding out if a character \emph{is} or is not an element of the
 set.
 \item Querying the \emph{members} of a set.
-\item Applying \emph{logical} operators on a pair of sets.  There are
-16 possible logical operations between two sets (2 set members with 2
-values each = $2^2$ value combinations; 4 value combinations with 2
-possible result values each = $4^2$ result combinations).  See table
-\ref{tab:logical} for a complete list of operations.
+\item Applying set \emph{operators} on a pair of sets.  There are
+16 possible set operations between two sets (each potential member is
+either in or not in each of the 2 sets = $2^2$ membership
+combinations; member is either in or not in result = $4^2$ total
+combinations).  See table \ref{tab:setop} for a complete list of
+operations.
 
 \begin{table}
 \begin{quote}
-\begin{tabular}{lllllrl}
-$x\in A$&false&false&true&true&\\
-$x\in B$&false&true&false&true&\\
-&\multicolumn{4}{c}{$x\in A\textrm{ op }B$}&\multicolumn{2}{l}{Op \#}\\
-$\emptyset$&false&false&false&false&0&\\
-$\alpha$&true&true&true&true&1&\\
-$A$&false&false&true&true&2&\\
-$\overline A$&true&true&false&false&3&\\
-$B$&false&true&false&true&4&\\
-$\overline B$&true&false&true&false&5&\\
-$A \ominus B$&false&true&true&false&6&\\
-$\overline{A \ominus B}$&true&false&false&true&7&\\
-$A \cap B$&false&false&false&true&8&\\
-$\overline{A \cap B}$&true&true&true&false&9&\\
-$A - B$&false&false&true&false&10&\\
-$\overline{A - B}$&true&true&false&true&11&\\
-$B - A$&false&true&false&false&12&\\
-$\overline{B - A}$&true&false&true&true&13&\\
-$A \cup B$&false&true&true&true&14&\\
-$\overline{A \cup B}$&true&false&false&false&15&\\
+\begin{tabular}{lllllcrl}
+$x\in A$&false&false&true&true&&~\\
+$x\in B$&false&true&false&true&&\\
+\emph{op}&\multicolumn{4}{c}{$x\in A\textrm{ \emph{op} }B$}&\emph{when}&\multicolumn{2}{l}{\emph{Op \#}}\\
+$\emptyset$&false&false&false&false&never&0&\\
+$\alpha$&true&true&true&true&always&1&\\
+$A$&false&false&true&true&$x\in A$&2&\\
+$\overline A$&true&true&false&false&$x\notin A$&3&\\
+$B$&false&true&false&true&$x\in B$&4&\\
+$\overline B$&true&false&true&false&$x\notin B$&5&\\
+$A\ominus B$&false&true&true&false&$(x\in A)\oplus (x\in B)$&6&\\
+$\overline{A\ominus B}$&true&false&false&true&$(x\in A)\overline\oplus (x\in B)$&7&\\
+$A\cap B$&false&false&false&true&$(x\in A)\wedge (x\in B)$&8&\\
+$\overline{A\cap B}$&true&true&true&false&$(x\in A)\overline\wedge (x\in B)$&9&\\
+$A-B$&false&false&true&false&$(x\in A)\wedge (x\notin B)$&10&\\
+$\overline{A-B}$&true&true&false&true&$(x\notin A)\vee (x\in B)$&11&\\
+$B-A$&false&true&false&false&$(x\notin A)\wedge (x\in B)$&12&\\
+$\overline{B-A}$&true&false&true&true&$(x\in A)\vee (x\notin B)$&13&\\
+$A\cup B$&false&true&true&true&$(x\in A)\vee (x\in B)$&14&\\
+$\overline{A\cup B}$&true&false&false&false&$(x\in A)\overline\vee (x\in B)$&15&\\
 \end{tabular}
 
 {\small Operation numbers are assigned using the formula $o_0 \oplus
-(x \in A)\wedge o_1 \oplus (x \in B)\wedge o_2 \oplus (x \in A \cap
+(x \in A)\wedge o_1 \oplus (x \in B)\wedge o_2 \oplus (x \in A\cap
 B)\wedge o_3$, where $o_n$ is true if bit $n$ is true in the operation
 number.}
 \end{quote}
-\caption{\label{tab:logical}Logical Operations}
+\caption{\label{tab:setop}Set Operations}
 \end{table}
 \end{itemize}
 
@@ -250,22 +252,20 @@ would still be over 128 kilobytes, even if the array is limited to the
 valid code point range.  Some properties only apply to a limited range
 of characters, so these might use a little less space.  Even so, with
 numerous properties, this adds up quickly, and may even slow things
-down by keeping everything out of the cache.  A plain bit array also
-makes it difficult to perform the \emph{members} operation: every
-single potential member needs to be tested.  The \emph{logical}
-operators are easy to perform, but require manipulating up to 256
-kilobytes of data.  Other storage strategies are needed.
+down by keeping everything out of the cache.  The set
+\emph{operations} are easy to perform, but require manipulating up to
+384 kilobytes of data.
 
 <<Common uni definitions>>=
 #define MAX_UNI_CP 0x10ffff
 typedef enum {
-  UNI_LOG_FALSE, UNI_LOG_TRUE, UNI_LOG_A, UNI_LOG_NOT_A,
-  UNI_LOG_B, UNI_LOG_NOT_B, UNI_LOG_A_XOR_B, UNI_LOG_A_XNOR_B,
-  UNI_LOG_A_AND_B, UNI_LOG_A_NAND_B, UNI_LOG_A_MINUS_B, UNI_LOG_NOT_A_MINUS_B,
-  UNI_LOG_B_MINUS_A, UNI_LOG_NOT_B_MINUS_A, UNI_LOG_A_OR_B, UNI_LOG_A_NOR_B
-} uni_log_op_t;
+  UNI_SOP_NIL, UNI_SOP_ALL, UNI_SOP_A, UNI_SOP_INV_A,
+  UNI_SOP_B, UNI_SOP_INV_B, UNI_SOP_SYM_DIFF, UNI_SOP_INV_SYM_DIFF,
+  UNI_SOP_INTER, UNI_SOP_INV_INTER, UNI_SOP_A_MINUS_B, UNI_SOP_INV_A_MINUS_B,
+  UNI_SOP_B_MINUS_A, UNI_SOP_INV_B_MINUS_A, UNI_SOP_UNION, UNI_SOP_INV_UNION
+} uni_set_op_t;
 #define BIT_OP_BIT(op, n) (~((((op) >> n) & 1) - 1))
-#define BIT_OP(A, B, op) \
+#define BIT_OP(A, op, B) \
   (((A) & BIT_OP_BIT(op, 1)) ^ ((B) & BIT_OP_BIT(op, 2)) ^ \
    ((A) & (B) & BIT_OP_BIT(op, 3)) ^ BIT_OP_BIT(op, 0))
 
@@ -277,35 +277,406 @@ typedef enum {
 #define BSET_IS_SET(a, b) (BSET_ELT(a, b) & BSET_MASK(a, b))
 #define BSET_SET(a, b) BSET_ELT(a, b) |= BSET_MASK(a, b)
 #define BSET_CLEAR(a, b) BSET_ELT(a, b) &= ~BSET_MASK(a, b)
-/* Logical ops not directly supported */
+@
+
+<<Known Data Types>>=
+uni_set_op_t,%
+@
+
+The set \emph{operations} must be performed on arrays of a particular
+type.  However, C does not really support generics, so the only way to
+support more than one type is to either repeat the code or use
+preprocessor macros.  In this case, I will write the function
+definition to an include file, and include it multiple times while
+redefining the table type.  This prevents the need for a large,
+multi-chunk preprocessor macro which does not support [[#line]]
+directives.
+
+<<Common uni definitions>>=
+#define setop_bitn(n) \
+  void setop_bit##n(uint##n##_t *a, uint32_t a_low, uint32_t a_len, \
+                    uni_set_op_t op, \
+                    uint##n##_t *b, uint32_t b_low, uint32_t b_len, \
+		    uint##n##_t **res, uint32_t *res_low, uint32_t *res_len, \
+		    uint32_t *res_max)
+setop_bitn(32);
+setop_bitn(16);
+setop_bitn(8);
+@
+
+<<makefile.rules>>=
+uni_common.c: setop_bitn.h
+@
+
+<<Common uni functions>>=
+#define setop_src_t uint32_t
+#define setop_n 32
+#define setop_f setop_bit32
+#include "setop_bitn.h"
+#define setop_src_t uint16_t
+#define setop_n 16
+#define setop_f setop_bit16
+#include "setop_bitn.h"
+#define setop_src_t uint8_t
+#define setop_n 8
+#define setop_f setop_bit8
+#include "setop_bitn.h"
+@
+
+<<Known Data Types>>=
+setop_src_t,%
+@
+
+<<setop_bitn.h>>=
+void setop_f(setop_src_t *a, uint32_t a_low, uint32_t a_len,
+             uni_set_op_t op,
+	     setop_src_t *b, uint32_t b_low, uint32_t b_len,
+	     setop_src_t **res, uint32_t *res_low, uint32_t *res_len,
+	     uint32_t *res_max)
+{
+  <<Perform set operation on bit strings>>
+}
+#undef setop_src_t
+#undef setop_n
+#undef setop_f
+@
+
+First, there are few degenerate cases which do not involve [[a]]
+and/or [[b]].  While the general routine will return the same result,
+the logic for the degenerate cases is much simpler, so a value can be
+returned immediately.  The $\overline A$ and $\overline B$ operations
+are degenerate cases by this definition, but they require a bit of
+finesse that is provided by the main routine, anyway.  So, instead of
+duplicating that code here, the unused input is simply zeroed to
+improve its performance.
+
+<<Perform set operation on bit strings>>=
+if(op == UNI_SOP_INV_A)
+  b_len = 0;
+else if(op == UNI_SOP_INV_B)
+  a_len = 0;
+@
+
+If both inputs are empty, the operation is determined by applying the
+operator to two zeroes.  This will always match bit zero of the
+operation number, and will be equivalent to applying $\emptyset$ or
+$\alpha$.  If just one is empty, then that reduces the operations to
+four: the above two, the non-empty set, or the inverse of the
+non-empty set.  The operation number is adjusted to reflect this.
+
+<<Perform set operation on bit strings>>=
+int zz_op = /* BIT_OP(0, op, 0) */ op & UNI_SOP_ALL;
+if(!a_len && !b_len)
+  op &= UNI_SOP_ALL;
+else if(!a_len)
+  op &= UNI_SOP_B | UNI_SOP_ALL;
+else if(!b_len)
+  op &= UNI_SOP_A | UNI_SOP_ALL;
+@
+
+The $\emptyset$ operation returns an empty result.  The $\alpha$
+operation returns a result with all bits set.  The $A$ and $B$
+operations just return copies of the requested input.
+
+<<Perform set operation on bit strings>>=
+if(op == UNI_SOP_NIL) {
+  *res_len = 0;
+  *res_low = 0;
+  if(*res_max) {
+    *res_max = 0;
+    free(*res);
+  }
+  return;
+}
+if(op == UNI_SOP_ALL) {
+  *res_len = MAX_UNI_CP / setop_n + 1;
+  *res_low = 0;
+  if(!*res_max)
+    inisize(*res, (*res_max = *res_len));
+  else if(*res_max < *res_len)
+    resize(*res, (*res_max = *res_len));
+  memset(*res, ~0, *res_len * setop_n / 8);
+  return;
+}
+if(op == UNI_SOP_A) {
+  *res_len = a_len;
+  *res_low = a_low;
+  if(!*res_max)
+    inisize(*res, (*res_max = a_len));
+  else if(*res_max < a_len)
+    resize(*res, (*res_max = a_len));
+  memcpy(*res, a, *res_len * setop_n / 8);
+  return;
+}
+if(op == UNI_SOP_B) {
+  *res_len = b_len;
+  *res_low = b_low;
+  if(!*res_max)
+    inisize(*res, (*res_max = b_len));
+  else if(*res_max < b_len)
+    resize(*res, (*res_max = b_len));
+  memcpy(*res, b, *res_len * setop_n / 8);
+  return;
+}
+@
+
+The bit strings do not necessarily start at the same position.  For
+convenience, [[a]] will be reassigned to be the set with the earlier
+start position, or only start position if one of the inputs is empty.
+If a swap occurs, the operation number must also be adjusted by
+swapping the $A$ and $B$ bits.  In addition, if one input is empty, it
+is moved past the end of the first so it is not involved in
+calculations until the end.
+
+<<Perform set operation on bit strings>>=
+if(!a_len || b_low < a_low) {
+  setop_src_t *t = a;
+  a = b;
+  b = t;
+  a_len ^= b_len;
+  b_len ^= a_len;
+  a_len ^= b_len;
+  a_low ^= b_low;
+  b_low ^= a_low;
+  a_low ^= b_low;
+  op = (op & ~(UNI_SOP_A|UNI_SOP_B)) | ((op & UNI_SOP_A) << 1) |
+                                       ((op & UNI_SOP_B) >> 1);
+}
+if(!b_len)
+  b_low = a_low + a_len * setop_n;
+@
+
+The bit strings do not necessarily start at zero.  If neither does,
+then the region before the bit strings is all zeroes, meaning that the
+result will be all zeroes or all ones depending on [[zz_op]].  If it
+is all zeroes, the start of the result can be moved up.  In fact, the
+start of the result only needs to be set once ones start rolling in,
+so a flag is kept to determine if a one has been encountered yet.
+
+<<Perform set operation on bit strings>>=
+uint32_t i;
+int did_start = 0;
+
+if(a_low > 0 && zz_op) {
+  uint32_t need = a_low / setop_n;
+  did_start = 1;
+  *res_low = 0;
+  if(!*res_max)
+    inisize(*res, (*res_max = need + 4));
+  else if(*res_max < need) {
+    while(*res_max < need)
+      *res_max *= 2;
+    resize(*res, *res_max);
+  }
+  if(need > 0)
+    memset(*res, ~0, need * sizeof(**res));
+}
+@
+
+If the inputs do not start at the same place, there is an initial
+region where only [[a]] has values other than zero.  Rather than
+complicate the case where [[b]] is involved by checking for this case,
+a separate loop is performed for this region.  If the result start was
+set to zero above, the result may be misaligned with [[a]].  If so,
+the bits from the previous operation are shifted into place.  Since
+the above set all ones, the first previous value is also all ones.
+While it is setting values, it also does not actually increase the
+result size or set the value if it is zero.  Instead, it keeps track
+of the last position that was set to zero after a non-zero set, so
+that the result can be truncated with no excess zeroes.  Naturally,
+when a new non-zero value comes along, the zeroes need to be filled in
+after all.  The first non-zero value also sets the start position, if
+it was not already set above.
+
+<<Perform set operation on bit strings>>=
+setop_src_t cur_a = 0, prev_a, r;
+uint32_t last_zero = 0;
+int misalign_a = did_start ? (a_low - *res_low) % setop_n : 0;
+uint32_t end = a_low + a_len * setop_n;
+if(end < b_low)
+  end = b_low;
+for(; (i = a_low) < end - setop_n + 1; a_low += setop_n, a_len--, a++) {
+#ifndef update_src
+#define update_src(x) do { \
+  prev_##x = cur_##x; \
+  cur_##x = *x; \
+  if(misalign_##x) { \
+    prev_##x |= cur_##x << misalign_##x; \
+    cur_##x >>= setop_n - misalign_##x; \
+  } else \
+    prev_##x = cur_##x; \
+} while(0)
+#endif
+  update_src(a);
+  r = BIT_OP(prev_a, op, 0);
+  <<Set res if non-zero or mark if zero>>
+}
+@
+
+<<Set res if non-zero or mark if zero>>=
+if(!r) {
+  if(!last_zero && did_start)
+    last_zero = i - *res_low;
+} else {
+  if(!did_start) {
+    did_start = 1;
+    *res_low = i;
+  }
+  if(!*res_max)
+    inisize(*res, (*res_max = 4));
+  else if(*res_max <= (i - *res_low) / setop_n) {
+    while(*res_max <= (i - *res_low) / setop_n)
+      *res_max *= 2;
+    resize(*res, *res_max);
+  }
+  if(last_zero) {
+    memset(&BSET_ELT(*res, last_zero), 0, (i - *res_low - last_zero) / 8);
+    last_zero = 0;
+  }
+  BSET_ELT(*res, i - *res_low) = r;
+}
+@
+
+Now, either [[a]] is pointing past the end of the lower input, or it
+is pointing at a word which contains the position [[b_low]].  In the
+former case, there may be a(nother) region where both [[a]] and [[b]]
+are not present.  If so, the region can be set to [[zz_op]] as before,
+except for the first word if there was a misalignment.  In either
+case, if there was a misalignment, [[cur_a]] contains some of the bits
+to be applied to the next word.  Only full words which do not contain
+[[b_low]] are processed here.
+
+<<Perform set operation on bit strings>>=
+if(misalign_a && i < b_low - setop_n - 1) {
+  r = BIT_OP(cur_a, op, 0);
+  <<Set res if non-zero or mark if zero>>
+  i += setop_n;
+  cur_a = 0; /* a_len must be 0 */
+}
+if(!a_len) {
+  misalign_a = 0; /* cur_a is aligned, and remaining 0s do not need align */
+  if(did_start)
+    i -= (i - *res_low) % setop_n; /* align i with result instead of a */
+}
+if(i < b_low - setop_n - 1) {
+  uint32_t skip = (b_low - i) / setop_n;
+  skip *= setop_n;
+  if(!zz_op) {
+    if(!last_zero && did_start)
+      last_zero = i - *res_low;
+    if(!did_start)
+      i = b_low; /* if b causes a start, *res_low should be b_low */
+    else
+      i += skip;
+  } else {
+    <<Set gap to all ones>>
+  }
+}
+@
+
+<<Set gap to all ones>>=
+if(!did_start) {
+  did_start = 1;
+  *res_low = i;
+}
+uint32_t tot = i - *res_low + skip;
+if(!*res_max)
+  inisize(*res, (*res_max = tot > setop_n ? tot / setop_n : 4));
+else if(*res_max <= tot / setop_n) {
+  while(*res_max <= tot / setop_n)
+    *res_max *= 2;
+  resize(*res, *res_max);
+}
+if(last_zero) {
+  memset(&BSET_ELT(*res, last_zero), 0, (i - *res_low - last_zero) / 8);
+  last_zero = 0;
+}
+memset(&BSET_ELT(*res, i - *res_low), ~0, skip / 8);
+i += skip;
+@
+
+Now the position is at the word containing [[b_low]], if [[b]] is
+non-empty.  If [[a]] has not yet ended, or ended in the last word,
+bits remain in [[cur_a]] for this word.  If it ended earlier than
+that, [[cur_a]] is zero, so either way [[cur_a]] needs to be applied. 
+Both [[b]] and [[a]] need to be aligned to the result before use.  If
+the result has not yet started, it will start aligned with [[a]] if
+[[a]] has not yet ended (i.e., [[i]] is an integral [[setop_n]]
+multiple following [[a_low]]); otherwise, due to the above code, it
+will start aligned with [[b]] (i.e., [[i]] was set to [[b_low]]).
+First any full words in common with both [[a]] and [[b]] are
+processed; then whichever one has words left is processed.  Note that
+it is not possible for [[a]] to have data left to process if [[b]] is
+absent.
+
+<<Perform set operation on bit strings>>=
+if(b_len) {
+  uint32_t misalign_b = did_start ? (b_low - *res_low) % setop_n : 
+                                    (b_low - i) % setop_n;
+  setop_src_t cur_b = 0, prev_b;
+  for(; a_len && b_len; b++, b_len--, b_low += setop_n, i += setop_n,
+                        a++, a_len--, a_low += setop_n) {
+    update_src(b);
+    update_src(a);
+    r = BIT_OP(prev_a, op, prev_b);
+    <<Set res if non-zero or mark if zero>>
+  }
+  for(; b_len; b++, b_len--, b_low += setop_n, i += setop_n) {
+    update_src(b);
+    r = BIT_OP(cur_a, op, prev_b);
+    <<Set res if non-zero or mark if zero>>
+    cur_a = 0;
+  }
+  for(; a_len; a++, a_len--, a_low += setop_n, i += setop_n) {
+    update_src(a);
+    r = BIT_OP(prev_a, op, cur_b);
+    <<Set res if non-zero or mark if zero>>
+    cur_b = 0;
+  }
+  if(cur_a || cur_b) {
+    r = BIT_OP(cur_a, op, cur_b);
+    <<Set res if non-zero or mark if zero>>
+    i += setop_n;
+  }
+}
+@
+
+Finally, if the upper set did not end at the last valid code point,
+the upper region needs to be set the same way as the initial region.
+
+<<Perform set operation on bit strings>>=
+if(zz_op) {
+  if(did_start)
+    i -= (i - *res_low) % setop_n; /* align i with result */
+  if(i <= MAX_UNI_CP) {
+    uint32_t skip = (MAX_UNI_CP - i) / setop_n + 1;
+    skip *= setop_n;
+    <<Set gap to all ones>>
+  }
+}
+@
+
+The only thing remaining is to update the length of the result.
+
+<<Perform set operation on bit strings>>=
+if(did_start)
+  *res_len = ((last_zero ? last_zero : i) - *res_low) / setop_n;
+else
+  *res_len = 0;
+@
+
+A plain bit array also makes it difficult to perform the
+\emph{members} operation: every single potential member needs to be
+tested.  Other storage strategies are needed.
+
+<<Common uni definitions>>=
 /* List members enumeration not directly supported */
 @
 
 <<Common uni functions>>=
 #if 0
-  <<Perform logical ops on bit array>>
-#endif
-#if 0
   <<List bit array members>>
 #endif
-@
-
-<<Perform logical ops on bit array>>=
-uint32_t i; elt_t e;
-/* assumes both bit arrays cover entire set of possible values */
-/* if not:
-     if not starting at 0:
-      if(BIT_OP(0, 0, op)) fill_up_to_min_offset_with_1s();
-     if not starting at same point:
-      if(start_a != start_b)
-        for(i = min(start_a, start_b); i < max(start_a, start_b); i++)
-	  tab[i] = BIT_OP(start_a < start_b ? a[i] : 0,
-	                  start_b < start_a ? b[i] : 0, op);
-     if not ending at same point: same basic idea as mismatched starts
-     if not ending at end: same basic idea as not starting at zero
-*/
-for(i = 0; i < tab_size; i++)
-  tab[i] = BIT_OP(taba[i], tabb[i], op);
 @
 
 <<List bit array members>>=
@@ -325,7 +696,7 @@ One of the simplest strategies is to provide a sorted table of
 members.  Membership is tested by binary search, so the speed of
 lookup is proportional to $\log_2(N)$, where $N$ is the number of set
 members.  Querying the \emph{members} of the set is trival: the table
-is already the list.  Applying \emph{logical} operators only requires
+is already the list.  Applying set \emph{operatotions} only requires
 looking at the members already present, with the exception of the
 latter eight:  inversion may be more expensive than with bit arrays.
 This does not save much space for properties which apply to
@@ -337,7 +708,7 @@ extern int uni_cmp_cp(const void *a, const void *b); /* for qsort/bsearch */
   bsearch(&c, tab, tab_len, sizeof(tab[0]), uni_cmp_cp)
 
 /* members are already in list */
-/* logical operations not directly supported */
+/* set operations not directly supported */
 @
 
 <<Common uni functions>>=
@@ -349,26 +720,26 @@ int uni_cmp_cp(const void *a, const void *b)
 
 <<Common uni functions>>=
 #if 0
-  <<Perform logical ops on cp array>>
+  <<Perform set ops on cp array>>
 #endif
 @
 
-<<Perform logical ops on cp array>>=
+<<Perform set ops on cp array>>=
 uint32_t i = 0;
 uint32_t tab[max], tab_len = 0;
-int invert = BIT_OP(0, 0, op);
+int invert = /* BIT_OP(0, op, 0) */ op & 1;
 uint32_t aptr, bptr;
 for(aptr = bptr = 0; aptr < a_len || bptr < b_len; ) {
   int res;
   uint32_t cp;
   if(bptr == b_len || (aptr < a_len && a[aptr] < b[bptr])) {
-    res = BIT_OP(~0, 0, op);
+    res = BIT_OP(~0, op, 0);
     cp = a[aptr++];
   } else if(aptr == a_len || (bptr < b_len && a[aptr] > b[bptr])) {
-    res = BIT_OP(0, ~0, op);
+    res = BIT_OP(0, op, ~0);
     cp = b[bptr++];
   } else {
-    res = BIT_OP(~0, ~0, op);
+    res = BIT_OP(~0, op, ~0);
     cp = a[aptr++];
     bptr++;
   }
@@ -389,10 +760,10 @@ apply to large consecutive ranges; if this is not true, then this is
 actually worse than storing individual code points.  Whenever the
 number of ranges is less than half of the number of individual code
 points, this table will be smaller, requiring less time to search, and
-less time to perform \emph{logical} operations.  In particular,
-negation is usually much faster with a range table than with an
-individual code point table.  Not only can absent members be skipped,
-but present members within a range can be skipped as well.
+less time to perform set \emph{operations}.  In particular, negation
+is usually much faster with a range table than with an individual code
+point table.  Not only can absent members be skipped, but present
+members within a range can be skipped as well.
 
 <<Common uni definitions>>=
 #include <stdint.h>
@@ -446,7 +817,7 @@ int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
 /* members are already in list, albeit in compact form */
 void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
 		      uni_chrrng_t **rtab, uint32_t *r_len);
-void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
+void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
                       const uni_chrrng_t *b, uint32_t b_len,
 		      uni_chrrng_t **rtab, uint32_t *r_len);
 @
@@ -477,46 +848,46 @@ void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
   *r_len = tab_len;
 }
 
-void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
+void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
                       const uni_chrrng_t *b, uint32_t b_len,
 		      uni_chrrng_t **rtab, uint32_t *r_len)
 {
   uni_chrrng_t *tab;
   uint32_t tab_len = 0, max_tab = 8;
   /* shortcut all ops that don't involve both sets */
-  if(op == UNI_LOG_FALSE) {
+  if(op == UNI_SOP_NIL) {
     inisize(tab, 1); /* so free always works */
     *rtab = tab;
     *r_len = 0;
     return;
-  } else if(op == UNI_LOG_TRUE) {
+  } else if(op == UNI_SOP_ALL) {
     inisize(tab, 1);
     tab[0].low = 0;
     tab[0].high = MAX_UNI_CP;
     *rtab = tab;
     *r_len = 1;
     return;
-  } else if(op == UNI_LOG_A) {
+  } else if(op == UNI_SOP_A) {
     inisize(tab, a_len);
     memcpy(tab, a, a_len * sizeof(*a));
     *rtab = tab;
     *r_len = a_len;
     return;
-  } else if(op == UNI_LOG_NOT_A) {
+  } else if(op == UNI_SOP_INV_A) {
     uni_chrrng_invert(a, a_len, rtab, r_len);
     return;
-  } else if(op == UNI_LOG_B) {
+  } else if(op == UNI_SOP_B) {
     inisize(tab, b_len);
     memcpy(tab, b, b_len * sizeof(*b));
     *rtab = tab;
     *r_len = b_len;
     return;
-  } else if(op == UNI_LOG_NOT_B) {
+  } else if(op == UNI_SOP_INV_B) {
     uni_chrrng_invert(b, b_len, rtab, r_len);
     return;
   }
   inisize(tab, max_tab);
-  int invert = BIT_OP(0, 0, op);
+  int invert = /* BIT_OP(0, op, 0); */ op & 1;
   uint32_t aptr = 0, bptr = 0;
   uint32_t alow, ahigh, blow, bhigh;
   int32_t lasthigh = -1, curlow = -1, curhigh = -1;
@@ -530,7 +901,7 @@ void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
     uint32_t nextlow, nexthigh, res;
     if(alow < blow) {
       nextlow = alow;
-      res = BIT_OP(~0, 0, op);
+      res = BIT_OP(~0, op, 0);
       if(ahigh < blow) {
         nexthigh = ahigh;
 	aptr++;
@@ -541,7 +912,7 @@ void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
       }
     } else if(alow > blow) {
       nextlow = blow;
-      res = BIT_OP(0, ~0, op);
+      res = BIT_OP(0, op, ~0);
       if(bhigh < alow) {
         nexthigh = bhigh;
 	bptr++;
@@ -552,7 +923,7 @@ void uni_chrrng_logic(const uni_chrrng_t *a, uint32_t a_len, uni_log_op_t op,
       }
     } else {
       nextlow = alow;
-      res = BIT_OP(~0, ~0, op);
+      res = BIT_OP(~0, op, ~0);
       nexthigh = ahigh;
       if(ahigh <= bhigh) {
         aptr++;
@@ -1230,28 +1601,46 @@ if(mp - *ml != *ml_len) {
 Generally, even with the complexity I added by compressing pointers,
 the table lookups are faster than equivalent range table lookups.  As
 long as duplicates are removed, the space taken up is comparable to
-ordinary range tables.  With the suppression of zero and one blocks,
-it is faster to find the \emph{members} list than with plain bit
-tables, but is still not very fast.  On the other hand, making
-modifications, or creating new tables from scratch, is very expensive.
-Even if we stick with a table's current structure, there needs to be
-side storage that deals with the shared arrays.  If a change is made
-to an array at any level, then all pointers at the next level need to
-be checked: if they point to the same place, the block needs to be
-duplicated first, and after updating the block (duplicate or not), it
-needs to be compared against all existing blocks at the same level for
-re-merging.  The last step is not strictly necessary for run-time
-operations, but there is no way with the current structure to detect
-shared blocks.  An additional bit for each pointer could be used to
-indicate sharing, which would never be turned off even if the last
-owner disappears.  There are many possibilities, and I do not wish to
-dwell on it any more.  For now, the multi-level tables are expected to
-be read-only and only provide the \emph{in} function.
+ordinary range tables, and sometimes even better.  With the
+suppression of zero and one blocks, it is faster to find the
+\emph{members} list than with plain bit tables, but is still not very
+fast.  On the other hand, making modifications, or creating new tables
+from scratch, is very expensive. Even if we stick with a table's
+current structure, there needs to be side storage that deals with the
+shared arrays.  If a change is made to an array at any level, then all
+pointers at the next level need to be checked: if they point to the
+same place, the block needs to be duplicated first, and after updating
+the block (duplicate or not), it needs to be compared against all
+existing blocks at the same level for re-merging.  The last step is
+not strictly necessary for run-time operations, but there is no way
+with the current structure to detect shared blocks.  An additional bit
+for each pointer could be used to indicate sharing, which would never
+be turned off even if the last owner disappears.  There are many
+possibilities, and I do not wish to dwell on it any more.  For now,
+the multi-level tables are expected to be read-only and only provide
+the \emph{in} function.
 
 % FIXME: table_to_range
 % FIXME: range_to_table (already implemented, but not as a function)
 % FIXME: invert(table) (easy: doesn't need duplicate scanning)
-% FIXME: logical(table) (hard: needs duplicate scanning, but maybe not)
+% FIXME: setop(table) (hard: needs duplicate scanning, but maybe not)
+
+Another possibility would be to use more complex data structures.  I
+doubt I could come up with a more space-efficient storage method than
+the sorted range table, but some are much better at operations like
+lookup, scanning, or modification.  An appropriately designed hash
+table could be optimized off-line to provide even faster lookups, at
+the cost of fragility due to the hash algorithm probably depending on
+a particular Unicode release.  Prefix trees (tries, if you prefer)
+have good theoretical performance, and in fact the multi-level table
+is just a prefix tree of sorts.  It and many other faster tree
+approaches achieve their performance by assuming a constant time
+parent-to-child traversal with a large set of children, which once
+again equates to large storage penalties.  I have reduced the penalty
+somewhat in my own implementation by using smaller pointers, at the
+expense of slowing the lookup down a bit.  For now, the multi-level
+table, sorted range table, and sorted code point table are the only
+supported data structures.
 
 In order to actually compare performance and size, a separate test
 program is provided.
@@ -1408,7 +1797,8 @@ parse-ucd \
 <<makefile.vars>>=
 PARSE_UCD_DEPS := uni_common.c uni_common.h \
                   mfgets.c mfgets.h \
-		  mallocdef.h btricks.h
+		  mallocdef.h btricks.h \
+		  uni_strs.h
 PARSE_UCD_PROTO := cproto.h \
                    $(patsubst %, %.static_proto, $(filter %.c, $(PARSE_UCD_DEPS)))
 PARSER_CFLAGS :=
@@ -1501,12 +1891,12 @@ free(cwd);
 
 UCD text files consist of semicolon-separated fields, with the code
 point(s) in the first field.  Comments are introduced with the number
-sign.  Blank lines and purely comment lines are permitted.  Whitespace
-is stripped from the beginning and ending of each field.  One
-particular file stores relevant information in a line comment, so all
-comments on the same line as non-whitespace data are retained.  Rather
-than process each field as it is encountered, like I would normally
-do, each line is split into an array of fields first.  This makes the
+sign.  Blank lines and purely comment lines have no fields. 
+Whitespace is stripped from the beginning and ending of each field.
+Comments are stripped off, but kept on the side, since one particular
+file stores relevant information in a line comment.  Rather than
+process each field as it is encountered, like I would normally do,
+each line is split into an array of fields first.  This makes the
 parsing routines more readable and obvious as well.
 
 <<Process a line of [[UnicodeData.txt]]>>=
@@ -1520,26 +1910,34 @@ if(num_fields < 15) { /* should never happen! */
 <<UCD parser local definitions>>=
 static char **fields;
 static int num_fields, max_fields = 0;
+static char *line_comment;
 @
 
 <<UCD parser local functions>>=
 static void split_line(char *buf)
 {
+  char fc = 0;
+
   if(!max_fields)
     inisize(fields, (max_fields = 16));
   num_fields = 0;
+  line_comment = NULL;
   while(isspace(*buf)) buf++;
   if(!*buf || *buf == '#')
     return;
   while(1) {
     while(isspace(*buf))
       buf++;
-    char *f = buf, *nf, fc;
-    for(nf = buf; *nf && *nf != ';' && *nf != '#'; nf++);
+    if(fc == '#')
+      line_comment = buf;
+    char *f = buf, *nf;
+    for(nf = buf; *nf && (fc == '#' || (*nf != ';' && *nf != '#')); nf++);
     fc = *nf;
     buf = nf + 1;
     while(nf > f && isspace(nf[-1])) --nf;
     *nf = 0;
+    if(line_comment)
+      return;
     if(num_fields == max_fields)
       resize(fields, (max_fields *= 2));
     fields[num_fields++] = f;
@@ -1560,6 +1958,10 @@ sorting is done after the fact to reduce complexity.
 typedef struct {
   const char *short_name, *long_name, *alt_name, *alt_name2;
 } uni_alias_t;
+@
+
+<<Known Data Types>>=
+uni_alias_t,%
 @
 
 <<UCD parser local definitions>>=
@@ -1877,11 +2279,15 @@ blank lines and comments, which need to be skipped.
 
 <<Parse dotted cp>>=
 split_line(lbuf);
-if(num_fields < 2)
+if(!num_fields || !isxdigit(*lbuf))
   continue;
 low = high = strtol(lbuf, &s, 16);
 if(s && *s == '.' && s[1] == '.')
-  high = strtol(s + 2, NULL, 16);
+  high = strtol(s + 2, &s, 16);
+if(*s) { /* should never happen, but if it does: ignore */
+  fprintf(stderr, "bad col 1: %s\n", lbuf);
+  continue;
+}
 @
 
 Each boolean property is true if field two is the name of that
@@ -1970,12 +2376,11 @@ static void fixup_rng(prop_t *p)
 
 [[DerivedNormalizationProps.txt]] contains the only remaining required
 boolean UCD properties.  Unlike the other three, there are some
-non-boolean properties in this file as well.  Luckily, there is a
-comment after every line, so some boolean values can be detected by
-simply counting the fields.  The Expands\_On\_* properties are
-deprecated.  Technically, the quick check fields could be booleans as
-well, but some values are Maybe.  In any case, the Unicode standard
-defines them as enumerated properties.
+non-boolean properties in this file as well.  Luckily, some boolean
+values can be detected by simply counting the fields.  The
+Expands\_On\_* properties are deprecated.  Technically, some of the
+quick check fields could be booleans as well, but they will be taken
+care of as enumerations.
 
 <<Parse UCD files>>=
 open_f("DerivedNormalizationProps.txt");
@@ -1987,7 +2392,7 @@ fclose(f);
 @
 
 <<Process a line of [[DerivedNormalizationProps.txt]]>>=
-if(num_fields == 3) {
+if(num_fields == 2) {
   if(!strncmp(fields[1], "Expands_On_", 11))
     continue;
   <<Just add field two as binary property>>
@@ -2304,7 +2709,11 @@ other structure as needed.
 
 The first thing to read in is the list of aliases.  These are keyed on
 property short name.  Since there is already a list of property names,
-the array of aliases may as well correspond.
+the array of aliases may as well correspond.  As the list of aliases
+is read, the comment may be stored as an alias as well.  The group
+names for the gc property are stored in this file, and the comment for
+the definition line for these names indicates the fundamental values
+that are combined into this group.
 
 <<UCD parser local definitions>>=
 uni_alias_t **val_aliases;
@@ -2354,6 +2763,8 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     perror("PropertyValueAliases.txt");
     exit(1);
   }
+  if(line_comment && !strcmp(fields[0], "gc"))
+    val_aliases[idx][num_val_aliases[idx]].alt_name2 = strdup(line_comment);
   num_val_aliases[idx]++;
 }
 fclose(f);
@@ -2371,6 +2782,10 @@ typedef struct {
   const char *name;
   int val;
 } uni_valueof_t;
+@
+
+<<Known Data Types>>=
+uni_valueof_t,%
 @
 
 <<UCD parser local definitions>>=
@@ -2406,10 +2821,11 @@ for(i = 0; i < num_prop_aliases; i++) {
     valueof[num_valueof++].val = j;
     valueof[num_valueof].name = strdup(va->long_name);
     valueof[num_valueof++].val = j;
-    if(va->alt_name && !strchr(va->alt_name, '|')) {
+    if(va->alt_name) {
       valueof[num_valueof].name = strdup(va->alt_name);
       valueof[num_valueof++].val = j;
     }
+    /* need to skip comments stored in alt_name2; all contain | */
     if(va->alt_name2 && !strchr(va->alt_name2, '|')) {
       valueof[num_valueof].name = strdup(va->alt_name2);
       valueof[num_valueof++].val = j;
@@ -2495,9 +2911,9 @@ for(j = 0; j < num_val_aliases[i]; j++) {
   fprintf(nf, "\t{ \"%s\"", va->short_name);
   if(strcmp(va->long_name, va->short_name))
     fprintf(nf, ", \"%s\"", va->long_name);
-  if(va->alt_name && !strchr(va->alt_name, '|') &&
-     strcmp(va->alt_name, va->long_name))
+  if(va->alt_name && strcmp(va->alt_name, va->long_name))
     fprintf(nf, ", \"%s\"", va->alt_name);
+  /* again, | is to skip comments */
   if(va->alt_name2 && !strchr(va->alt_name2, '|') &&
      strcmp(va->alt_name, va->alt_name2))
     fprintf(nf, ", \"%s\"", va->alt_name2);
@@ -2523,12 +2939,11 @@ for(j = 0; j < num_val_aliases[i]; j++) {
       fprintf(gen_h, "%s,", va->short_name);
   }
   /* filter out alt names with dashes */
-  if(va->alt_name && !strchr(va->alt_name, '|') &&
-     !strchr(va->alt_name, '-') &&
+  if(va->alt_name && !strchr(va->alt_name, '-') &&
      strcmp(va->alt_name, va->long_name))
     fprintf(gen_h, " U_%s_%s = U_%s_%s,", pn, va->alt_name, pn, va->long_name);
-  if(va->alt_name2 && !strchr(va->alt_name2, '|') &&
-     !strchr(va->alt_name2, '-') &&
+  /* again, | is to skip comments */
+  if(va->alt_name2 && !strchr(va->alt_name2, '|') && !strchr(va->alt_name2, '-') &&
      strcmp(va->alt_name, va->long_name) && strcmp(va->alt_name, va->alt_name2))
     fprintf(gen_h, " U_%s_%s = U_%s_%s,", pn, va->alt_name2, pn, va->long_name);
   fputc('\n', gen_h);
@@ -2575,12 +2990,9 @@ if(!strcmp(pn, "gc")) {
   for(j = 0; j < num_val_aliases[i]; j++) {
     const char *desc;
     fprintf(tf, "\t/* %2s */ ", val_aliases[i][j].short_name);
-    desc = val_aliases[i][j].alt_name;
-    if(desc && !strchr(desc, '|')) {
-      desc = val_aliases[i][j].alt_name2;
-      if(desc && !strchr(desc, '|'))
-        desc = NULL;
-    }
+    desc = val_aliases[i][j].alt_name2;
+    if(desc && !strchr(desc, '|'))
+      desc = NULL;
     if(!desc)
       fprintf(tf, "1ULL << U_gc_%s", val_aliases[i][j].short_name);
     else {
@@ -2776,7 +3188,7 @@ The other file that has mixed field types is
 at the number of fields, and added if the number of fields was too low
 to be boolean.  This parser can't really do the same, without first
 loading the expected default values.  There are only four properties,
-so it's safer to just to them by hand.  In fact, two of them can only
+so it's safer to just do them by hand.  In fact, two of them can only
 have two values: Yes and No.  This makes them boolean in my view, so
 that they will become.  There is one other caveat:  the default value
 for those two is Yes, and the listed value is always No, so they need
@@ -2790,7 +3202,7 @@ decl_bool(NFKD_QC);
 @
 
 <<Process a line of [[DerivedNormalizationProps.txt]]>>=
-if(num_fields == 4) {
+if(num_fields == 3) {
   if(!strcmp(fields[1], "NFC_QC"))
     add_enum(NFC_QC, fields[2]);
   else if(!strcmp(fields[1], "NFD_QC"))
@@ -3316,7 +3728,11 @@ fclose(f);
 split_line_tab(lbuf);
 if(num_fields < 2)
   continue;
-low = high = strtol(lbuf + 2, NULL, 16);
+low = high = strtol(lbuf + 2, &s, 16);
+if(!low || *s) { /* should never happen, but if it does: ignore */
+  fprintf(stderr, "bad col 1: %s\n", lbuf);
+  continue;
+}
 @
 
 <<Dump character information as C code>>=
@@ -3513,6 +3929,10 @@ field to distinguish themselves.
 typedef struct {
   uint32_t cp, off, flags: 8, len: 24;
 } raw_cp_str_t;
+@
+
+<<Known Data Types>>=
+raw_cp_str_t,%
 @
 
 <<Property parsed contents>>=
@@ -3834,6 +4254,10 @@ typedef struct {
 } uni_decomp_rng_t;
 @
 
+<<Known Data Types>>=
+uni_decomp_rng_t,%
+@
+
 <<Dump character information as C code>>=
 qsort(dmf_prop->rng_str, dmf_prop->rng_len, sizeof(*dmf_prop->rng_str), cmp_cp_flg);
 uni_decomp_rng_t *dec;
@@ -3849,7 +4273,7 @@ for(curent = 0; i < dmf_prop->rng_len; i++, curent++) {
   dec[curent].off = dmf_prop->rng_str[i].off;
   dec[curent].len = dmf_prop->rng_str[i].len;
   dec[curent].compat = 0;
-  while(i < dmf_prop->rng_len - 1 && dmf_prop->rng_str[i].flags)
+  while(i < dmf_prop->rng_len - 1 && dmf_prop->rng_str[i + 1].flags)
     ++i;
   fprintf(cf, "{ 0x%X, %d, %d }%s", (int)dec[curent].cp, (int)dec[curent].off,
                                     (int)dec[curent].len,
@@ -3873,6 +4297,10 @@ typedef struct {
 } uni_cp_val_t;
 uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
                            uint32_t *ml_len);
+@
+
+<<Known Data Types>>=
+uni_cp_val_t,%
 @
 
 <<Common uni functions>>=
@@ -4053,7 +4481,7 @@ for C is canonical, and C does not have the Comp\_Ex property.  For
 lookup, given the characters A and B, the value C is either nothing,
 in which case there is no possible composition, or a character, which
 is the result of composition.  While C may take part in further
-composition, there is no way to make an ``fully composed`` table that
+composition, there is no way to make a ``fully composed`` table that
 iterates thorugh all possible compositions.  There are a number of
 possible strategies for storing these values for efficient retrieval.
 For sorted arrays, the pair of A and B could simply be used as the
@@ -4216,6 +4644,8 @@ uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len)
 
 The next strings are the various case conversion tables.
 [[UnicodeData.txt]] contains three of them:  the simple case mappings.
+These are always just one character long, so technically a string
+buffer would not be necessary.
 
 <<Initialize UCD files>>=
 decl_str(suc);
@@ -4229,11 +4659,17 @@ add_str(slc, fields[13]);
 add_str(stc, fields[14]);
 @
 
-From [[SpecialCasing.txt]] comes the exceptions to the above case
-mappings.  These should really be combined with the above.  For
-convenience, the conditional entries are indicated in a separate
-string table, which has the condition string as its text.  Since there
-are so few conditions, this could technically be an enumeration.
+[[SpecialCasing.txt]] lists the exceptions to the above case mappings.
+The above values are always either zero or one character (technically
+always one character, since the default value is the code point
+unmodified); the ones from this file may be more than one character,
+or may require more than one character as input, or may only apply
+under certain conditions.  The mappings with conditions override the
+simple mappings above when the condition is in effect.  These should
+really be combined with the above.  For convenience, the conditional
+entries are indicated in a separate string table, which has the
+condition string as its text.  Since there are so few conditions, this
+could technically be an enumeration.
 
 <<Initialize UCD files>>=
 decl_str(lc);
@@ -4243,6 +4679,17 @@ decl_str(sccond);
 @
 
 <<UCD parser local definitions>>=
+#define add_str_not_me(n, v) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  /* note: blank values permitted */ \
+  uint32_t str[64]; /* max known value == 30, so 64 should be enough */ \
+  uint32_t len; \
+  for(s = v, len = 0; *s; len++) \
+    str[len] = strtol(s, &s, 16); \
+  if(len != 1 || low != high || str[0] != low) \
+    add_str_rng(&parsed_props[prop_##n], low, high, str, len); \
+} while(0)
 #define add_str_raw(n, v) do { \
   if(prop_##n < 0) \
     prop_##n = add_prop(#n); \
@@ -4261,15 +4708,18 @@ decl_str(sccond);
 open_f("SpecialCasing.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
-  add_str(lc, fields[1]);
-  add_str(tc, fields[2]);
-  add_str(uc, fields[3]);
+  add_str_not_me(lc, fields[1]);
+  add_str_not_me(tc, fields[2]);
+  add_str_not_me(uc, fields[3]);
   /* [<locale>] [<context>] */
   /* locale: az, lt, tr */
   /* context: */
   /*  After_I - LATIN CAPITAL LETTER I in same grapheme cluster (gc) */
   /*  Not_Before_Dot - COMBINING DOT ABOVE not in same gc */
   /*  Final_Sigma - no following letters in same word */
+  /*      note that 03C3 should never really occur in final pos */
+  /*           and 03C2 should never really occur in non-final pos */
+  /*           but rule to implement that is commented out in sc.txt */
   /*  After_Soft_Dotted -  lc i in same gc */
   /*  More_Above - grave, acute, tilde above, ogonek in same gc */
   add_str_raw(sccond, fields[4]);
@@ -4303,7 +4753,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     case 'S': /* scf == C+S */
       add_str(cf_s, fields[2]);
       break;
-    case 'T': /* not used by anything, technically */
+    case 'T': /* tr, az lang only; not used by anything, technically */
       add_str(cf_t, fields[2]);
       break;
   }
@@ -4312,16 +4762,23 @@ fclose(f);
 @
 
 [[DerivedNormalizationProps.txt]] contains the final case folding
-method.
+method.  The main difference between it and the other methods is that
+it applies multiple transformations simultaneously.  In addition to
+case folding, it also removes default ignorable code points and
+performs compatibility decompositin on the results repeatedly until
+the result is stable.
 
 <<Initialize UCD files>>=
 decl_str(NFKC_CF);
 @
 
 <<Process a line of [[DerivedNormalizationProps.txt]]>>=
-if(num_fields == 4 && !strcmp(fields[1], "NFKC_CF"))
+if(num_fields == 3 && !strcmp(fields[1], "NFKC_CF"))
   add_str(NFKC_CF, fields[2]);
 @
+
+It is also quite useful for the other case folding techniques to
+include normalization.  This saves a pass in the transformation step.
 
 [[BidiMirroring.txt]] contains the last officially supported string
 property.
@@ -4454,7 +4911,7 @@ if((f = fopen("IdnaMappingTable.txt", "r")) ||
   while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     <<Parse dotted cp>>
     add_str_raw(IDNA_Status, fields[1]);
-    if(num_fields > 3)
+    if(num_fields > 2)
       add_str(IDNA_Mapping, fields[2]);
   }
   fclose(f);
@@ -4478,7 +4935,7 @@ if((f = fopen("xidmodifications.txt", "r")) ||
   while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     <<Parse dotted cp>>
     add_str_raw(ID_Restrict_Status, fields[1]);
-    if(num_fields > 3)
+    if(num_fields > 2)
       add_str_raw(ID_Restrict_Type, fields[2]);
   }
   fclose(f);
@@ -4495,7 +4952,7 @@ a certain top.  This top can be stored separately.  For now, each
 entry is stored as a four-character sequence for every sort key
 (multiple sort keys are possible for each entry), followed by any
 characters that follow the first.  Since no multi-character entry has
-more than four characters, there is no probly distinguishing the
+more than four characters, there is no problem distinguishing the
 character groups in the value.  The code point used as the key is the
 first character.  Since several multi-character entries use the same
 first character, multiple entries with the same [[cp]] are created,
@@ -4514,7 +4971,11 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   uint32_t str[20*4]; /* current max: 18 * 4 */
   uint32_t len = 0;
   int is_var;
-  <<Parse dotted cp>>
+
+  split_line(lbuf);
+  if(!num_fields || !isxdigit(*lbuf))
+    continue;
+  low = high = strtol(lbuf, &s, 16);
   for(s = fields[1]; s; s = strchr(s, '[')) {
     is_var = s[1] == '*';
     str[len++] = strtol(s + 2, &s, 16);
@@ -4562,68 +5023,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 }
 fclose(f);
 @
-
-Since lookup (\emph{of}) is the only supported operation, the
-multi-level table is probably the appropriate data structure for all
-string-valued properties.  The routine to split tables can be given a
-minimum width for the lowest level, which can be set to the width of
-the string descriptor (32 bits for a 16-bit offset and length, for
-example).
-
-
-
-<<Common uni definitions>>=
-typedef struct {
-  int32_t cp; /* can use sign bit for extra storage */
-              /* could also add a byte by making this :24 or smaller */
-  uint32_t data; /* have whole word available here */
-} uni_cp_dat_t;
-const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
-                                uint32_t tab_len);
-@
-
-<<Known Data Types>>=
-uni_cp_dat_t,%
-@
-
-<<Common uni functions>>=
-const uni_cp_dat_t *find_cp_dat(uint32_t cp, const uni_cp_dat_t *tab,
-                                uint32_t tab_len)
-{
-#if 0
-  uni_cp_dat_t d = {cp};
-  return (uni_cp_dat_t *)bsearch(&d, tab, tab_len, sizeof(uni_cp_dat_t),
-                                 uni_cmp_cp);
-#else /* twice as fast! */
-  int l = 0, h = tab_len - 1;
-  while(l <= h) {
-    int j = (l + h) / 2;
-    if(cp < tab[j].cp)
-      h = j - 1;
-    else if(cp > tab[j].cp)
-      l = j + 1;
-    else
-      return &tab[j];
-  }
-  return 0;
-#endif
-}
-@
-
-Another possibility would be to use more complex data structures.  I
-doubt I could come up with a more space-efficient storage method than
-the sorted range table, but some are much better at operations like
-lookup, scanning, or modification.  An appropriately designed hash
-table could be optimized off-line to provide even faster lookups, at
-the cost of fragility due to the hash algorithm probably depending on
-a particular Unicode release.  Prefix trees (tries, if you prefer)
-have good theoretical performance, and in fact the multi-level table
-is just a prefix tree of sorts.  It and many other faster tree
-approaches achieve their performance by assuming a constant time
-parent-to-child traversal with a large set of children, which once
-again equates to large storage penalties.  I have reduced the penalty
-somewhat in my own implementation by using smaller pointers, at the
-expense of slowing the lookup down a bit.
 
 \section {XML Data Files}
 
@@ -6525,10 +6924,12 @@ mkstrs: $(MKSTRS_C)
 
 \lstset{language=C}
 <<[[mkstrs]] definitions>>=
+#ifdef DYN_BUILTIN_STR /* quiet errors from cproto */
 const char *builtin_str;
 int builtin_str_size;
 const hashent_t *builtin_hashe;
 int builtin_hashe_size = 0;
+#endif
 
 uint32_t strhash[HTAB_SIZE];
 @
