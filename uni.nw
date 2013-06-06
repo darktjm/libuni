@@ -2,7 +2,7 @@
 % Build with noweb:
 %  notangle -t8 build.nw > makefile
 %  make
-\documentclass[twoside,english]{article}
+\documentclass[twoside,english]{report}
 \usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
 %%% latex preamble
 \RCS $Id$
@@ -49,8 +49,9 @@ build a regular expression library and a compiler using these routines.
 \end{abstract}
 
 \tableofcontents
+\listoftables
 
-\section{Introduction}
+\chapter{Introduction}
 
 The Unicode standard is a freely available standard describing a large
 character set, and the features of those characters.  It also
@@ -165,7 +166,7 @@ the minimal necessary code with static linking, and does not include
 heavy wrapper code and additional utilities that the other libraries
 include.
 
-\section{Properties}
+\chapter{Properties}
 
 This library's primary purpose is to preparse the Unicode information
 and query it efficiently.  The Unicode Character Database defines
@@ -207,7 +208,7 @@ of value:  Boolean, String, Enumerated, or Numeric.  Each class of
 values has a particular set of desirable operations related to a
 property of that class.
 
-\subsection{Boolean Properties}
+\section{Boolean Properties}
 
 Boolean properties are either true or false.  They define a subset of
 characters: those for which the value is true.  As with any set, the
@@ -278,6 +279,8 @@ given, either will work.}
 \end{table}
 \end{itemize}
 
+\subsection{Storage Methods}
+
 All of the above require that every member be stored.  The \emph{is}
 test can be stored in a single bit.  However, there are over a million
 valid character values, so the total storage for a simple bit array
@@ -309,15 +312,19 @@ down by keeping everything out of the cache.  The set
 #define BSET_CLEAR(a, b) BSET_ELT(a, b) &= ~BSET_MASK(a, b)
 @
 
-<<Common uni definitions>>=
-<<Simple bit set definitions>>
-/* set operation names */
+<<[[uni_setop_t]]>>=
 typedef enum {
   UNI_SOP_NIL, UNI_SOP_ALL, UNI_SOP_A, UNI_SOP_INV_A,
   UNI_SOP_B, UNI_SOP_INV_B, UNI_SOP_SYM_DIFF, UNI_SOP_INV_SYM_DIFF,
   UNI_SOP_INTER, UNI_SOP_INV_INTER, UNI_SOP_A_MINUS_B, UNI_SOP_INV_A_MINUS_B,
   UNI_SOP_B_MINUS_A, UNI_SOP_INV_B_MINUS_A, UNI_SOP_UNION, UNI_SOP_INV_UNION
 } uni_set_op_t;
+@
+
+<<Common uni definitions>>=
+<<Simple bit set definitions>>
+/* set operation names */
+<<[[uni_setop_t]]>>
 /* logical operation names */
 #define UNI_SOP_NOT_A UNI_SOP_INV_A
 #define UNI_SOP_NOT_B UNI_SOP_INV_B
@@ -328,14 +335,14 @@ typedef enum {
 #define UNI_SOP_OR UNI_SOP_UNION
 #define UNI_SOP_NOR UNI_SOP_INV_UNION
 
-#define BIT_OP_BIT_(op, n) (~((((op) >> n) & 1) - 1))
-#define BIT_OP(A, op, B) \
-  (((A) & BIT_OP_BIT_(op, 1)) ^ ((B) & BIT_OP_BIT_(op, 2)) ^ \
-   ((A) & (B) & BIT_OP_BIT_(op, 3)) ^ BIT_OP_BIT_(op, 0))
+#define BIT_SET_OP_BIT_(op, n) (~((((op) >> n) & 1) - 1))
+#define BIT_SET_OP(A, op, B) \
+  (((A) & BIT_SET_OP_BIT_(op, 1)) ^ ((B) & BIT_SET_OP_BIT_(op, 2)) ^ \
+   ((A) & (B) & BIT_SET_OP_BIT_(op, 3)) ^ BIT_SET_OP_BIT_(op, 0))
 @
 
 <<C Prototypes>>=
-uint_t BIT_OP(uint_t A, uni_set_op_t op, uint_t B);
+uint_t BIT_SET_OP(uint_t A, uni_set_op_t op, uint_t B);
 @
 
 <<Known Data Types>>=
@@ -431,7 +438,7 @@ four: the above two, the non-empty set, or the inverse of the
 non-empty set.  The operation number is adjusted to reflect this.
 
 <<Perform set operation on bit strings>>=
-int zz_op = /* BIT_OP(0, op, 0) */ op & UNI_SOP_ALL;
+int zz_op = /* BIT_SET_OP(0, op, 0) */ op & UNI_SOP_ALL;
 if(!a_len && !b_len)
   op &= UNI_SOP_ALL;
 else if(!a_len)
@@ -576,7 +583,7 @@ for(; (i = a_low) < end - setop_n + 1; a_low += setop_n, a_len--, a++) {
 } while(0)
 #endif
   update_src(a);
-  r = BIT_OP(prev_a, op, 0);
+  r = BIT_SET_OP(prev_a, op, 0);
   <<Set res if non-zero or mark if zero>>
 }
 @
@@ -616,7 +623,7 @@ to be applied to the next word.  Only full words which do not contain
 
 <<Perform set operation on bit strings>>=
 if(misalign_a && i < b_low - setop_n - 1) {
-  r = BIT_OP(cur_a, op, 0);
+  r = BIT_SET_OP(cur_a, op, 0);
   <<Set res if non-zero or mark if zero>>
   i += setop_n;
   cur_a = 0; /* a_len must be 0 */
@@ -686,23 +693,23 @@ if(b_len) {
                         a++, a_len--, a_low += setop_n) {
     update_src(b);
     update_src(a);
-    r = BIT_OP(prev_a, op, prev_b);
+    r = BIT_SET_OP(prev_a, op, prev_b);
     <<Set res if non-zero or mark if zero>>
   }
   for(; b_len; b++, b_len--, b_low += setop_n, i += setop_n) {
     update_src(b);
-    r = BIT_OP(cur_a, op, prev_b);
+    r = BIT_SET_OP(cur_a, op, prev_b);
     <<Set res if non-zero or mark if zero>>
     cur_a = 0;
   }
   for(; a_len; a++, a_len--, a_low += setop_n, i += setop_n) {
     update_src(a);
-    r = BIT_OP(prev_a, op, cur_b);
+    r = BIT_SET_OP(prev_a, op, cur_b);
     <<Set res if non-zero or mark if zero>>
     cur_b = 0;
   }
   if(cur_a || cur_b) {
-    r = BIT_OP(cur_a, op, cur_b);
+    r = BIT_SET_OP(cur_a, op, cur_b);
     <<Set res if non-zero or mark if zero>>
     i += setop_n;
   }
@@ -766,8 +773,8 @@ lookup is proportional to $\log_2(N)$, where $N$ is the number of set
 members.  Querying the \emph{members} of the set is trival: the table
 is already the list.  Applying set \emph{operations} only requires
 looking at the members already present, with the exception of the
-latter eight:  inversion may be more expensive than with bit arrays.
-This does not save much space for properties which apply to
+odd-numbered ones:  inversion may be more expensive than with bit
+arrays.  This does not save much space for properties which apply to
 a large number of characters; in fact, it might even take more space.
 
 <<Common uni definitions>>=
@@ -799,19 +806,19 @@ int uni_cmp_cp(const void *a, const void *b)
 <<Perform set ops on cp array>>=
 uint32_t i = 0;
 uint32_t tab[max], tab_len = 0;
-int invert = /* BIT_OP(0, op, 0) */ op & 1;
+int invert = /* BIT_SET_OP(0, op, 0) */ op & 1;
 uint32_t aptr, bptr;
 for(aptr = bptr = 0; aptr < a_len || bptr < b_len; ) {
   int res;
   uint32_t cp;
   if(bptr == b_len || (aptr < a_len && a[aptr] < b[bptr])) {
-    res = BIT_OP(~0, op, 0);
+    res = BIT_SET_OP(~0, op, 0);
     cp = a[aptr++];
   } else if(aptr == a_len || (bptr < b_len && a[aptr] > b[bptr])) {
-    res = BIT_OP(0, op, ~0);
+    res = BIT_SET_OP(0, op, ~0);
     cp = b[bptr++];
   } else {
-    res = BIT_OP(~0, op, ~0);
+    res = BIT_SET_OP(~0, op, ~0);
     cp = a[aptr++];
     bptr++;
   }
@@ -837,10 +844,14 @@ is usually much faster with a range table than with an individual code
 point table.  Not only can absent members be skipped, but present
 members within a range can be skipped as well.
 
-<<Common uni definitions>>=
+<<[[uni_chrrng_t]]>>=
 typedef struct {
     uint32_t low, high;
 } uni_chrrng_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_chrrng_t]]>>
 int uni_cmprng(const void *a, const void *b); /* for qsort/bsearch */
 int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
 @
@@ -885,8 +896,6 @@ int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
 
 <<Common uni definitions>>=
 /* members are already in list, albeit in compact form */
-void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
-		      uni_chrrng_t **rtab, uint32_t *r_len);
 void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
                       const uni_chrrng_t *b, uint32_t b_len,
 		      uni_chrrng_t **rtab, uint32_t *r_len);
@@ -900,8 +909,8 @@ most one range is removed (replaced by ranges below if top-most is at
 top, except if one is already at the bottom).
 
 <<Common uni functions>>=
-void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
-		      uni_chrrng_t **rtab, uint32_t *r_len)
+static void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
+		              uni_chrrng_t **rtab, uint32_t *r_len)
 {
   uni_chrrng_t *tab;
   uint32_t tab_len = 0;
@@ -981,7 +990,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     return;
   }
   inisize(tab, max_tab);
-  int invert = /* BIT_OP(0, op, 0); */ op & 1;
+  int invert = /* BIT_SET_OP(0, op, 0); */ op & 1;
   uint32_t aptr = 0, bptr = 0;
   uint32_t alow, ahigh, blow, bhigh;
   int32_t lasthigh = -1, curlow = -1, curhigh = -1;
@@ -997,7 +1006,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     uint32_t nextlow, nexthigh, res;
     if(alow < blow) {
       nextlow = alow;
-      res = BIT_OP(~0, op, 0);
+      res = BIT_SET_OP(~0, op, 0);
       if(ahigh < blow) {
         nexthigh = ahigh;
 	aptr++;
@@ -1008,7 +1017,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
       }
     } else if(alow > blow) {
       nextlow = blow;
-      res = BIT_OP(0, op, ~0);
+      res = BIT_SET_OP(0, op, ~0);
       if(bhigh < alow) {
         nexthigh = bhigh;
 	bptr++;
@@ -1019,7 +1028,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
       }
     } else {
       nextlow = alow;
-      res = BIT_OP(~0, op, ~0);
+      res = BIT_SET_OP(~0, op, ~0);
       nexthigh = ahigh;
       if(ahigh <= bhigh) {
         aptr++;
@@ -1990,6 +1999,8 @@ expense of slowing the lookup down a bit.  For now, the multi-level
 table, sorted range table, and sorted code point table are the only
 supported data structures.
 
+\subsection{Testing}
+
 In order to actually compare performance and size, a separate test
 program is provided.
 
@@ -2128,6 +2139,8 @@ static void print_mtab_info(const uint32_t *mt, uint32_t rsize)
          (double)(i * 4) / rsize);
 }
 @
+
+\subsection{Parsing the UCD}
 
 A parser program is used to generate these tables as static,
 compilable C code from the UCD tables.  One of the advantages of the
@@ -2313,10 +2326,14 @@ process is the file which contains those names:  [[PropertyAliases.txt]].
 This file is read in and stored in a local table, sorted by name.  The
 sorting is done after the fact to reduce complexity.
 
-<<Common uni definitions>>=
+<<[[uni_alias_t]]>>=
 typedef struct {
   const char *short_name, *long_name, *alt_name, *alt_name2;
 } uni_alias_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_alias_t]]>>
 @
 
 <<Known Data Types>>=
@@ -2417,7 +2434,7 @@ static int add_prop(const char *name)
   uni_alias_t *pn, n;
   uint32_t i;
   if(!maxparsed) {
-    inisize(parsed_props, (maxparsed = num_prop_aliases + 20));
+    inisize(parsed_props, (maxparsed = num_prop_aliases));
     nparsed = num_prop_aliases;
     clearbuf(parsed_props, nparsed);
   }
@@ -2438,10 +2455,13 @@ static int add_prop(const char *name)
   if(pn)
     i = (int)(pn - prop_aliases);
   else {
-    if(maxparsed == nparsed)
+    if(maxparsed == nparsed) {
       resize(parsed_props, (maxparsed *= 2));
+      <<Resize prop-associated arrays>>
+    }
     i = nparsed;
     clearbuf(&parsed_props[nparsed], 1);
+    <<Clear prop-associated array[i]>>
     nparsed++;
   }
   if(!parsed_props[i].name)
@@ -2709,6 +2729,8 @@ for(i = 0; i < nparsed; i++)
                                           &ml_len);
 @
 
+\subsection{Generating the Static Data}
+
 The boolean properties can now be printed, using the canonical short
 name.  Declarations are all printed to the same file:
 [[uni_prop.gen.h]].  However, each boolean property is printed to a
@@ -2746,7 +2768,8 @@ MAKEFILES+=makefile.unidat
 <<makefile.rules>>=
 makefile.unidat: uni_prop.gen.h
 	printf 'RNGDAT_NAMES := ' >$@
-	fgrep '[]' $^ | sed -e 's/.* //;s/\[.*//' | tr \\n ' ' >>$@
+	fgrep '[]' $^ | <<Filter generated file names>>
+	       sed -e 's/.* //;s/\[.*//' | tr \\n ' ' >>$@
 -include makefile.unidat
 $(RNGDAT_NAMES:%=%.gen.c): uni_prop.gen.h
 	@touch "$@"
@@ -2891,7 +2914,7 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
 }
 @
 
-\subsection{Enumerated Properties}
+\section{Enumerated Properties}
 
 Enumerated properties have a limited number of values, which have
 names of their own.  These names may have aliases, as well.  Of course
@@ -2916,6 +2939,8 @@ underscores removed (except as noted).
 general searching.
 \end{itemize}
 
+\subsection{Storage Methods}
+
 Again, for the \emph{of} operation, the multi-level table seems
 appropriate.  Rather than storing the actual string value, the
 enumeration is simply converted into an integer from zero to the
@@ -2933,10 +2958,14 @@ requires 32 bits, so adding another separate field is wasteful.
 Instead, an 8-bit bit field is added.  This does slow things down
 slightly, but for performance, the multi-level table is better, anyway.
 
-<<Common uni definitions>>=
+<<[[uni_chrrng_dat_t]]>>=
 typedef struct {
     uint32_t low, high:24, dat:8;
 } uni_chrrng_dat_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_chrrng_dat_t]]>>
 int uni_cmprng_dat(const void *a, const void *b); /* for bsearch/qsort */
 uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
                         uint32_t tab_len, uint32_t def);
@@ -2997,6 +3026,8 @@ rare, only the simple sorted table is provided, and the library user
 is expected to convert that to a hash table, prefix tree, or some
 other structure as needed.
 
+\subsection{Name Tables}
+
 The first thing to read in is the list of aliases.  These are keyed on
 property short name.  Since there is already a list of property names,
 the array of aliases may as well correspond.  As the list of aliases
@@ -3017,6 +3048,17 @@ inisize(num_val_aliases, num_prop_aliases);
 clearbuf(num_val_aliases, num_prop_aliases);
 inisize(max_val_aliases, num_prop_aliases);
 clearbuf(max_val_aliases, num_prop_aliases);
+@
+
+<<Resize prop-associated arrays>>=
+resize(val_aliases, maxparsed);
+resize(num_val_aliases, maxparsed);
+resize(max_val_aliases, maxparsed);
+@
+
+<<Clear prop-associated array[i]>>=
+val_aliases[i] = NULL;
+num_val_aliases[i] = max_val_aliases[i] = 0;
 @
 
 Then, the alias file can be read and stored in the array.  While it
@@ -3067,11 +3109,15 @@ is necessary because some fields do not match any of the literal
 values we have gathered so far.  This table will be dumped as well,
 for the \emph{value} function.
 
-<<Common uni definitions>>=
+<<[[uni_valueof_t]]>>=
 typedef struct {
   const char *name;
   int val;
 } uni_valueof_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_valueof_t]]>>
 @
 
 <<Known Data Types>>=
@@ -3154,6 +3200,16 @@ for(i = 0; i < num_prop_aliases; i++) {
 }
 @
 
+<<Resize prop-associated arrays>>=
+resize(enum_vals, maxparsed);
+resize(enum_vals_len, maxparsed);
+@
+
+<<Clear prop-associated array[i]>>=
+enum_vals[i] = NULL;
+enum_vals_len[i] = 0;
+@
+
 For each value alias, an enumeration needs to be printed to the header
 file.  Both the short and long name should be supported, but there is
 little value in supporting the secondary aliases.  This excludes
@@ -3168,11 +3224,14 @@ need to be dumped as well.  First, a table similar to the locally
 stored table is printed; this does the \emph{name} operation.  Next,
 value table built just previously is dumped for the \emph{value}
 operation.  Unlike the enumerations, no values may be skipped when
-generating the string tables.
+generating the string tables.  The string tables are stored in the
+same file, because both files use the same set of string constants,
+and most compilers share storage for like string constants.
 
 <<Dump character information as C code>>=
-for(i = 0; i < num_prop_aliases; i++) {
-  const char *pn = prop_aliases[i].short_name;
+for(i = 0; i < nparsed; i++) {
+  const char *pn = i < num_prop_aliases ? prop_aliases[i].short_name :
+                                          parsed_props[i].name;
   if(!enum_vals[i])
     continue;
   /* ignore boolean properties */
@@ -3184,7 +3243,7 @@ for(i = 0; i < num_prop_aliases; i++) {
 @
 
 <<Generate C code for enumeration constants>>=
-/* generating nameof array on stdout (except extern decl on gen_h) */
+/* generating nameof array */
 fprintf(gen_h, "extern const uni_alias_t uni_%s_nameof[];\n", pn);
 char nbuf[64];
 sprintf(nbuf, "uni_%s_nameof.gen.c", pn);
@@ -3223,8 +3282,17 @@ for(j = 0; j < num_val_aliases[i]; j++) {
     continue;
   }
   /* use numeric values directly instead of making into enum */
-  if(!isdigit(va->short_name[0]))
-    fprintf(gen_h, "\tU_%s_%s,", pn, va->short_name);
+  if(!isdigit(va->short_name[0])) {
+    if(strchr(va->short_name, '-')) {
+      const char *n;
+      /* slow, but necessary with e.g. ID_Restrict_Type */
+      fprintf(gen_h, "\tU_%s_", pn);
+      for(n = va->short_name; *n; n++)
+        putc(*n == '-' ? '_' : *n, gen_h);
+      putc(',', gen_h);
+    } else
+      fprintf(gen_h, "\tU_%s_%s,", pn, va->short_name);
+  }
   if(strcmp(va->long_name, va->short_name)) {
     fprintf(gen_h, "%cU_%s_%s = ", isdigit(va->short_name[0]) ? '\t' : ' ',
                     pn, va->long_name);
@@ -3244,25 +3312,34 @@ for(j = 0; j < num_val_aliases[i]; j++) {
   fputc('\n', gen_h);
 }
 fputs("};\n", nf);
-fclose(nf);
 fprintf(gen_h, "\tU_NUM_%s\n} uni_%s_t;\n", pn, pn);
 /* now, print valueof table */
 fprintf(gen_h, "extern const uni_valueof_t uni_%s_valueof[];\n", pn);
-sprintf(nbuf, "uni_%s_valueof.gen.c", pn);
-open_wf(vf, nbuf);
-fprintf(vf, "#include \"uni_common.h\"\n"
-            "#include \"uni_prop.gen.h\"\n\n"
+fprintf(nf, "#include \"uni_prop.gen.h\"\n\n"
 	    "const uni_valueof_t uni_%s_valueof[] = {\n", pn);
 for(j = 0; j < enum_vals_len[i]; j++) {
   const char *name = val_aliases[i][enum_vals[i][j].val].short_name;
   if(isdigit(*name))
     name = val_aliases[i][enum_vals[i][j].val].long_name;
-  fprintf(vf, "\t{ \"%s\", U_%s_%s }%s\n", enum_vals[i][j].name, pn, name,
-	      j < enum_vals_len[i] - 1 ? "," : "");
+  fprintf(nf, "\t{ \"%s\", U_%s_", enum_vals[i][j].name, pn);
+  if(strchr(name, '-')) {
+    /* slow, but necessary with e.g. ID_Restrict_Type */
+    for(; *name; name++)
+      putc(*name == '-' ? '_' : *name, nf);
+  } else
+    fputs(name, nf);
+  fprintf(nf, " }%s\n", j < enum_vals_len[i] - 1 ? "," : "");
 }
-fputs("};\n", vf);
-fclose(vf);
+fputs("};\n", nf);
+fclose(nf);
 fprintf(gen_h, "#define uni_%s_valueof_len %d\n", pn, enum_vals_len[i]);
+@
+
+Since the two arrays are stored in the same file, the logic to
+generate file names needs to skip the valueof array.
+
+<<Filter generated file names>>=
+fgrep -v _valueof | \
 @
 
 There is still one nagging issue:  the gc aliases include some that
@@ -3402,6 +3479,8 @@ static uint8_t enum_val(int pno, const char *v)
 } while(0)
 @
 
+\subsection{Testing}
+
 To test the table implementations, a different, but nearly identical,
 set of routines is used compared to the ones one for booleans.
 
@@ -3444,6 +3523,8 @@ static void doit_dat(const char *name, const uni_chrrng_dat_t *rng, uint32_t nen
     printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
 }
 @
+
+\subsection{Parsing the UCD}
 
 First, [[UnicodeData.txt]] has a few fields.  Field 3 is gc.  Field 4
 is ccc.  Field 5 provides bc. Field 6 provides dt, albeit indirectly.
@@ -3517,13 +3598,15 @@ if(num_fields == 3) {
 <<Parse UCD files>>=
 uni_chrrng_t *new;
 uint32_t new_len;
-uni_chrrng_invert(parsed_props[prop_NFD_QC].rng,
-                  parsed_props[prop_NFD_QC].rng_len, &new, &new_len);
+uni_chrrng_setop(parsed_props[prop_NFD_QC].rng,
+                 parsed_props[prop_NFD_QC].rng_len, UNI_SOP_INV_A,
+		 NULL, 0, &new, &new_len);
 free(parsed_props[prop_NFD_QC].rng);
 parsed_props[prop_NFD_QC].rng = new;
 parsed_props[prop_NFD_QC].rng_len = new_len;
-uni_chrrng_invert(parsed_props[prop_NFKD_QC].rng,
-                  parsed_props[prop_NFKD_QC].rng_len, &new, &new_len);
+uni_chrrng_setop(parsed_props[prop_NFKD_QC].rng,
+                 parsed_props[prop_NFKD_QC].rng_len, UNI_SOP_INV_A,
+		 NULL, 0, &new, &new_len);
 free(parsed_props[prop_NFKD_QC].rng);
 parsed_props[prop_NFKD_QC].rng = new;
 parsed_props[prop_NFKD_QC].rng_len = new_len;
@@ -3643,6 +3726,8 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+\subsection{Generating the Static Data}
+
 Once finished, the tables can be dumped.  Just as with boolean
 properties, only range tables have been built, so it's time to
 generate the multi-level table, assuming that the range data is
@@ -3697,16 +3782,21 @@ static void fixup_rng_dat(prop_t *p)
 {
   uint32_t i;
   qsort(p->rng_dat, p->rng_len, sizeof(uni_chrrng_dat_t), uni_cmprng_dat);
-  for(i = 0; i < p->rng_len - 1; i++)
-    if(p->rng_dat[i + 1].low == p->rng_dat[i].high - 1 &&
-       p->rng_dat[i + 1].dat == p->rng_dat[i].dat) {
-      p->rng_dat[i].high = p->rng_dat[i + 1].high;
-      if(i + 2 < p->rng_len) {
-        memmove(p->rng_dat + i + 1, p->rng_dat + i + 2,
-	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_dat_t));
-        p->rng_len--;
-      }
+  /* starting at top means only optimized entries are memmove'd */
+  for(i = p->rng_len - 1; i > 0; i--) {
+    uint32_t j = i;
+    while(i > 0 && p->rng_dat[i - 1].high == p->rng_dat[i].low - 1 &&
+          p->rng_dat[i - 1].dat == p->rng_dat[i].dat)
+      i--;
+    p->rng_dat[i].high = p->rng_dat[j].high;
+    if(j < p->rng_len - 1) {
+        memmove(p->rng_dat + i + 1, p->rng_dat + j + 1,
+	        (p->rng_len - (j + 1)) * sizeof(uni_chrrng_dat_t));
     }
+    p->rng_len -= j - i;
+    if(!i)
+      break;
+  }
 }
 @
 
@@ -3791,7 +3881,7 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 uni_x_of(i, mtab, def)
 @
 
-\subsection{Numeric Properties}
+\section{Numeric Properties}
 
 Numeric properties are a subset of enumerated properties.  The
 property's primary values are integers or two dot-separated integers
@@ -3803,16 +3893,22 @@ like-valued floating point number (e.g., 01.10 matches 1.1).  In
 addition, the age property is meant to match equal to or less than the
 search value.  For example, 3.0 matches 1.1 as well.
 
+\subsection{Storage Methods}
+
 Numeric values are stored as rational numbers (fractions).  Since the
 current standard has no numbers requiring denominators over 127, the
 denominator is stored in a single byte.  The numerator needs no more
 than 19 bits, so it is stored in the remaining 3 bytes.
 
-<<Common uni definitions>>=
+<<[[uni_chrrng_num_t]]>>=
 typedef struct {
     uint32_t low, high;
     int32_t num:24, denom:8;
 } uni_chrrng_num_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_chrrng_num_t]]>>
 void uni_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
                     uint32_t tab_len, int32_t *num, uint8_t *denom);
 @
@@ -3890,6 +3986,8 @@ static void add_num_rng(prop_t *p, uint32_t low, uint32_t high,
 } while(0)
 @
 
+\subsection{Testing}
+
 To test the table implementations, a different, but nearly identical,
 set of routines is used compared to the ones one for booleans.
 
@@ -3937,6 +4035,8 @@ static void doit_num(const char *name, const uni_chrrng_num_t *rng, uint32_t nen
     printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
 }
 @
+
+\subsection{Parsing the UCD}
 
 Numeric properties from [[UnicodeData.txt]] are ccc (field 4) and nv
 (field 9).  Since ccc has aliases, it is already added as an
@@ -4058,6 +4158,8 @@ The only other numeric property currently supported is age, which
 comes from [[DerivedAge.txt]].  Since it has aliases, it is already
 added as an enumeration.
 
+\subsection{Generating the Static Data}
+
 Once finished, the tables can be dumped.  Just as with other
 properties, only range tables have been built, so it's time to
 generate the multi-level table, assuming that the range data is correct.
@@ -4104,17 +4206,22 @@ static void fixup_rng_num(prop_t *p)
 {
   uint32_t i;
   qsort(p->rng_num, p->rng_len, sizeof(uni_chrrng_num_t), uni_cmprng);
-  for(i = 0; i < p->rng_len - 1; i++)
-    if(p->rng_num[i + 1].low == p->rng_num[i].high - 1 &&
-       p->rng_num[i + 1].num == p->rng_num[i].num &&
-       p->rng_num[i + 1].denom == p->rng_num[i].denom) {
-      p->rng_num[i].high = p->rng_num[i + 1].high;
-      if(i + 2 < p->rng_len) {
-        memmove(p->rng_num + i + 1, p->rng_num + i + 2,
-	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_num_t));
-        p->rng_len--;
-      }
+  /* starting at top means only optimized entries are memmove'd */
+  for(i = p->rng_len - 1; i > 0; i--) {
+    uint32_t j = i;
+    while(i > 0 && p->rng_num[i - 1].high == p->rng_num[i].low - 1 &&
+          p->rng_num[i - 1].num == p->rng_num[i].num &&
+          p->rng_num[i - 1].denom == p->rng_num[i].denom)
+      i--;
+    p->rng_num[i].high = p->rng_num[j].high;
+    if(j < p->rng_len - 1) {
+        memmove(p->rng_num + i + 1, p->rng_num + j + 1,
+	        (p->rng_len - (j + 1)) * sizeof(uni_chrrng_num_t));
     }
+    p->rng_len -= j - i;
+    if(!i)
+      break;
+  }
 }
 @
 
@@ -4188,11 +4295,12 @@ void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 uni_x_val(i, mtab, &mn, &md);
 @
 
-\subsection{String Properties}
+\section{String Properties}
 
-String properties are those which have a value.  Technically, boolean
-properties have the string values representing true and false, but
-they are never considered this way.  Useful operations include:
+String properties are those which have a value that cannot be
+represented using the previously described methods.  Since the UCD is
+text, this is generally either an ASCII or Unicode string.  Useful
+operations include:
 
 \begin{itemize}
 \item Find out the string-valued value \emph{of} the property for a
@@ -4202,35 +4310,37 @@ there is a maximum length, it should be listed so that the sizing step
 can be avoided.
 \end{itemize}
 
+\subsection{Storage Methods}
+
 The storage methods used for boolean properties can be used for
 strings as well, with some adjustments.  First of all, there are very
 few consecutive characters with the same value (other than the default
 value, which is an empty string), so using a range list is wasteful.
 Instead, a simple code point list with value is used.  One way to
-store the string would be as a pointer to a zero-terminated string.
-However, this requires computing string length at every access, so a
-better way would be to store a pointer and a length.  For 64-bit
-systems, this would require at least 8 bytes for the pointer, and
-probably another 8 bytes to align the structure, so 4 bytes for the
-code point and 4 bytes for the length.  However, a more efficient
-storage method would be to use a 32-bit pointer into a single string
-containing all possible values, reducing storage by 4 bytes.
-Additional savings can be had if the combined string size can be kept
-below 64K, in which case 16-bit integers can represent the offset and
-length.  The length could be stored in the string as well, eliminating
-the need for a separate length, and generally reducing the space
-required for that to a byte.  Since fewer than 24 bits are used for
-the code point, the length could be stored in the code point's lower
-byte as well; masking would be required to test equality, though.
-Another space-saving measure would be to store similar properties
-together.  For example, the main string properties are either case
-folding-related or normalization-related, and some have the others as
-their default values.  These could be combined when they have many
-elements in common.  For now, though, range tables are built using
-32-bit pointers and lengths.  The merging into a single string table
-can be done during post-processing.  However, to assist with this,
-multiple tables sharing the same string table can use the [[flags]]
-field to distinguish themselves.
+store the string would be as a pointer to a zero-terminated string (no
+strings use zero as a component value).  However, this requires
+computing string length at every access, so a better way would be to
+store a pointer and a length.  For 64-bit systems, this would require
+at least 8 bytes for the pointer, and probably another 8 bytes to
+align the structure, so 4 bytes for the code point and 4 bytes for the
+length.  However, a more efficient storage method would be to use a
+32-bit pointer into a single string containing all possible values,
+reducing storage by 4 bytes. Additional savings can be had if the
+combined string size can be kept below 64K, in which case 16-bit
+integers can represent the offset and length.  The length could be
+stored in the string as well, eliminating the need for a separate
+length, and generally reducing the space required for that to a byte.
+Since fewer than 24 bits are used for the code point, the length could
+be stored in the code point's lower byte as well; masking would be
+required to test equality, though. Another space-saving measure would
+be to store similar properties together.  For example, the main string
+properties are either case folding-related or normalization-related,
+and some have the others as their default values.  These could be
+combined when they have many elements in common.  For now, though,
+range tables are built using 32-bit pointers and lengths.  The merging
+into a single string table can be done during post-processing.
+However, to assist with this, multiple tables sharing the same string
+table can use the [[flags]] field to distinguish themselves.
 
 <<[[prop_t]] prerequisites>>=
 typedef struct {
@@ -4289,10 +4399,13 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
 } while(0)
 @
 
+\subsection{Parsing the UCD - Decomposition}
+
 The first string field from [[UnicodeData.txt]] is the decomposition
 mapping (dm) field.  For compatibility decompositions, the initial
 part of the field is the decomposition type in angle brackets, which
-has already been encoded as an enumeration (dt).
+has already been encoded as an enumeration (dt), so it is skipped,
+along with the space which always follows it.
 
 <<Initialize UCD files>>=
 decl_str(dm);
@@ -4306,18 +4419,22 @@ add_str(dm, s);
 @
 
 While the default values for dt and dm are normally blank, one range
-actually has defined canonical values: the Hangul Syllables, from AC00
-through D7A3.  These are only described in the standard, and can be
-generated with a simple algorithm.  An entry in this range consists of
-three parts, called L, V, and T.  There are normal, named code points
-for each L, V, and T outside of this range, and every LV and LVT
-combination is contained within this range.  There are defined
-decomposition mappings from LVT to LV and T, and from LV to L and V.
-Rather than fill the dm string table with easily generated values, the
-value is represented as an invalid decomposition result: 1.  A
-function is then provided to convert that 1 into the correct
-decomposition mapping.  The canonical dm entry for LVT is LV T, so a
-flag is used to select the full L V T decomposition directly.
+actually has defined canonical values: the Hangul
+Syllables\footnote{Note that I am not Korean, so I may refer to things
+incorrectly or inappropriately.  Everything I know about Korean is
+what I read about in the Unicode standard (and maybe a little watching
+of subtitled Korean TV dramas).}, from AC00 through D7A3.  These are
+only described in the standard, and can be generated with a simple
+algorithm.  An entry in this range consists of three parts, called L,
+V, and T.  There are normal, named code points for each L, V, and T
+outside of this range, and every LV and LVT combination is contained
+within this range.  There are defined decomposition mappings from LVT
+to LV and T, and from LV to L and V. Rather than fill the dm string
+table with easily generated values, the value is represented as an
+invalid decomposition result: 1.  A function is then provided to
+convert that 1 into the correct decomposition mapping.  The canonical
+dm entry for LVT is LV T, so a flag is used to select the full L V T
+decomposition directly.
 
 <<Process a line of [[UnicodeData.txt]]>>=
 if(low == 0xAC00) {
@@ -4455,6 +4572,8 @@ for(i = 0; i < dm_prop->rng_len; i++) {
 }
 @
 
+\subsection{Generating the Static Data}
+
 This string table can now be printed.  Before doing so, the strings
 are sorted, and any strings which are either the same or overlap from
 the start share space.  This does not save as much as true common
@@ -4479,10 +4598,9 @@ static int cmp_strs(const void *a, const void *b)
 @
 
 <<UCD parser local functions>>=
-static void dump_strs(prop_t *p, FILE *gen_h)
+static uint32_t merge_strs(prop_t *p)
 {
-  uint32_t i, off, saved = 0;
-  char nbuf[32];
+  uint32_t i, saved = 0;
 
   sort_strs = p->strs;
   qsort(p->rng_str, p->rng_len, sizeof(*p->rng_str), cmp_strs);
@@ -4494,10 +4612,18 @@ static void dump_strs(prop_t *p, FILE *gen_h)
       p->rng_str[i - 1].off = p->rng_str[i].off;
       saved += p->rng_str[i - 1].len;
   }
+  return saved;
+}
+
+static void dump_strs(prop_t *p, FILE *gen_h)
+{
+  uint32_t i, off, saved = merge_strs(p);
+  char nbuf[64];
+
   sprintf(nbuf, "uni_%s_strs.gen.c", p->name);
   open_wf(of, nbuf);
   fprintf(of, "#include <stdint.h>\n\n"
-              "uint32_t uni_%s_strs[] = {\n\t", p->name);
+              "const uint32_t uni_%s_strs[] = {\n\t", p->name);
   for(i = 0, off = 0; i < p->rng_len; i++) {
     uint32_t j, len;
     if(i < p->rng_len - 1 && p->rng_str[i].off == p->rng_str[i + 1].off) {
@@ -4514,8 +4640,8 @@ static void dump_strs(prop_t *p, FILE *gen_h)
   }
   fclose(of);
   fprintf(gen_h, "/* %d words (%d bytes) (%d words saved) */\n"
-                 "extern uint32_t uni_%s_strs[];\n", off, off * 4, saved,
-		 p->name);
+                 "extern const uint32_t uni_%s_strs[];\n",
+		 off, off * 4, saved, p->name);
 }
 @
 
@@ -4556,21 +4682,28 @@ static int cmp_cp_flg(const void *a, const void *b)
 }
 @
 
-<<Common uni definitions>>=
+<<[[uni_str_rng_t]]>>=
 typedef struct {
   uint32_t cp;
   uint16_t off;
   uint8_t len, flags;
 } uni_str_rng_t;
+@
 
+<<[[uni_str_rng_val_t]]>>=
 typedef struct {
   uint16_t off;
   uint8_t len, flags;
 } uni_str_rng_val_t;
 @
 
+<<Common uni definitions>>=
+<<[[uni_str_rng_t]]>>
+<<[[uni_str_rng_val_t]]>>
+@
+
 <<Known Data Types>>=
-uni_str_rng_t,%
+uni_str_rng_t,uni_str_rng_val_t,%
 @
 
 <<Dump character information as C code>>=
@@ -4605,11 +4738,15 @@ fprintf(gen_h, "/* %d lookups max */\n"
 free(dec);
 @
 
-<<Common uni definitions>>=
+<<[[uni_cp_val_t]]>>=
 typedef struct {
   uint32_t cp;
   uint32_t val;
 } uni_cp_val_t;
+@
+
+<<Common uni definitions>>=
+<<[[uni_cp_val_t]]>>
 uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
                            uint32_t *ml_len);
 @
@@ -4735,27 +4872,36 @@ that the exact name of the string table and the special value for
 Hangul Syllables is encoded in these functions, rather than everywhere
 lookups are used.
 
-<<Dump character information as C code>>=
-fputs("/* 2-step lookup: uni_find_xxx followed by uni_get_decomp() */\n"
-      "/* off is uint16_t; len and compat are uint8_t; compat is optional */\n"
-      "#define uni_find_canon_decomp(cp, off, len) \\\n"
-      "  uni_x_dec(cp, uni_canon_decomp_mtab, off, len, NULL, 1, uni_dm_full_strs)\n"
-      "#define uni_find_compat_decomp(cp, off, len, compat) \\\n"
-      "  uni_x_dec(cp, uni_compat_decomp_mtab, off, len, compat, 1, "
-                                                          "uni_dm_full_strs)\n"
-      "#define uni_find_de(cp, off, len, compat) \\\n"
-      "  uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_full_strs)\n"
-      "#define uni_get_decomp(cp, buf, off, len) do { \\\n"
-        "  if((off) == (uint16_t)~0) \\\n"
-	"    hangul_syllable_decomp(cp, buf, (len) == 3); \\\n"
-	"  else \\\n"
-	"    memcpy(buf, uni_dm_full_strs + (off), (len) * 4); \\\n"
-	"} while(0)\n", gen_h);
+<<Common uni definitions>>=
+/* this prototype needs to appear before macros using it so build.nw */
+/* doesn't get confused */
+void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
+               uint8_t *compat, int full, const uint32_t *strs);
 @
 
 <<Common uni definitions>>=
-void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
-               uint8_t *compat, int full, const uint32_t *strs);
+/* 2-step lookup: uni_find_xxx followed by uni_get_decomp */
+/* off is uint16_t; len and compat are uint8_t; compat is optional */
+#define uni_find_canon_decomp(cp, off, len) \
+  uni_x_dec(cp, uni_canon_decomp_mtab, off, len, NULL, 1, uni_dm_full_strs)
+#define uni_find_compat_decomp(cp, off, len, compat) \
+  uni_x_dec(cp, uni_compat_decomp_mtab, off, len, compat, 1, uni_dm_full_strs)
+#define uni_find_dm(cp, off, len, compat) \
+  uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_full_strs)
+#define uni_get_decomp(cp, buf, off, len) do { \
+  if((off) == (uint16_t)~0) \
+    hangul_syllable_decomp(cp, buf, (len) == 3); \
+  else \
+    memcpy(buf, uni_dm_full_strs + (off), (len) * 4); \
+} while(0)
+@
+
+<<C Prototypes>>=
+void uni_find_canon_decomp(uint32_t cp, int16_t *off, uint8_t *len);
+void uni_find_compat_decomp(uint32_t cp, int16_t *off, uint8_t *len,
+                            uint8_t *compat);
+void uni_find_dm(uint32_t cp, int16_t *off, uint8_t *len, uint8_t *compat);
+void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 @
 
 <<Common uni functions>>=
@@ -4786,6 +4932,8 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
   }
 }
 @
+
+\subsection{Parsing the UCD - Composition}
 
 As mentioned earlier, composition takes place on pairs.  The canonical
 composition of A and B is C if the plain dm value for C is A B, and dt
@@ -4934,21 +5082,26 @@ The same lookup function as was used for decomposition lookups mostly
 works for the A-indexed level as well.  For the B-indexed level, a
 binary search is performed.  This is hand-coded for speed.
 
-<<Dump character information as C code>>=
-fputs("/* to compose A+B->C: */\n"
-      "/* look up B->C table for A (cp) */\n"
-      "#define uni_find_canon_comp(cp, off, len) \\\n"
-      "  uni_x_dec(cp, uni_canon_comp_mtab, off, len, NULL, 0, "
-                                                       "uni_canon_comp_strs)\n"
-      "/* then look up C given B->C table info */\n"
-      "#define uni_canon_comp(cpa, cpb, off, len) \\\n"
-      "  ((len) > 0 ? uni_lookup_decent(cpb, uni_canon_comp_strs + (off), len) : \\\n"
-      "               hangul_syllable_comp(cpa, cpb))\n",
-      gen_h);
+<<Common uni definitions>>=
+/* this prototype needs to appear before macros using it so build.nw */
+/* doesn't get confused */
+uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len);
 @
 
 <<Common uni definitions>>=
-uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len);
+/* to compose A+B->C: */
+/* look up B->C table for A (cp) */
+#define uni_find_canon_comp(cp, off, len) \
+  uni_x_dec(cp, uni_canon_comp_mtab, off, len, NULL, 0, uni_canon_comp_strs)
+/* then look up C given B->C table info */
+#define uni_canon_comp(cpa, cpb, off, len) \
+  ((len) > 0 ? uni_lookup_decent(cpb, uni_canon_comp_strs + (off), len) : \
+               hangul_syllable_comp(cpa, cpb))
+@
+
+<<C Prototypes>>=
+void uni_find_canon_comp(uint32_t cp, int16_t *off, uint8_t *len);
+uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
 @
 
 <<Common uni functions>>=
@@ -4968,6 +5121,8 @@ uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len)
   return 0;
 }
 @
+
+\subsection{Parsing the UCD - Case Conversion}
 
 The next strings are the various case conversion tables.
 [[UnicodeData.txt]] contains three of them: the simple case mappings
@@ -5027,7 +5182,7 @@ string.  Unfortunately, multiple entries with the same key are not
 always consecutive, so this merging is done after they have all been
 gathered.
 
-<<Common uni definitions>>=
+<<Special casing conditions>>=
 /* all known conditions from SpecialCasing.txt, version 6.2 */
 /* future revisions may need more flags/parsing */
 #define UNI_SC_FL_LT                (1<<16) /* lt locale */
@@ -5041,9 +5196,13 @@ gathered.
 #define UNI_SC_FL_BEFORE_DOT        (1<<27) /* combining dot above in same gc */
 #define UNI_SC_FL_MORE_ABOVE        (1<<28) /* grave, acute, etc. in same gc */
 #define UNI_SC_FL_FINAL_SIGMA       (1<<29) /* no following letters in same word */
-#define UNI_SC_FL_COND              (0xfe << 24) /* any condition flags */
+#define UNI_SC_FL_CONTEXT           (0xfe << 24) /* any condition flags */
 
 #define UNI_SC_FL_LEN_MASK          0xffff
+@
+
+<<Common uni definitions>>=
+<<Special casing conditions>>
 @
 
 <<Initialize UCD files>>=
@@ -5160,7 +5319,7 @@ postproc_sc(tc);
 static void dump_str_tabs(prop_t *prop, FILE *gen_h)
 {
   uint32_t i;
-  char nbuf[32];
+  char nbuf[64];
   uni_str_rng_t *short_str;
   inisize(short_str, prop->rng_len);
   dump_strs(prop, gen_h);
@@ -5188,6 +5347,9 @@ static void dump_str_tabs(prop_t *prop, FILE *gen_h)
   print_mtab(prop->name, tmt, gen_h);
   free(tmt);
   free(short_str);
+  /* for direct lookup */
+  fprintf(gen_h, "#define uni_%s_of(cp) uni_x_str_of(cp, uni_%s_mtab)\n",
+                 prop->name, prop->name);
 }
 @
 
@@ -5248,11 +5410,11 @@ int uni_case_convert(uint32_t cp, uint32_t *buf, uint32_t buf_len,
   const uint32_t *ncond = NULL;
   while(rem > 0) {
     if(!(*str & UNI_SC_FL_LOCALE) || (*str & UNI_SC_FL_LOCALE & cond)) {
-      if(!(*str & UNI_SC_FL_COND)) {
+      if(!(*str & UNI_SC_FL_CONTEXT)) {
         /* locale condition is stronger than no condition at all */
         if(!ncond || (*str & UNI_SC_FL_LOCALE))
 	  ncond = str;
-      } else if(!(*str & cond & UNI_SC_FL_COND) == !!(*str & UNI_SC_FL_NOT)) {
+      } else if(!(*str & cond & UNI_SC_FL_CONTEXT) == !!(*str & UNI_SC_FL_NOT)) {
         /* condition true: return result (assumes no other cond could be true) */
 	ncond = str;
 	break;
@@ -5294,39 +5456,74 @@ int uni_case_convert(uint32_t cp, uint32_t *buf, uint32_t buf_len,
                    cond)
 @
 
+<<C Prototypes>>=
+int uni_lc(uint32_t cp, uint32_t *buf, uint32_t buf_len, uint32_t cond);
+int uni_uc(uint32_t cp, uint32_t *buf, uint32_t buf_len, uint32_t cond);
+int uni_tc(uint32_t cp, uint32_t *buf, uint32_t buf_len, uint32_t cond);
+@
+
 For more case transformation fun, there is [[CaseFolding.txt]].  It
 provides four different case folding (lower-case) transformations:
-common, simple, full, and Turkic special cases.  Rather than generate
-the cf and scf properties directly, the four types each get their own
-list, to be combined later.
+common, simple, full, and Turkic special cases.  The common and simple
+cases are guaranteed to always have length one.  There are few enough
+full and Turkic cases that it makes sense to just encode them using
+the same method as the full case conversion tables above.  Note that
+the official cf property ignores the Turkic cases.
 
 <<Initialize UCD files>>=
-decl_str(cf_c);
-decl_str(cf_s);
-decl_str(cf_f);
-decl_str(cf_t);
+decl_num(scf);
+decl_str(cf);
 @
 
 <<Parse UCD files>>=
 open_f("CaseFolding.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
+  uint32_t flg;
+  uint32_t scf = strtol(fields[2], NULL, 16);
   switch(fields[1][0]) {
     case 'C': /* default; value == cp */
-      add_str(cf_c, fields[2]);
+      add_num(scf, scf, 1);
       break;
     case 'S': /* scf == C+S */
-      add_str(cf_s, fields[2]);
+      add_num(scf, scf, 1);
       break;
     case 'F': /* cf == C+F */
-      add_str(cf_f, fields[2]);
+      flg = 0;
+      add_sc(cf, fields[2]);
       break;
     case 'T': /* tr, az lang only; not used by anything, technically */
-      add_str(cf_t, fields[2]);
+      flg = UNI_SC_FL_AZ | UNI_SC_FL_TR;
+      add_sc(cf, fields[2]);
+      add_str(cf, fields[2]);
       break;
   }
 }
 fclose(f);
+postproc_sc(cf);
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_cf], gen_h);
+@
+
+Technically, any entry which is in the S class but not in the F class
+should have no translation.  However, I believe that there is no such
+case.  Like with the case conversions, a macro is provided for cf
+property lookup.  Since there is no condition input, a special macro
+is provided for Turkic locales as well.
+
+<<Common uni definitions>>=
+#define uni_cf(cp, buf, buf_len) \
+  uni_case_convert(cp, buf, buf_len, uni_scf_mtab, uni_cf_mtab, uni_cf_strs, 0)
+#define uni_tcf(cp, buf, buf_len) \
+  uni_case_convert(cp, buf, buf_len, uni_scf_mtab, uni_cf_mtab, uni_cf_strs, \
+                   UNI_SC_FL_TR)
+@
+
+<<C Prototypes>>=
+int uni_cf(uint32_t cp, uint32_t *buf, uint32_t buf_len, uint32_t cond);
+int uni_tcf(uint32_t cp, uint32_t *buf, uint32_t buf_len, uint32_t cond);
 @
 
 [[DerivedNormalizationProps.txt]] contains the final case folding
@@ -5345,14 +5542,22 @@ if(num_fields == 3 && !strcmp(fields[1], "NFKC_CF"))
   add_str(NFKC_CF, fields[2]);
 @
 
-It is also quite useful for the other case folding techniques to
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_NFKC_CF], gen_h);
+@
+
+It might also quite useful for the other case folding techniques to
 include normalization.  This saves a pass in the transformation step.
+There are a number of combinations:  NFC\_CF, NFC\_SCF,
+NFKC\_SCF.  Whether or not any of those combinations should include
+removal of default ignorable code points is difficult to tell.
 
 <<FIXME>>=
  combine case folding and normalization here
- dump case conversion tables
- add case conversion functions
+   create string tabs NFC_CF, NFC_SCF, NFKC_SCF(?)
 @
+
+\subsection{Parsing the UCD - Others}
 
 [[BidiMirroring.txt]] contains the last officially supported string
 property.
@@ -5370,9 +5575,8 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-<<FIXME>>=
- dump bidimirroring table
- add bidimirring lookup function
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_bmg], gen_h);
 @
 
 While scx is officially an ``Other'' property, it can be treated just
@@ -5406,13 +5610,14 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-<<FIXME>>=
- dump scx table
- add scx lookup function
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_scx], gen_h);
 @
 
 Another ``Other'' property which can be treated as a string for now is
 the na property.  This includes the Name\_Alias property, as well.
+However, since this property is large and has some special cases,
+dumping it will be handled in a later section.
 
 <<UCD parser local definitions>>=
 #define add_str_raw(n, v) do { \
@@ -5495,9 +5700,10 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 }
 @
 
-<<FIXME>>=
- dump variant tables
- add variant lookup functions
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_cjkTraditionalVariant], gen_h);
+dump_str_tabs(&parsed_props[prop_cjkSimplifiedVariant], gen_h);
+dump_str_tabs(&parsed_props[prop_cjkCompatibilityVariant], gen_h);
 @
 
 Another optional string value comes from the IDNA compatiblity
@@ -5505,8 +5711,8 @@ database.  This is available from a separate location
 (\url{http://www.unicode.org/Public/idna/}), but is only checked for
 in the UCD directory and a few minor variants.  If not present, it is
 ignored.  The IDNA\_Status property is technically an enumeration, but
-since it has no value aliases, it is instead treated as a string for
-now.
+since it has no value aliases, it is instead accumulated as a string
+property.  It is then converted to an enumeration.
 
 <<Initialize UCD files>>=
 decl_str(IDNA_Status);
@@ -5524,19 +5730,69 @@ if((f = fopen("IdnaMappingTable.txt", "r")) ||
       add_str(IDNA_Mapping, fields[2]);
   }
   fclose(f);
+  str_to_enum(&parsed_props[prop_IDNA_Status], "disallowed");
 }
 @
 
-<<FIXME>>=
- create enum from IDNA_Status
- dump IDNA_Status table
- create IDNA_Status lookup function
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_IDNA_Mapping], gen_h);
+@
+
+<<UCD parser local functions>>=
+static void str_to_enum(prop_t *p, const char *def)
+{
+  uint32_t i, poff = 0, plen = 0, pnum = (uint32_t)(p - parsed_props);
+  uint32_t seq = 0;
+
+  merge_strs(p);
+  p->def = ~0;
+  inisize(val_aliases[pnum], max_val_aliases[pnum] = 5);
+  inisize(p->rng_dat, p->rng_len);
+  for(i = 0; i < p->rng_len; i++) {
+    p->rng_dat[i].low = p->rng_dat[i].high = p->rng_str[i].cp;
+    p->rng_dat[i].dat = seq;
+    if(p->rng_str[i].off == poff && p->rng_str[i].len == plen)
+      continue;
+    seq++;
+    poff = p->rng_str[i].off;
+    plen = p->rng_str[i].len;
+    if(num_val_aliases[pnum] == max_val_aliases[pnum])
+      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    {
+      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
+      char *n;
+      inisize(n, plen * 4 + 1);
+      memcpy(n, (char *)(p->strs + poff), plen * 4);
+      n[plen * 4] = 0;
+      if(!strcmp(n, def))
+        p->def = seq - 1;
+      va->short_name = va->long_name = n;
+      va->alt_name = va->alt_name2 = NULL;
+      num_val_aliases[pnum]++;
+    }
+  }
+  if(p->def == (uint8_t)~0) {
+    p->def = seq;
+    if(num_val_aliases[pnum] == max_val_aliases[pnum])
+      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    {
+      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
+      va->short_name = va->long_name = strdup(def);
+      va->alt_name = va->alt_name2 = NULL;
+      num_val_aliases[pnum]++;
+    }
+  }
+  inisize(enum_vals[pnum], enum_vals_len[pnum] = num_val_aliases[pnum]);
+  for(i = 0; i < enum_vals_len[pnum]; i++) {
+    enum_vals[pnum][i].name = strdup(val_aliases[pnum][i].short_name);
+    enum_vals[pnum][i].val = i;
+  }
+}
 @
 
 Similarly, the security information database, available separately at
 \url{http://www.unicode.org/Public/security/}, contains two optional
-enumeration properties without value aliases.  For now, they are read
-into string properties.
+enumeration properties without value aliases.
 
 <<Initialize UCD files>>=
 decl_str(ID_Restrict_Status);
@@ -5554,14 +5810,12 @@ if((f = fopen("xidmodifications.txt", "r")) ||
       add_str_raw(ID_Restrict_Type, fields[2]);
   }
   fclose(f);
+  str_to_enum(&parsed_props[prop_ID_Restrict_Status], "restricted");
+  str_to_enum(&parsed_props[prop_ID_Restrict_Type], "not-chars");
 }
 @
 
-<<FIXME>>=
- create num from security props
- dump security prop tables
- add security prop lookup functions
-@
+\subsection{Parsing the UCD - DUCET}
 
 The most complex optional string value is the Default Unicode
 Collation Element Table (\url{http://unicode.org/Public/UCA/}).  It
@@ -5645,12 +5899,15 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-<<FIXME>>=
- dump DUCET
- add DUCET lookup functions
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_DUCET], gen_h);
 @
 
-\section {XML Data Files}
+<<FIXME>>=
+DUCET needs more support
+@
+
+\chapter {XML Data Files}
 
 The CLDR uses XML rather than simple tables.  One way to deal with
 this would be to turn those XML tables into simple tables using XSLT.
@@ -5794,7 +6051,7 @@ supplemental -> various
 transforms -> mappings (no real single name for each, though)
 @
 
-\section{Unicode Normalization}
+\chapter{Unicode Normalization}
 
 After reading raw Unicode, it needs to be normalized.
 
@@ -6711,7 +6968,7 @@ for(i = 0; i < ndec; i++)
 puts("\n};");
 @
 
-\section{Character Classification}
+\chapter{Character Classification}
 
 Once the characters arrive, they need to be classified for lexical
 analysis and other purposes.
@@ -6809,6 +7066,11 @@ initiate backslash-escapes.
 #define is_bs(x) (c == '\\' || c == 0xFE68 || c == 0xFF3C)
 @
 
+<<C Prototypes>>=
+int is_nl(uint32_t cp);
+int is_bs(uint32_t cp);
+@
+
 A mainline is provided for testing some of the mess above.  It also
 makes it easy to figure out what the gaps are, and what to do about
 them.
@@ -6867,7 +7129,7 @@ if(is_uni_DI(i))
   putchar('!');
 @
 
-\section{Character Names}
+\chapter{Character Names}
 
 Another way to get input is to use backslash-escapes.  These require
 knowledge of all Unicode character names.
@@ -7045,10 +7307,10 @@ For that, the ideal structure is probably a suffix table.  Of
 course such structures can be much larger than the equivalent hash
 table.
 
-\section{Persistent Strings}
+\chapter{Persistent Strings}
 
 Note that GLib provides some of this functionality with its
-[[GStringChunk]] and [[GQuark]] datatypes.  The main difference is
+q[[GStringChunk]] and [[GQuark]] datatypes.  The main difference is
 that my code stored a length, and GLib stores a terminating zero.  The
 terminating zero (rarely) takes up less space, but disallows zeroes in
 the strings. For my compiler-wide table, I also stored constant
@@ -7506,7 +7768,7 @@ strhash[h] = hen + 1;
 return hen + 1;
 @
 
-\section{Character Names, Revisited}
+\chapter{Character Names, Revisited}
 
 Now that we have the ability to use a table of built-in strings, the
 various name tables can be added.  A general string table generator is
@@ -9330,7 +9592,7 @@ while(--tl >= 0)
 return fulllen;
 @
 
-\section{File Input}
+\chapter{File Input}
 
 Basic I/O support is provided in the form of UTF decoders and
 encoders.  More advanced I/O is provided in the form of arbitrary
@@ -9364,7 +9626,7 @@ uni_io.o
 #endif
 @
 
-\subsection{Basic Unicode I/O}
+\section{Basic Unicode I/O}
 
 Unicode defines several file formats:  UTF-8, UTF-16, and UTF-32.  No
 special conversion needs to be made from UTF-32 to integer code
@@ -9875,7 +10137,7 @@ else if((ec & 0xc0) != 0x80) {
 }
 @
 
-\subsection{General File Input}
+\section{General File Input}
 
 A more general UTF reader would have to scan for a byte order mark and
 remember what it said.  This requires retaining state.
@@ -10227,7 +10489,7 @@ while(1) {
 }
 @
 
-\subsection{Generic Normalized Unicode Input}
+\section{Generic Normalized Unicode Input}
 
 To make things even easier, we can make a function which returns a
 normalized character.  Any normalization type we have code for, we
@@ -10416,7 +10678,7 @@ switch(nt) {
 ufn->blen = bp;
 @
 
-\section{Testing}
+\chapter{Testing}
 
 Here is a master driver to call some of the above code for testing.
 
@@ -10818,7 +11080,7 @@ int main(void)
 #endif
 @
 
-\section{Building}
+\chapter{Building}
 
 \input{build-doc.tex} %%% doc
 The full, documented [[makefile.config]] is reproduced here for
@@ -10827,12 +11089,12 @@ start at [[UCD_LOC]].
 
 \input{makefile.config.tex} % make
 
-\section{API}
+\chapter{API}
 
 The easiest way to include this library's definitions is using
 [[#include "uni_all.h"]].  Linking requires [[-luni]].
 
-\subsection{Bit Sets}
+\section{Bit Sets}
 
 The following functions support storage of Unicode boolean properties
 in simple bit sets.  [[a]] is an array of any unsigned integer data
@@ -10840,7 +11102,7 @@ type.  [[b]] is a bit number, and [[e]] is an index into [[a]].
 
 \input{Simple bit set definitions.tex} % C
 
-\subsection{Sorted Code Point Arrays}
+\section{Sorted Code Point Arrays}
 
 An array of any data type whose first member is a 32-bit signed
 integer can be searched and sorted using the standard C [[bsearch]]
@@ -10848,18 +11110,34 @@ and [[qsort]] functions with the following comparison routine:
 
 % uni_cmp_cp prototype
 
-A convenience wrapper for [[bsearch]] is provided, but in general a
-hand-written binary search can perform significantly faster.
+Note that valid Unicode code points are always positive when stored in
+a signed 32-bit integer.  A convenience wrapper for [[bsearch]] is
+provided, but in general a hand-written binary search can perform
+significantly faster.
 
 % uni_is_cp prototype
 
-\subsection{Sorted Code Point Range Arrays}
+For convenience, a structure is defined for code point arrays with
+32-bit values.  As the [[cp]] member is first, [[uni_cmp_cp]] works
+with arrays of this type as well, if [[cp]] is a valid Unicode code
+point.  If not, care must be taken that the value never exceeds the
+maximum [[int32_t]] value ([[0x7fffffff]]).
+
+\input{[[uni_cp_val_t]].tex} % C
+
+\section{Sorted Code Point Range Arrays}
+
+Sorted code point range arrays are generally stored as structures
+whose first two members define the (inclusive) range:
+
+\input{[[uni_chrrng_t]].tex} % C
 
 An array of any data type whose first two members are 32-bit signed
 integers indicating a contiguous range of values, as per the
-[[uni_chrrng_t]] data type (low first, then high), may be searched and
-sorted using the standard C [[bsearch]] and [[qsort]] functions with
-the following comparison routine:
+[[uni_chrrng_t]] data type (if the [[low]] and [[high]] values do not
+exceed the maximum [[int32_t]] value), may be searched and sorted
+using the standard C [[bsearch]] and [[qsort]] functions with the
+following comparison routine:
 
 % uni_cmprng prototype
 
@@ -10867,16 +11145,23 @@ A convenience wrapper for binary searching is provided.  It uses a
 hand-written binary search for significant performance improvement
 over using [[bsearch]].  However, unlike the macro provided for single
 code point arrays, this function can only be used for arrays of the raw
-[[uni_chrrng_t]] type.
+[[uni_chrrng_t]] type.  Since it uses the raw structure, values
+exceeding the maximum [[int32_t]] value are treated as unsigned values
+still, so care must be taken that sorting either uses a different
+comparison function than above or that the values never exceed this
+value.
 
 % is_cp_chrrng prototype
 
 In addition to plain ranges, ranges may store data.  One variant,
-[[uni_chrrng_dat_t]], stores a byte of data ([[dat]]) along side a
+[[uni_chrrng_dat_t]], stores a byte of data along side a
 24-bit high range value.  This keeps the structure the same size, but
-makes it a bit less efficient for searching.  The comparison function
-for [[qsort]] and [[bsearch]] is different, since it needs to mask out
-the value:
+makes it a bit less efficient for searching:
+
+\input{[[uni_chrrng_dat_t]].tex} % C
+
+The comparison function for [[qsort]] and [[bsearch]] is different,
+since it needs to mask out the value:
 
 % uni_cmprng_dat prototype
 
@@ -10892,8 +11177,11 @@ Another variant, [[uni_chrrng_num_t]], stores a rational number as a
 extends the structure size to 3 32-bit words.  Technically, any pair
 of numbers could be stored in this structure; the only thing the
 functions do to support this interpretation is to set the denominator
-to one if the numerator is zero.  Also, the default return value is
-always zero over one.
+to one if the numerator is zero, so that zero can be more conveniently
+stored as zero over zero.  Also, the default return value is always
+zero (over one).
+
+\input{[[uni_chrrng_num_t]].tex} % C
 
 Since no changes are made to the range portion of the structure, the
 [[uni_cmprng]] function can be used for [[qsort]] and [[bsearch]].  An
@@ -10901,7 +11189,7 @@ optimized lookup function is provided as well:
 
 % uni_chrrng_val prototype
 
-\subsection{Multilevel Tables}
+\section{Multilevel Tables}
 
 Multi-level tables are a data structure consisting of a sequence of
 32-bit words which are interpreted dynamically.  When reading such a
@@ -10998,7 +11286,15 @@ to this format.  The inverse function is not provided.
 
 % rng_num_to_multi prototype
 
-\subsection{Bit Operations}
+For values where ranges are inappropriate, a function is provided to
+convert a sorted code point array with 32-bit values (nominally
+[[uni_cp_val_t]]) into a multi-level table.  No inverse function is
+provided.  No generic lookup function is provided, either; remember to
+multiply code point values by 4 when using [[multi_tab_lookup]].
+
+% cp_val_to_multi prototype
+
+\section{Bit Set Operations}
 
 The following functions perform a generic bit operation (see table
 \ref{tab:setop2} for a complete list of operations).
@@ -11010,7 +11306,12 @@ The following functions perform a generic bit operation (see table
 Bit arrays consisting of a single unsigned integer can be operated on
 using the following macro:
 
-% BIT_OP prototype
+% BIT_SET_OP prototype
+
+The [[op]] argument is intended to be one of the [[uni_setop_t]]
+enumeration constants.
+
+\input{[[uni_setop_t]].tex} % C
 
 Arbitrary bit arrays of standard C unsigned integer types can be
 operated on using the following functions.  The inputs are bit arrays
@@ -11032,11 +11333,16 @@ non-[[NULL]].
 % setop_bit16 prototype
 % setop_bit8 prototype
 
-For sorted code point range arrays, inversion is provided as a
-separate function for convenience.  Both this and the generic set
-operation function always allocate their results using [[malloc]].
+Since sorted code point arrays are generally inefficient for storing
+Unicode boolean properties (sets), no set operations are provided for
+this data type.  However, the following sample code may be used if
+needed:
 
-% uni_chrrng_invert prototype
+\input{Perform set ops on cp array.tex} % C
+
+For sorted code point range arrays, a single function is provided.  It
+always allocates its results using [[malloc]].
+
 % uni_chrrng_setop prototype
 
 No set operations are provided for multi-level tables at this time.
@@ -11045,9 +11351,9 @@ implementation, and should not be performed frequently, anyway.  The
 only way to perform these operations right now is to convert the
 multi-level tables to range arrays first, and then convert the result
 back.  Alternately, the lookup function can simply be called for each
-table, and the lookup results combined instead.
+table, and the lookup results combined instead, using [[BIT_SET_OP]].
 
-\subsection{Boolean Properties}
+\section{Boolean Properties}
 
 The supported boolean properties are listed in table
 \ref{tab:boolprop}.  For each supported boolean property \emph{BP},
@@ -11056,13 +11362,18 @@ the following symbols are defined:
 \begin{itemize}
 \item [[const uni_chrrng_t uni_]]\emph{BP}[[_rng[]]] is a sorted range
 table with entries for that property.
-\item [[int uni_]]\emph{BP}[[_rng_len]] is the number of entries in
-that array.
+\item [[uni_]]\emph{BP}[[_rng_len]] is the number of entries in that
+array (a preprocessor symbol).
 \item [[const uint32_t uni_]]\emph{BP}[[_mtab[]]] is a multi-level
 table for that property.
 \item [[int is_uni_]]\emph{BP}[[(uint32_t cp)]] is a boolean lookup
-function for that property.  It uses the multi-level table internally.
+function for that property.  It is actually a preprocessor macro which
+uses the multi-level table and [[is_uni_x]] internally.
 \end{itemize}
+
+For static linking, each property is in a separate object file, and
+the sorted range table and multi-level table are stored separately, as
+well.
 
 \begin{table}
 \begin{centering}
@@ -11084,15 +11395,21 @@ VS&WSpace&XIDC&XIDS\\
 \end{centering}
 \end{table}
 
-\subsection{Enumerated Properties}
+\section{Enumerated Properties}
 
 For lists of names, there are both the canonical names and aliases.
-These are stored in the data structure [[uni_alias_t]].  These names
-include a [[short_name]], a [[long_name]], and two alternate names
-([[alt_name]] and [[alt_name2]]).  Any undefined names are [[NULL]].
-For reverse lookups, the [[uni_valueof_t]] structure contains a
-[[name]] and a value ([[val]]).  An array of such structures can be
-searched or sorted using the generic comparison function.
+These are stored in an array of [[uni_alias_t]] structures.  Any
+undefined names are [[NULL]].
+
+\input{[[uni_alias_t]].tex} % C
+
+For reverse lookups, the [[uni_valueof_t]] structure's [[val]] field
+is the index of that name in the alias array.
+
+\input{[[uni_valueof_t]].tex} % C
+
+An array of [[uni_valueof_t]] structures can be searched or sorted
+using the generic comparison function.
 
 % cmp_valueof prototype
 
@@ -11101,44 +11418,42 @@ The list of supported enumeration properties is in table
 following symbols are defined:
 
 \begin{itemize}
-\item [[uni_]]\emph{EP}[[_t]] is a C enumeration type whose members
-are the enumerated elements.
-\item For each canonical enumeration name \emph{EN}, the symbol
-[[U_]]\emph{EP}[[_]]\emph{EN} is defined, which an enumeration
-constant of type [[uni_]]\emph{EP}[[_t]].  These correspond to the
-values actually stored in the table.  Canonical aliases are defined as
-well.
-\item [[U_NUM_]]\emph{EP} is another enumeration constant of type
+\item [[uni_]]\emph{EP}[[_t]] is a C enumeration type whose literals
+correspond to the property's values.
+\item For each canonical enumeration value name \emph{EN}, the symbol
+[[U_]]\emph{EP}[[_]]\emph{EN} is defined, which is an enumeration
+literal of type [[uni_]]\emph{EP}[[_t]].  Enumeration literals
+corresponding to canonical aliases are defined as well, as long as they
+do not contain a minus sign or a decimal point.
+\item [[U_NUM_]]\emph{EP} is another enumeration literal of type
 [[uni_]]\emph{EP}[[_t]], which corresponds to the number of unique
-constants.  Note that where canonical aliases are present, this number
+values.  Note that where canonical aliases are present, this number
 is smaller than the actual number of enumeration symbols.
-\item [[uni_alias_t uni_]]\emph{EP}[[_nameof[]]] is an array of names
-corresponding with the enumeration literals.  The index is simply a
-valid enumeration literal value.
-\item [[uni_valueof_t uni_]]\emph{EP}[[_valueof[]]] is a sorted array
-of all unique names (including aliases) for this property; the [[val]]
-field in each entry is the associated enumeration literal.
-\item [[int uni_]]\emph{EP}[[_valueof_len]] is the length of the
-[[valueof]] array.
-\item [[uni_cmprng_t uni_]]\emph{EP}[[_rng[]]] is a sorted array of
-ranges.  The default value is not provided here.
-\item [[int uni_]]\emph{EP}[[_rng_len]] is the length of the range
-array.
+\item [[const uni_alias_t uni_]]\emph{EP}[[_nameof[]]] is an array of
+names corresponding with the enumeration literals.  The index is
+simply a valid enumeration literal value.
+\item [[const uni_valueof_t uni_]]\emph{EP}[[_valueof[]]] is a sorted
+array of all unique names (including aliases) for this property; the
+[[val]] field in each entry is the associated enumeration literal.
+\item [[uni_]]\emph{EP}[[_valueof_len]] is the length of the
+[[valueof]] array (a preprocessor symbol).
+\item [[const uni_chrrng_dat_t uni_]]\emph{EP}[[_rng[]]] is a sorted
+array of ranges.  The default value is not provided here.
+\item [[uni_]]\emph{EP}[[_rng_len]] is the length of the range
+array (a preprocessor symbol).
 \item [[uint32_t *uni_]]\emph{EP}[[_mtab]] is a multi-level table whose
-byte-length values are the enumeration constants.
-\item [[int uni_]]\emph{EP}[[_of]] returns the enumeration value for
-any code point.  The canonical default is returned when the table has
-no entry.  Internally, the multi-level table is used for lookup.
+byte-length values correspond to the enumeration literal values.
+\item [[int uni_]]\emph{EP}[[_of]] is a preprocessor macro which
+returns the enumeration value for any code point.  The canonical
+default is returned when the table has no entry.  Internally, the
+multi-level table and [[uni_x_of]] are used for lookup.
 \end{itemize}
 
-In addition, the gc property defines a symbol to support aliases which
-cover more than one value.  For example, the enumeration literal
-[[U_gc_Z]] is actually an alias for [[U_gc_Zl]], [[U_gc_Zp]], and
-[[U_gc_Zs]].  The [[uint64_t uni_gc_trans[]]] table takes an
-enumeration literal as index, and returns a bit mask with all
-appropriate base classes included with this literal set.  The base
-classes themselves only have one bit set; to check if a class is a
-base class, simply check if the bit is set for itself.
+For static linking, each property is in a separate object file.  In
+addition, the range tables and multi-level tables are stored
+separately.  The two name tables are stored together in order to share
+constant name strings, but are stored separately from the range and
+multi-level tables.
 
 \begin{table}
 \begin{centering}
@@ -11153,13 +11468,25 @@ SB&WB&&\\
 \end{centering}
 \end{table}
 
-\subsection{Numeric Properties}
+In addition, the gc property defines a symbol to support aliases which
+cover more than one value.  For example, the enumeration literal
+[[U_gc_Z]] is actually an alias for [[U_gc_Zl]], [[U_gc_Zp]], and
+[[U_gc_Zs]].  The [[const uint64_t uni_gc_trans[]]] table takes an
+enumeration literal as index, and returns a bit mask with all
+appropriate base classes included with this literal set.  The base
+classes themselves only have one bit set; to check if a class is a
+base class, simply check if the bit is set for itself.
 
-The age field is numeric, but not supported as such.  Instead, it is
-only supported as an enumerated property.
+There are two additional support macros for the gc property.
+[[is_nl]] checks if a character is any valid newline-type character,
+and [[is_bs]] checks if a character is any valid backslash-type
+character.  [[is_bs]] is not necessary for text already processed
+using NFKC\_CF.
 
-The ccc field is similarly only enumerated, but the value of the
-enumeration literal is the numeric value of the field as well.
+% is_nl prototype
+% is_bs prototype
+
+\section{Numeric Properties}
 
 Each numeric property \emph{NP} is supported by the following symbols:
 
@@ -11175,6 +11502,17 @@ is a simple wrapper lookup function that uses the multi-level table to
 retrieve the numerator and denominator.
 \end{itemize}
 
+The age property is officially numeric, but not supported as such. 
+Instead, it is only supported as an enumerated property.  The ccc
+property is similarly only enumerated, but the value of the
+enumeration literal is equal to the numeric value of the property as
+well.
+
+The slc, suc, stc and scf properties are technically string properties,
+not numeric properties.  However, since they always map to exactly one
+character (or nothing), they can be considered numeric properties
+whose value is the translated code point (or zero if nothing).
+
 In addition, the value for the cjkRSUnicode field is interpreted as a
 series of dotted numbers, with optional exclamation points.  This is
 all encoded into the numerator and denominator fields, and can be
@@ -11186,47 +11524,225 @@ point, and the right side is the absolute value of [[r]].  When there
 is more than one value, the [[val2]] macro will return a non-zero value.
 
 % uni_kRSUnicode_val1 prototype
-% uni_KRSUnicode_val2 prototype
+% uni_kRSUnicode_val2 prototype
 
 \begin{table}
 \begin{centering}
 \begin{tabular}{llll}
 nv&cjkRSUnicode&slc&suc\\
-stc&&&\\
+stc&scf&&\\
 \end{tabular}
 \caption{\label{tab:numprop}Numeric properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
 
-Note that slc, suc, and stc are not technically numeric properties.
-However, since they always map to exactly one character (or nothing),
-they can be considered numeric properties whose value is the
-translated code point.
+\section{String Properties}
 
-\subsection{Other Properties}
+Properties with string values are stored in two parts: a constant
+string table, and tables which have offsets and lengths of strings
+within that table.  Multiple properties may use the same string table.
+The offset and length tables are either sorted code point arrays of
+type [[uni_str_rng_t]], or multi-level tables of 32-bit values, which
+are interpreted as (and can be cast into) [[uni_str_rng_val_t]].  The
+[[flags]] fields in these structures are sometimes used for
+property-specific purposes.
 
-A Hangul syllable, in the form LVT or LV can be singularly or
-completely decomposed (dependent on the [[full]] flag) using the
-following function:
+\input{[[uni_str_rng_t]].tex} % C
+\input{[[uni_str_rng_val_t]].tex} % C
+
+Note that the [[uni_str_rng_t]] data structure can also be cast to the
+[[uni_cp_val_t]] type, whose [[val]] element can then be cast to
+the [[uni_str_rng_val_t]] type.
+
+Unless otherwise stated, for each string property \emph{SP}, the
+following symbols are defined:
+
+\begin{itemize}
+\item [[const uint32_t uni_]]\emph{ST}[[_strs[]]] is a string table
+containing all string values.  \emph{ST} may or may not be the same as
+\emph{SP}.
+\item [[const uni_str_rng_t uni_]]\emph{SP}[[_rng[]]] is a sorted list
+of code points with their associated string offsets and lengths.
+\item [[uni_]]\emph{SP}[[_rng_len]] is the length of the above array
+(a preprocessor symbol).
+\item [[const uint32_t uni_]]\emph{SP}[[_mtab[]]] is a multi-level
+table of 32-bit [[uni_str_rng_val_t]] values.
+\end{itemize}
+
+For static linking, the string table, sorted code point table, and
+multi-level table are all in separate object files.
+
+\subsection{Raw Decomposition}
+
+Raw decomposition data is stored in [[uni_dm_full_strs]] (i.e.,
+\emph{ST} is dm\_full).  This includes the raw dm property, as well as
+two pseudo properties.  The canon\_decomp property contains only
+full (recursive) canonical decompositions, and the compat\_decomp
+property contains only full (recursive) compatibility decompositions
+when they differ from the canon\_decomp result.  The raw dm property
+is not recursively/fully decomposed.  The only enhancement of the dm
+property is that no dt lookup is required to determine if a
+decomposition is canonical or compatibility; the flag field is
+non-zero for compatibility decompositions.
+
+Lookup with the multi-level tables is simplified with some
+preprocessor macros, which return the associated string's offset and
+length.  For the compatibility lookups, an optional pointer to a flag
+([[compat]]) can be used to check if the returned decomposition was
+not canonical.
+
+% uni_find_canon_decomp prototype
+% uni_find_compat_decomp prototype
+% uni_find_dm prototype
+
+These macros use the internal-use only [[uni_x_dec]] function to do
+their work.  For Hangul syllable strings, the returned offset is
+always [[~0]], but the length is correct.
+
+% uni_x_dec prototype
+
+For the Hangul syllables, a separate function must be use to
+decompose.  A Hangul syllable string in the form LVT or LV can be
+singularly or completely decomposed (dependent on the [[full]] flag)
+using the following function.  The function will return nothing (-1)
+if the input is not a decomposable Hangul syllable string, so it is
+safe to call whenver no decompositionmapping is found in the tables.
+Otherwise, it fills in the return buffer ([[res]]) and returns the
+number of filled-in values (always 2 or 3).  The return buffer
+must contain space for at least 2 characters if the [[full]] flag is
+not set, or 3 if it is set.
 
 % hangul_syllable_decomp prototype
 
-% hangul_syllable_comp prototype
-
-dm canon\_decomp compat\_decomp (dm\_full\_strs)
-canon\_comp (canon\_comp\_strs)
-lc (lc\_strs)
-uc (uc\_strs)
-tc (tc\_strs)
+To make this easier, a wrapper macro is provided.  This assumes that
+at least [[len]] words are available in the passed-in buffer
+([[buf]]), and copies out the result.  This is meant to be called
+after [[uni_find_]]\emph{xxx}, using its results combined with the
+[[hangul_syllable_decomp]] results.
 
 % uni_get_decomp prototype
+
+\subsection{Raw Composition}
+
+The raw composition tables, derived from the dm and Comp\_Ex
+properties, are designed for multi-step lookup as well. In addition to
+having a gap for the Hangul syllable strings, composition takes two
+code points for input rather than just one.  The latter problem is
+solved by looking up a ``string'' using the first input, which is
+actually a sub-table that can be searched using the second input.  The
+format of the sub-table is like a [[uni_cp_val_t]] structure; the
+value is the composed character.  These sub-tables are stored in the
+string table [[uni_canon_comp_strs]] (i.e., \emph{ST} is canon\_comp).
+Only one pseudo-property is defined for this: canon\_comp.
+
+The following macro takes the first element of the composition pair
+and returns the offset and length of the sub-table by using
+[[uni_x_dec]] and the multi-level table.
+
+% uni_find_canon_comp prototype
+
+To look up values in the sub-table, a separate search function is
+provided.  Again, a hand-coded binary search is used instead of
+[[bsearch]] for speed.
+
+% uni_lookup_decent prototype
+
+To look up Hangul syllable compositions, another separate function is
+provided.  It returns zero if there is no valid composition; otherwise
+it returns the result of composition.
+
+% hangul_syllable_comp prototype
+
+Combining the above two steps can be done using a wrapper macro.  Thus
+the preferred method of looking up compositions is to call
+[[uni_find_canon_comp]] for a code point, and then to use the results
+for all candidates for the second input to composition with
+[[uni_canon_comp]].
+
 % uni_canon_comp prototype
+
+\subsection{Raw Case Conversion}
+
+The slc, suc, and stc properties are provided as if they were numeric
+properties; the numerator result is the single character to which the
+input maps.  A lookup failure in the stc table has the result of a suc
+lookup as its default.  A lookup failure in either the slc or suc
+tables has the input code point itself as its default.
+
+The lc, uc, and sc properties, however, provide not only a mapping,
+but also a condition under which the mapping takes place.  The
+properties are each stored in separate string tables, so their
+\emph{ST} name is the same as their \emph{SP} name.  All currently
+possible conditions are mapped to a flag:
+
+\input{Special casing conditions.tex} % C
+
+A flag in [[UNI_SC_FL_LOCALE]] indicates that the translation only
+applies in specific locales.  The others ([[UNI_SC_FL_CONTEXT]])
+depend on context: generally the entire containing grapheme cluster,
+and possibly the next character must be known before deciding on a
+translation.
+
+Since each input code point may map to multiple translations
+(depending on the condition),  the encoding of the string is to
+provide all possible translations, each preceeded by their length.  The
+condition flags for that interpretation are then or-ed into the length.
+
+The actual lc, uc, and tc properties combine the slc, suc, and stc
+lookups with the contents of the lc, uc, and tc string tables.
+To do a lookup, the [[uni_case_convert]] function takes the result
+buffer ([[buf]] of length [[buf_len]]) and the input code point
+([[cp]]), the associated tables, and the currently known conditions
+([[cond]]), and returns the number of returnable characters and fills
+the buffer as much as possible.  A [[cond]] of [[~0]] indicates that
+the caller does not know the current conditions.  The return is the
+number of characters in the result (perhaps even zero), or -1 if no
+change needs to be made, or -2 if the condition is currently unknown,
+but may affect the result.  For a return value greater than
+[[buf_len]], the function may be called again with more space.  For a
+return value of -2, the function may be called again with a valid set
+of condition flags. Note that the passed-in condition flags should
+never set [[UNI_SC_FL_NOT]]; just leave a flag unset if it is not in
+effect.
+
 % uni_case_convert prototype
+
+To make this a little easier, wrapper macros are provided which select
+the correct set of needed tables.
+
 % uni_lc prototype
 % uni_uc prototype
 % uni_tc prototype
 
-\section{Code Index}
+Case folding converts to a canonical desired case, usually lower-case.
+Like the plain case conversion properties, there are two cases:
+simple and full.  In addition, some of the full folding is
+conditional.  In this case, though, the only condition is whether or
+not the tr or az locale is in use.  Encoding is identical to the case
+conversion properties.  The scf property is numeric, and the cf
+property can be derived using the [[uni_case_convert]] function, and
+its associated wrapper macro:
+
+% uni_cf prototype
+
+The pseudo-property tcf, which includes the Turkic language exceptions,
+can be obtained using a wrapper macro as well:
+
+% uni_tcf prototype
+
+\section{Name Tables}
+
+The following symbols are for internal use only.  They provide
+information about ranges within the Unicode.txt data file.  These
+ranges have code points algorithmically generated from the range's
+base name.
+
+[[const uni_chrrng_dat_t uni_range_rng[]]]
+[[uni_range_rng_len]]
+[[const uint32_t uni_range_mtab[]]]
+[[uni_range_invalid]]
+
+\chapter{Code Index}
 \nowebchunks
 
 \end{document}
