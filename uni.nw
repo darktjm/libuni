@@ -2598,7 +2598,7 @@ if(*s) { /* should never happen, but if it does: ignore */
 @
 
 Each boolean property is true if field two is the name of that
-property.  Since the [[addprop]] routine finds the correct entry based
+property.  Since the [[add_prop]] routine finds the correct entry based
 on the name (assuming the name exists), it can be called every time,
 and the correct entry will be updated.  However, the Hyphen property
 needs to be excluded, because it is deprecated.  Also, I have no
@@ -2669,15 +2669,22 @@ static void fixup_rng(prop_t *p)
 {
   uint32_t i;
   qsort(p->rng, p->rng_len, sizeof(uni_chrrng_t), uni_cmprng);
-  for(i = 0; i < p->rng_len - 1; i++)
-    if(p->rng[i + 1].low == p->rng[i].high - 1) {
-      p->rng[i].high = p->rng[i + 1].high;
-      if(i + 2 < p->rng_len) {
-        memmove(p->rng + i + 1, p->rng + i + 2,
-	        (p->rng_len - (i + 2)) * sizeof(uni_chrrng_t));
-        p->rng_len--;
-      }
+  /* starting at top means only optimized entries are memmove'd */
+  for(i = p->rng_len - 1; i > 0; i--) {
+    uint32_t j = i;
+    while(i > 0 && p->rng[i - 1].high == p->rng[i].low - 1)
+      i--;
+    if(i == j)
+      continue;
+    p->rng[i].high = p->rng[j].high;
+    if(j < p->rng_len - 1) {
+        memmove(p->rng + i + 1, p->rng + j + 1,
+	        (p->rng_len - (j + 1)) * sizeof(uni_chrrng_t));
     }
+    p->rng_len -= j - i;
+    if(!i)
+      break;
+  }
 }
 @
 
@@ -2965,7 +2972,13 @@ typedef struct {
 @
 
 <<Common uni definitions>>=
+#if 1
 <<[[uni_chrrng_dat_t]]>>
+#else /* 32-bit dat during testing */
+typedef struct {
+    uint32_t low, high, dat;
+} uni_chrrng_dat_t;
+#endif
 int uni_cmprng_dat(const void *a, const void *b); /* for bsearch/qsort */
 uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
                         uint32_t tab_len, uint32_t def);
@@ -3284,11 +3297,11 @@ for(j = 0; j < num_val_aliases[i]; j++) {
   /* use numeric values directly instead of making into enum */
   if(!isdigit(va->short_name[0])) {
     if(strchr(va->short_name, '-')) {
-      const char *n;
+      const char *np;
       /* slow, but necessary with e.g. ID_Restrict_Type */
       fprintf(gen_h, "\tU_%s_", pn);
-      for(n = va->short_name; *n; n++)
-        putc(*n == '-' ? '_' : *n, gen_h);
+      for(np = va->short_name; *np; np++)
+        putc(*np == '-' ? '_' : *np, gen_h);
       putc(',', gen_h);
     } else
       fprintf(gen_h, "\tU_%s_%s,", pn, va->short_name);
@@ -3399,11 +3412,6 @@ uni_chrrng_dat_t *rng_dat;
 uint8_t def;
 @
 
-<<Ignore unimplemented enums>>=
-if(!parsed_props[i].rng_dat)
-  continue;
-@
-
 <<UCD parser local functions>>=
 static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
 {
@@ -3426,7 +3434,7 @@ static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
 @
 
 <<UCD parser local functions>>=
-static uint8_t enum_val(int pno, const char *v)
+static uint32_t enum_val(int pno, const char *v)
 {
   char *s = strdup(v), *t, *d;
   uni_valueof_t me, *vp;
@@ -3788,6 +3796,8 @@ static void fixup_rng_dat(prop_t *p)
     while(i > 0 && p->rng_dat[i - 1].high == p->rng_dat[i].low - 1 &&
           p->rng_dat[i - 1].dat == p->rng_dat[i].dat)
       i--;
+    if(i == j)
+      continue;
     p->rng_dat[i].high = p->rng_dat[j].high;
     if(j < p->rng_len - 1) {
         memmove(p->rng_dat + i + 1, p->rng_dat + j + 1,
@@ -3827,8 +3837,8 @@ for(i = 0; i < nparsed; i++) {
                 "#include \"uni_prop.gen.h\"\n\n"
 		"const uni_chrrng_dat_t uni_%s_rng[] = {\n", name);
     for(j = 0; j < parsed_props[i].rng_len; j++) {
-      uint8_t val = parsed_props[i].rng_dat[j].dat;
-      uni_alias_t *aliases = i < num_prop_aliases ? val_aliases[i] : NULL;
+      uint32_t val = parsed_props[i].rng_dat[j].dat;
+      uni_alias_t *aliases = val_aliases[i];
       fprintf(of, "\t{ %d, %d, ",
                   parsed_props[i].rng_dat[j].low,
 	          parsed_props[i].rng_dat[j].high);
@@ -3840,7 +3850,14 @@ for(i = 0; i < nparsed; i++) {
 	const char *val_name = alias->short_name;
         if(isdigit(val_name[0]))
 	  val_name = alias->long_name;
-	fprintf(of, "U_%s_%s", name, val_name);
+	if(strchr(val_name, '-')) {
+	  const char *np;
+	  /* slow, but necessary with e.g. ID_Restrict_Type */
+	  fprintf(of, "U_%s_", name);
+	  for(np = val_name; *np; np++)
+	    putc(*np == '-' ? '_' : *np, of);
+	} else
+	  fprintf(of, "U_%s_%s", name, val_name);
       }
       fprintf(of, " }%s\n", j < parsed_props[i].rng_len - 1 ? "," : "");
     }
@@ -4135,16 +4152,16 @@ if(!low || *s) { /* should never happen, but if it does: ignore */
 }
 @
 
-<<Dump character information as C code>>=
-fputs("/* extract l.r value; l!.r is encoded as l.-r */\n"
-      "#define uni_kRSUnicode_val1(n, d, l, r) do { \\\n"
-      "  l = (uint8_t)(n); \\\n"
-      "  r = (int8_t)d; \\\n"
-      "} while(0)\n"
-      "#define uni_kRSUnicode_val2(n, d, l, r) do { \\\n"
-      "  l = (uint8_t)(n >> 8); \\\n"
-      "  r = (int32_t)n >> 16; \\\n"
-      "} while(0)\n", gen_h);
+<<Common uni definitions>>=
+/* extract l.r value; l!.r is encoded as l.-r */
+#define uni_kRSUnicode_val1(n, d, l, r) do { \
+  l = (uint8_t)(n); \
+  r = (int8_t)d; \
+} while(0)
+#define uni_kRSUnicode_val2(n, d, l, r) do { \
+  l = (uint8_t)(n >> 8); \
+  r = (int32_t)n >> 16; \
+} while(0)\n", gen_h);
 @
 
 <<C Prototypes>>=
@@ -4213,6 +4230,8 @@ static void fixup_rng_num(prop_t *p)
           p->rng_num[i - 1].num == p->rng_num[i].num &&
           p->rng_num[i - 1].denom == p->rng_num[i].denom)
       i--;
+    if(i == j)
+      continue;
     p->rng_num[i].high = p->rng_num[j].high;
     if(j < p->rng_len - 1) {
         memmove(p->rng_num + i + 1, p->rng_num + j + 1,
@@ -5653,6 +5672,17 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+<<Parse character data files>>=
+/* for testing to see if read properly */
+#if 0
+str_to_enum(&parsed_props[prop_na], NULL);
+str_to_enum(&parsed_props[prop_Name_Alias], NULL);
+#endif
+@
+
+#endif
+@
+
 <<FIXME>>=
  dump names & name aliases
  add name lookup function
@@ -5742,17 +5772,18 @@ dump_str_tabs(&parsed_props[prop_IDNA_Mapping], gen_h);
 static void str_to_enum(prop_t *p, const char *def)
 {
   uint32_t i, poff = 0, plen = 0, pnum = (uint32_t)(p - parsed_props);
-  uint32_t seq = 0;
+  int32_t seq = -1;
 
   merge_strs(p);
-  p->def = ~0;
+  p->def = def ? ~0 : 0;
   inisize(val_aliases[pnum], max_val_aliases[pnum] = 5);
   inisize(p->rng_dat, p->rng_len);
   for(i = 0; i < p->rng_len; i++) {
-    p->rng_dat[i].low = p->rng_dat[i].high = p->rng_str[i].cp;
-    p->rng_dat[i].dat = seq;
-    if(p->rng_str[i].off == poff && p->rng_str[i].len == plen)
+    if(p->rng_str[i].off == poff && p->rng_str[i].len == plen) {
+      p->rng_dat[i].low = p->rng_dat[i].high = p->rng_str[i].cp;
+      p->rng_dat[i].dat = seq;
       continue;
+    }
     seq++;
     poff = p->rng_str[i].off;
     plen = p->rng_str[i].len;
@@ -5764,12 +5795,13 @@ static void str_to_enum(prop_t *p, const char *def)
       inisize(n, plen * 4 + 1);
       memcpy(n, (char *)(p->strs + poff), plen * 4);
       n[plen * 4] = 0;
-      if(!strcmp(n, def))
-        p->def = seq - 1;
+      if(def && !strcmp(n, def))
+        p->def = seq;
       va->short_name = va->long_name = n;
       va->alt_name = va->alt_name2 = NULL;
       num_val_aliases[pnum]++;
     }
+    i--; /* re-run for current item to actually add it */
   }
   if(p->def == (uint8_t)~0) {
     p->def = seq;
@@ -5787,6 +5819,10 @@ static void str_to_enum(prop_t *p, const char *def)
     enum_vals[pnum][i].name = strdup(val_aliases[pnum][i].short_name);
     enum_vals[pnum][i].val = i;
   }
+  free(p->strs);
+  p->strs = NULL;
+  free(p->rng_str);
+  p->rng_str = NULL;
 }
 @
 
@@ -5907,22 +5943,26 @@ dump_str_tabs(&parsed_props[prop_DUCET], gen_h);
 DUCET needs more support
 @
 
-\chapter {XML Data Files}
+\chapter{XML Data Files}
 
-The CLDR uses XML rather than simple tables.  One way to deal with
-this would be to turn those XML tables into simple tables using XSLT.
-My original library did just that, but it only dealt with one XML
-file.  Converting the hundreds of files of the CLDR, and then parsing
-the resulting output, would be a waste of time and effort.  Instead,
-the files are parsed directly, using libxml2.%
+As mentioned in the introduction, the XML standard's entity names are
+generally much shorter than Unicode names, so a facility to use them
+instead is provided.  This requires parsing the XML entity database.
+One way to deal with this would be to turn it into a simple-to-parse
+format using XSLT.  An earlier version of this library did just that.
+However, since there are other XML files to parse as well, and
+everything else is being done in parse-ucd, it is now read in directly
+using libxml2.%
 \footnote{\url{http://xmlsoft.org/}}
 For maximum simplicity, each file is simply read in using the
 document-at-once
 parser\footnote{\url{http://xmlsoft.org/html/libxml-parser.html}}.
 While the incremental (xmlreader) mode would probably be more
 efficient for memory usage, this program is only run once, during
-built time, so the memory usage should not matter much.  At least the
-XML structure can be freed when finished.
+build time, so the memory usage should not matter much.  At least the
+XML structure can be freed when finished.  Scanning the tree is done
+using manual traversal.  While the associated libxslt could be used to
+run the old code directly, the C code is actually much simpler.
 
 <<UCD parser local definitions>>=
 #include <libxml/parser.h>
@@ -5935,113 +5975,793 @@ XML_CFLAGS := $(shell xml2-config --cflags)
 XML_LDFLAGS := $(shell xml2-config --libs)
 # adding xml flags only to PARSER_CFLAGS would be nice, but hard
 # to integrate w/ static_proto gen
-PARSER_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\"
+PARSER_CFLAGS += -DXMLUNI=\"$(XMLUNI)\"
 EXTRA_CFLAGS += $(XML_CFLAGS)
 PARSER_LDFLAGS += $(XML_LDFLAGS)
 @
 
 \lstset{language=C}
+<<UCD parser local definitions>>=
+#define xml_opts XML_PARSE_NOENT | /* expand known entities */ \
+                 XML_PARSE_NONET | /* forbid network access */ \
+		 XML_PARSE_NOCDATA | /* merge CDATA as text */ \
+                 XML_PARSE_COMPACT | /* compact small text nodes */ \
+		 XML_PARSE_HUGE /* no hard-coded limits */
+#define xml_isname(n, s) !strcmp((const char *)n->name, s)
+@
+
 <<Parse character data files>>=
-<<Initialize CLDR files>>
+xmlInitParser();  /* xmlCleanupParser() when done */
+xmlDocPtr doc = xmlReadFile(XMLUNI, NULL, xml_opts);
+if(!doc) {
+  perror(XMLUNI);
+  exit(1);
+}
+xmlNodePtr n;
+for(n = doc->children; n; n = n->next)
+  if(n->children && xml_isname(n, "unicode"))
+    break;
+if(!n) {
+  perror(XMLUNI);
+  exit(1);
+}
+@
+
+The name database has subsets called groups.  Using every single name
+is certain to frequently collide with Unicode names, so a particular
+group should be chosen.  The 2007 group is used by my own
+applications, and seems like a reasonable default.
+
+\lstset{language=make}
+<<makefile.config>>=
+# XML entity name group
+XML_ENTITY_NAME_GROUP = 2007
+@
+
+<<makefile.vars>>=
+PARSER_CFLAGS += -DXML_ENTITY_NAME_GROUP=\"$(XML_ENTITY_NAME_GROUP)\"
+@
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+#define xml_prop(n, p) (const char *)xmlGetProp(n, (const xmlChar *)p)
+@
+
+<<Parse character data files>>=
+xmlNodePtr c;
+const char **grp_set;
+int ngrp_set;
+for(c = n->children; c; c = c->next) {
+  if(!c->children || !xml_isname(c, "entitygroups"))
+    continue;
+  for(c = c->children; c; c = c->next) {
+    if(!c->children || !xml_isname(c, "group"))
+      continue;
+    const char *gn = xml_prop(c, "name");
+    if(gn && !strcmp(gn, XML_ENTITY_NAME_GROUP))
+      break;
+  }
+  break;
+}
+if(!c) {
+  perror("group " XML_ENTITY_NAME_GROUP " not in " XMLUNI);
+  exit(1);
+}
+{
+  xmlNodePtr cc;
+  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
+    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
+      continue;
+    ngrp_set++;
+  }
+  inisize(grp_set, ngrp_set);
+  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
+    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
+      continue;
+    grp_set[ngrp_set++] = xml_prop(cc, "name");
+  }
+  qsort(grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp);
+}
+@
+
+<<UCD parser local functions>>=
+static int sort_strcmp(const void *a, const void *b)
+{
+  return strcmp(*(const char **)a, *(const char **)b);
+}
+@
+
+Once the group's set names are known, the charlist is scanned for
+character tags with an entity descriptor belonging to one of those
+sets.  The id of the entity is the entity name, and the id of the
+character is the Unicode code point.  Some of these define
+multi-character code points; these will be added along with the named
+multi-character Unicode groups later.
+
+<<Parse character data files>>=
+decl_str(xmlname);
+for(n = n->children; n; n = n->next)
+  if(n->children && xml_isname(n, "charlist"))
+    break;
+if(!n) {
+  perror("charlist not in " XMLUNI);
+  exit(1);
+}
+for(n = n->children; n; n = n->next) {
+  if(!n->children || !xml_isname(n, "character"))
+    continue;
+  for(c = n->children; c; c = c->next) {
+    const char *set;
+    const char *cid, *eid;
+    if(c->type != XML_ELEMENT_NODE || !xml_isname(c, "entity") ||
+       !(set = xml_prop(c, "set")) ||
+       !bsearch(&set, grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp) ||
+       !(eid = xml_prop(c, "id")) || !(cid = xml_prop(n, "id")))
+      continue;
+    if(!strchr(cid, '-')) {
+      low = high = strtol(cid + 1, NULL, 16);
+      /* note: duplicates will occur: */
+      /*   both fully duplicated entries and multiple names for one cp */
+      add_str_raw(xmlname, eid);
+    } else {
+      <<Add multi-char xml entity>>
+    }
+  }
+}
+xmlFreeDoc(doc);
+@
+
+<<Parse character data files>>=
+/* for testing to see if read properly */
+#if 0
+str_to_enum(&parsed_props[prop_xmlname], NULL);
+#endif
+@
+
+The CLDR also uses XML rather than simple tables.  Doing hand-coded
+XSLT for hundreds of data files seemed excessive, which is the main
+reason why I abandoned XSLT.  Note that unlike unicode.xml, there is a
+local, valid DTD for every CLDR file.
+
+\lstset{language=make}
+<<makefile.vars>>=
+PARSER_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\"
+@
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+#define xml_opts_dtd xml_opts | \
+		     XML_PARSE_DTDLOAD | XML_PARSE_DTDATTR | \
+		     XML_PARSE_DTDVALID /* use DTD if on local disk */
+@
+
+<<Parse character data files>>=
+chdir(cwd);
+chdir(CLDR_LOC);
 <<Parse CLDR files>>
 @
 
-<<Initialize CLDR files>>=
-chdir(cwd);
-chdir(CLDR_LOC);
-xmlInitParser();
+Since the CLDR deals with locale data, the first thing to do is
+determine what locale is being used.  The locale name consists of a
+language identifier, followed by optional extensions.  The language
+identifier consists of a language subtag, followed by an optional
+script subtag, followed by an optional territory subtag, followed by
+optional variant subtags.  These are all case-insensitive, and are
+separated by either dashes or underscores.  The supported language
+identifier tags are listed in the supplemental metadata.  As with all
+of the CLDR data, versioning information is ignored.\footnote{One day,
+the versions of all data files used in building this library should be
+obtainable as a global variable or API call.  However, only overall
+version numbers should be used, and not the individual constituent
+file modification times.}
+
+<<Parse CLDR files>>=
+doc = xmlReadFile("common/supplemental/supplementalMetadata.xml",
+                  NULL, xml_opts_dtd);
+if(!doc) {
+  perror("supplementalMetadata.xml");
+  exit(1);
+}
+<<Prepare for parsing CLDR supplemental metadata>>
+for(n = doc->children; n; n = n->next) {
+  if(n->children && xml_isname(n, "supplementalData")) {
+    for(n = n->children; n; n = n->next) {
+      /* ignore version, generation, cldrVersion */
+      if(!n->children || !xml_isname(n, "metadata"))
+        continue;
+      for(n = n->children; n; n = n->next) {
+        if(!n->children)
+	  continue;
+        <<Parse CLDR supplemental metadata>>
+      }
+      break;
+    }
+    break;
+  }
+}
+<<Finish parsing CLDR supplemental metadata>>
+xmlFreeDoc(doc);
 @
 
-<<>>=
-XML_PARSE_NOENT|XML_PARSE_NONET|XML_PARSE_NOCDATA|XML_PARSE_COMPACT|XML_PARSE_HUGE
+The data we're looking for is under the validity tag.  Each set is
+listed as a ``variable'' whose value is the whitespace-separated list
+of names.  In fact, one could make an argument that all of the
+variables of type choice are useful to add as enumerations.  The main
+argument against this is that some of the lists are rather long, and
+the enumerations' use of binary searching (rather than, say, hash
+tables) may be slow.
+
+<<Parse CLDR supplemental metadata>>=
+else if(xml_isname(n, "validity")) {
+  for(c = n->children; c; c = c->next) {
+    if(!c->children)
+      continue;
+    <<Parse CLDR validity entries>>
+  }
+}
+@
+
+<<Parse CLDR validity entries>>=
+else if(xml_isname(c, "variable")) {
+  const char *t = xml_prop(c, "type");
+  if(!strcmp(t, "choice")) {
+    const char *v = xml_prop(c, "id");
+    if(!c->children || !c->children->content || !v || v[0] != '$')
+      continue; /* should never happpen */
+    int pno = add_prop(v + 1);
+    uint32_t str[64];
+    for(s = (char *)c->children->content; isspace(*s); s++);
+    for(i = 0; *s; i++) {
+      char *p = (char *)str;
+      while(!isspace(*s) && *s)
+        *p++ = *s++;
+      while((p - (char *)str) % 4)
+        *p++ = 0;
+      add_str_rng(&parsed_props[pno], i, i, str, (p - (char *)str) / 4);
+      while(isspace(*s))
+        s++;
+    }
+    str_to_enum(&parsed_props[pno], NULL);
+    free(parsed_props[pno].rng_dat);
+    parsed_props[pno].rng_dat = NULL;
+  }
+  <<Process other CLDR validity variables>>
+}
+@
+
+<<Ignore unimplemented enums>>=
+/* ignore auto-generated enums for obsolete properties */
+if(!parsed_props[i].rng_dat && i < num_prop_aliases)
+  continue;
+@
+
+In addition, the entries in \$grandfathered and some other ISO
+language codes are treated differently within Unicode and the CLDR.
+These translations are under the alias tag, in languageAlias elements.
+Similarly, script, territory, and variants have aliases as well.
+
+<<Parse CLDR supplemental metadata>>=
+else if(xml_isname(n, "alias")) {
+  
+}
+@
+
+The extensions supported by the CLDR are listed in the common/bcp47
+data files.
+
+<<UCD parser local definitions>>=
+#include <dirent.h>
+@
+
+<<Parse CLDR files>>=
+/* note: in most files, version info is silently ignored/dropped */
+/* however, when generating files, it might be a good idea to put that */
+/* info in to allow strings to determine versioning */
+
+/* bcp47: locale variants */
+/* need lookup by extension first (u/t), then name/aliases */
+/* for each keyword, need lookup of valid values */
+
+/* need parser function for locale names */
+/*  en_US-u-ca-blah */
+/*    -> en_US is full locale name (name+script) */
+/*       u-ca is a keyword with value blah */
+/*  en_US@ca=blah is equivalent */
+/*     but keywords with aliases may only use aliases in @-notation */
+struct dirent *de;
+DIR *d = opendir("common/bcp47");
+if(!d) {
+  perror("CLDR bcp47");
+  exit(1);
+}
+chdir("common/bcp47");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  doc = xmlReadFile(de->d_name, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(de->d_name);
+    exit(1);
+  }
+  for(n = doc->children; n; n = n->next)
+    /* not sure why 1st entry is always empty ldmlBCP47 */
+    if(n->children && xml_isname(n, "ldmlBCP47")) {
+      for(n = n->children; n; n = n->next) {
+        /* ignore version */
+	/*  although version/number could be added as literal text to output */
+	/* ignore generation */
+	/*  although generation/date could be added with version/number */
+	/* ignore deprecated cldrVersion */
+        if(n->children && xml_isname(n, "keyword")) {
+          for(n = n->children; n; n = n->next) {
+	    if(xml_isname(n, "key") ||
+	       /* attribute is actually 3-letter standalone attribute flag */
+	       xml_isname(n, "attribute")) {
+	      const char *name = xml_prop(n, "name");
+	      const char *desc = xml_prop(n, "description");
+	      const char *alias = xml_prop(n, "alias");
+	      const char *depr = xml_prop(n, "deprecated");
+	      const char *ext = xml_prop(n, "extension");
+	      /* ignoring since= attr */
+	      if(!ext)
+	        ext = "u";
+	      if(!alias)
+	        alias = name;
+	      /* note: alias may be multiple space-separated aliases */
+	      /* if alias present, only alias may be used in loc@var */
+	      /* but none observed in wild */
+              if(depr && !strcmp(depr, "false"))
+	        depr = NULL;
+#if 0
+	      printf("%s-%s/%s %s\n", ext, name, alias,
+	             depr ? "deprecated" : "");
+#endif
+	      /* note: t_i0 may have other valid keys: tags indicating method */
+	      /* note: t_k0 is same way */
+	      /* note: t_t0 is same way */
+	      /* note: t_x0 is generic tags only */
+	      for(c = n->children; c; c = c->next) {
+	        if(xml_isname(c, "type")) {
+		  name = xml_prop(c, "name");
+		  alias = xml_prop(c, "alias");
+		  desc = xml_prop(c, "description");
+		  depr = xml_prop(c, "deprecated");
+		  /* ignoring since= attr */
+		  if(!alias)
+		    alias = name;
+		  /* note: alias may be multiple space-separated aliases */
+		  /* 1st alias is preferred */
+		  if(depr && !strcmp(depr, "false"))
+		    depr = NULL;
+		  /* special names: */
+		  /*   REORDER_CODE reordering block name(s) */
+		  /*   CODEPOINTS one or more 4-6 hex digits */
+#if 0
+		  printf("  %s/%s %s\n", name, alias, depr ? "deprecated" : "");
+#endif
+	        }
+	      }
+	    }
+	  }
+	  break;
+	}
+      }
+      break;
+    }
+  xmlFreeDoc(doc);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<UCD parser local functions>>=
+static void parse_ldml(const char *name)
+{
+  /* ignore special tags everywhere, since it's undefined */
+  xmlDocPtr doc = xmlReadFile(name, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(name);
+    exit(1);
+  }
+  xmlNodePtr n, c;
+  for(n = doc->children; n; n = n->next)
+    /* not sure why 1st entry is always empty ldml */
+    if(n->children && xml_isname(n, "ldml")) {
+      /* ignore draft attribute */
+      /* ignore deprecated fallback tag */
+      for(n = n->children; n; n = n->next) {
+	if(!n->children)
+	  continue;
+	<<Parse ldml sections>>
+      }
+      break;
+    }
+  xmlFreeDoc(doc);
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "identity")) {
+  /* ignore version, generation */
+  const char *lang = NULL;
+  const char *scr = NULL;
+  const char *ter = NULL;
+  const char *var = NULL;
+  const char *alias = NULL, *alias_path = NULL;
+  for(c = n->children; c; c = c->next) {
+    /* e.g. zh in zh_Hans_SG */
+    if(xml_isname(c, "language"))
+      lang = xml_prop(c, "type");
+    /* e.g. Hans in zh_Hans_SG */
+    else if(xml_isname(c, "script"))
+      scr = xml_prop(c, "type");
+    /* e.g. SG in zh_Hans_SG */
+    else if(xml_isname(c, "territory"))
+      ter = xml_prop(c, "type");
+    /* e.g. POSIX in en_US_POSIX */
+    else if(xml_isname(c, "variant"))
+      var = xml_prop(c, "type");
+    else if(xml_isname(c, "alias")) {
+      /* note: should this even be supported?  is it used? */
+      alias = xml_prop(c, "source");
+      alias_path = xml_prop(c, "path");
+    }
+    /* note that draft, references, alt fields ignored above */
+  }
+  /* file name should be following text */
+#if 0
+  printf("lang: %s", lang);
+  if(scr)
+    printf("_%s", scr);
+  if(ter)
+    printf("_%s", ter);
+  if(var)
+    printf("_%s", var);
+  putchar('\n');
+#endif
+}
+@
+
+<<Parse CLDR files>>=
+/* casing: special casing rules */
+/* need to convert this to a binary file format */
+/* need to load at run-time based on locale var or desired locale */
+/* is this even useful?  supposedly internal-use-only */
+d = opendir("common/casing");
+if(!d) {
+  perror("CLDR casing");
+  exit(1);
+}
+chdir("common/casing");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "metadata")) {
+  for(c = n->children; c; c = c->next)
+    if(xml_isname(c, "casingData")) {
+      for(c = c->children; c; c = c->next) {
+        if(!xml_isname(c, "casingItem"))
+	  continue;
+	/* type should be enum of all potential types */
+	    /* calendar-field day-format-except-narrow */
+	    /* day-narrow day-standalone-except-narrow */
+	    /* displayName displayName-count era-abbr */
+	    /* era-name era-narrow language key */
+	    /* metazone-long month-format-except-narrow */
+	    /* month-standalone-except-narrow */
+	    /* month-narrow quarter-abbreviated */
+	    /* quarter-format-wide tense territory */
+	    /* quarter-standalone-wide script symbol */
+	    /* type metazone-short zone-exemplarCity */
+	  /* not sure if should allow "other" types */
+	/* content should be enum of values: */
+	  /* titlecase/uppercase/lowercase */
+#if 0
+        printf(" casing %s: %s\n", xml_prop(c, "type"),
+	                           c->children->content);
+#endif
+      }
+      break;
+    }
+}
+@
+
+<<Parse CLDR files>>=
+/* collation: locale-specific collation rules */
+d = opendir("common/collation");
+if(!d) {
+  perror("CLDR collation");
+  exit(1);
+}
+chdir("common/collation");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "collations")) {
+  const char *subl = xml_prop(n, "validSubLocales");
+#if 0
+  /* space-separated list of full locale names */
+  if(subl)
+    printf("sublang: %s\n", subl);
+#endif
+  /* ignore version, draft attrs */
+  const char *def = "standard";
+  for(c = n->children; c; c = c->next) {
+    /* should be same enum type as types below */
+    if(xml_isname(c, "default")) {
+      def = xml_prop(c, "choice");
+      if(!def)
+        def = xml_prop(c, "type"); /* deprecated, but used */
+      /* ignore draft, references, alt attrs */
+      /* can have more than one, but why would you? */
+    } else if(xml_isname(c, "collation")) {
+      /* ignore draft, standard, references, alt */
+      if(!subl) /* technically, this isn't a req, but it's safe */
+        subl = xml_prop(c, "validSubLocales");
+      /* ignore draft, standard, references, alt attrs */
+      /* ignore visibility attr */
+      /* all available types should be an enum */
+      /* or at least easily looked up on per-lang basis */
+      /* most langs have no alt types, but some have many */
+#if 0
+      printf("[rules for type %s]\n", xml_prop(c, "type"));
+#endif
+      xmlNodePtr cc;
+      const char *base = NULL; /* DUCET by default */
+      for(cc = c->children; cc; cc = cc->next) {
+        if(xml_isname(cc, "base")) {
+	  xmlNodePtr ccc;
+	  for(ccc = cc->children; ccc; ccc = ccc->next)
+	    if(xml_isname(ccc, "alias")) {
+	      base = xml_prop(ccc, "source");
+	      /* path should always be /ldml/collations */
+	      break;
+	    }
+	} else if(xml_isname(cc, "settings")) {
+	  xmlAttrPtr a;
+	  /* note: only settings in wild are: */
+	  /*   backwards=on */
+	  /*   caseFirst=upper */
+	  /*   normalization=on */
+	  /*   alternate=shifted */
+	  /*   variableTop=<n> */
+	  /*   strength=Tertiary */
+	  /*   hiraganaQuaterary=on */
+	  /* valid, though: */
+	  /*  strength=primary|secondary|tertiary|quaternary|identical */
+	  /*  alternate=non-ignorable|shifted */
+	  /*  backwards=on|off */
+	  /*  normalization=on|off */
+	  /*  caseLevel=on|off */
+	  /*  caseFirst=upper|lower|off */
+	  /*  hiraganaQuarternary=on|off */
+	  /*  hiraganaQuaternary=on|off */
+	  /*  numeric=on|off */
+	  /*  private=true|false */  /* deprecated */
+	  /*  variableTop='x' */
+	  /*  reorder=? */
+#if 0
+          fputs("  settings", stdout);
+	  for(a = cc->properties; a; a = a->next)
+	    printf(" %s=%s", a->name, a->children->content);
+	  putchar('\n');
+#endif
+        } else if(xml_isname(cc, "rules")) {
+	  xmlNodePtr r;
+	  for(r = cc->children; r; r = r->next) {
+	    if(r->type != XML_ELEMENT_NODE)
+	      continue;
+	    /* r->name may be alias.  not seen in wild. */
+	    /* r->name may be import (repeatedly).  not seen in wild. */
+	    /* r->name should be enum */
+	    /* reset [before=primary/secondary/tertiary] */
+	    /* note: reset arg may be tag: */
+	    /*    <when>_<lev>_ignorable */
+	    /*      <lev>=primary secondary tertiary non */
+	    /*      <when>=first last */
+	    /*    <when>_variable */
+	    /*    <when>_trailing */
+	    /*    cp hex=... */
+	    /* p pc s sc t tc i ic */ /* q qc are deprecated */
+	    /*   each takes interleaved raw data, <cp hex=>, <last_variable/> */
+	    /* x [<context>..</>] {p pc s sc ...}* [<extend>..</>] */
+	    /*  context & extend are interleaved raw data & <cp hex=> */
+#if 0
+            printf(" rule: %s%s '%s'\n", r->name,
+	           r->properties &&
+		     r->properties->children ?
+		       r->properties->children->content : "",
+		   r->children->type == XML_ELEMENT_NODE ?
+		      r->children->name :
+		      r->children->content);
+#endif
+          }
+        } else if(xml_isname(cc, "suppress_contractions")) {
+#if 0
+          printf("  suppress %s\n", cc->children->content);
+	  /* note: may be interleaved raw data and <cp hex="...."> tags */
+#endif
+        } else if(xml_isname(cc, "optimize")) {
+	  /* ??? */
+	  /* interleaved raw data and <cp hex="..."> tags */
+	}
+      }
+    } else if(xml_isname(c, "alias")) {
+      /* path should always be //ldml/collations */
+#if 0
+      printf("  [copy from %s (%s)]\n", xml_prop(c, "source"),
+             xml_prop(c, "path"));
+#endif
+    }
+  }
+#if 0
+  printf("[default: %s]\n", def);
+#endif
+}
+@
+
+<<Parse CLDR files>>=
+/* main: "other" rules */
+d = opendir("common/main");
+if(!d) {
+  perror("CLDR main");
+  exit(1);
+}
+chdir("common/main");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "dates")) {
+  /* ignore draft/standard/references/alt tags */
+  const char *subl = xml_prop(n, "validSubLocales");
+  for(c = n->children; c; c = c->next) {
+    if(xml_isname(c, "alias")) {
+    } else if(xml_isname(c, "localizedPatternChars")) {
+      /* deprecated */
+      /* ignore draft/standard/references/alt */
+      if(!subl)
+        subl = xml_prop(c, "validSubLocales");
+      /* data is interleaved raw data & <cp hex=> */
+    } else if(xml_isname(c, "dateRangePattern")) {
+      /* deprecated */
+      /* ignore draft/standard/references/alt */
+      if(!subl)
+        subl = xml_prop(c, "validSubLocales");
+      /* data is interleaved raw data & <cp hex=> */
+    } else if(xml_isname(c, "calendars")) {
+      /* calendar type=gregorian */
+      /*      months */
+      /*        monthContext type="format" */
+      /*          monthWidth type="wide" */
+      /*            <month type="8">Leqeeni</month> */
+    } else if(xml_isname(c, "timeZoneNames")) {
+    }
+  }
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "alias")) {
+  /* is this even used?  should it be supported? */
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "localeDisplayNames")) {
+  /* <languages><language type="..">...</>.... */
+  /* <scripts><script type="..">...</>... */
+  /* <territories><territory type='..'>...</>...*/
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "layout")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "contextTransforms")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "characters")) {
+  /* exemplarCharacters [type=...]>[uniset]</> */
+  /* note: this is an optional Unicode property */
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "delimiters")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "measurement")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "numbers")) {
+  /* <currenceis><currency type="DJF"><symbol>Fdj</symbol>...*/
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "units")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "listPatterns")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "posix")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "segmentations")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "rbnf")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "references")) {
+}
 @
 
 <<FIXME>>=
 implement
-common/bcp47/* -> locale name attributes (e.g. en_US-u-ca-blah)
- doctype=ldmlBCP47
- 1 ldmlBCP47
-    1 version !number= cldrVersion=
-    ? generation !date=
-    ? cldrVersion !version=
-    * keyword:
-       * key: extension=[u] !name= alias= description= since= deprecated=
-          * type !name= alias= description= since= deprecated=
-    * attribute !name= description= since= deprecated=
-  e.g. key=va, type=posix -> en_US-u-va-posix or en_US@va=posix
-  if type == CODEPOINT, then val is one or more hex 4-6 digit code points
-  if type == REORDER_CODE, val is one or more reordering block name
-  all other type names are the name of the value
-  if aliases exist, they (and only they) are used for @key=type syntax
-  multiple aliases are separated by spaces (1st is preferred)
-    variant.xml
-      va: posix
-    timezone.xml
-      tz: adalv .. zwhre
-    number.xml
-      nu: arab .. vaii
-    currency.xml
-      cu: adp .. zwr
-    collation.xml
-      co: big5han .. zhuyin
-      ka: noignore/shifted
-      kb: true/false
-      kc: true/false
-      kf: upper/lower/false
-      kh: true/false
-      kk: true/false
-      kn: true/false
-      kr: REORDER_CODE
-      ks: level1/level2/level3/level4/identic
-      vt: CODEPOINTS
-    calendar.xml
-      ca: buddhist .. roc
-    transform.xml: t
-      m0: alaloc .. ungegn
-    transform_private_use.xml: t
-      x0: <none> defn: 3-8 alnum per tag
-    transform_mt.xml: t
-      t0: und or sequence of tags specifying machine translation
-    transform_keyboard.xml: t
-      k0: osx .. und
-    transform_ime.xml: t
-      i0: handwrit .. und or tags indicating input method
-casing -> field casing information
- doctype = ldml
-//ldml/identity/language[type] == base locale name (e.g. zh in zh_Hans_SG)
-//ldml/identity/language[script] == base script (e.g. Hans in zh_Hans_SG)
-//ldml/identity/language[territory] == base ter (e.g. SG in zh_Hans_SG)
-//ldml/identity/language[variant] == base variant (e.g. POSIX in en_US_POSIX)
-//ldml/metadata/casingData/casingItem[type=x]/ == casing for type x
-                                      value == tyitlecase lowercase uppercase
-				      x ==
-				        calendar-field day-format-except-narrow
-					day-narrow day-standalone-except-narrow
-					displayName displayName-count era-abbr
-					era-name era-narrow language key
-					metazone-long month-format-except-narrow
-					month-standalone-except-narrow
-					month-narrow quarter-abbreviated
-					quarter-format-wide tense territory
-					quarter-standalone-wide script symbol
-					type metazone-short zone-exemplarCity
-collation -> collation order information
- doctype = ldml
-//ldml/identity/language[type] == base locale name (e.g. zh in zh_Hans_SG)
-//ldml/identity/language[script] == base script (e.g. Hans in zh_Hans_SG)
-//ldml/identity/language[territory] == base ter (e.g. SG in zh_Hans_SG)
-//ldml/identity/language[variant] == base variant (e.g. POSIX in en_US_POSIX)
-//ldml/collations[validSubLocales] == other locale names (e.g. zh_Hans_SG)
-//ldml/collations/default == name of default collation "type"
-//ldml/collations/collation[type=x]/ == def. for given collation "type" x
-   settings <setting>=<val>
-   rules/
-     reset before=lev/ == char to place at
-     p,pc,s,sc,t,tc,i,ic,x/ == char to place, and where
-   suppress_contractions/ == "set" of contractions to suppress
-   alias source= path=  == insert that path from that lang
 main -> info other than that covered in special dirs
   doctype = ldml
+    alias
+    fallback
+    localeDisplayNames
+    layout
+    contextTransforms
+    characters
+    delimiters
+    measurement
+    dates
+    numbers
+    units
+    listPatterns
+    collations(*)
+    posix
+    segmentations?
+    rbnf
+    metadata
+    references
+    special
+
 rbnf -> rbnf for generating number names from numbers
   doctype = ldml
 segments -> patterns for text segmentation
@@ -11080,7 +11800,46 @@ int main(void)
 #endif
 @
 
+\chapter{Code Index}
+\nowebchunks
+
+% Some might prefer having the Code Index in an appendix as well.
+% For this document, I'm making the appendix the "user documentation"
+\appendix
+
 \chapter{Building}
+
+Before starting, ensure that all prerequisites are present.  To build
+this, build.nw is required.  If you obtained the PDF or HTML version
+of this document, build.nw is included.  Otherwise, it may be obtained
+the same place you got this.  The other prerequisites are the Unicode
+data files.  Make sure the file locations are also set correctly in
+the config file.
+
+\begin{itemize}
+\item The Unicode Character Database; this library was tested using
+versions 6.0.0 and 6.2.0.\\
+\url{http://www.unicode.org/Public/zipped/}\emph{version}/UCD.zip
+\item The Unicode Han Database; this should match the UCD version.\\
+\url{http://www.unicode.org/Public/zipped/}\emph{version}/Unihan.zip
+\item The Default Unicode Collation Element Table; this should match
+the UCD version.  It should be placed in the same directory as the UCD.\\
+\url{http://www.unicode.org/Public/UCA/}\emph{version}/*
+\item The Unicode Common Locale Data Repository; make sure that the
+version is compatible with the UCD version.\\
+\url{http://www.unicode.org/Public/cldr/latest/core.zip}
+\item The XML entity database; the only version currently supported is
+the one at the following URL:\\
+\url{http://www.w3.org/2003/entities/2007xml/unicode.xml}
+\item The Unicode IDNA compatibility database (optional); this should
+match the UCD version.  If present, it should be in the same directory
+as the UCD, or in a subdirectory or sibling directory named idna.\\
+\url{http://www.unicode.org/Public/idna/}\emph{version}/*
+\item The Unicode security information database (optional).  If
+present, it should be in the same directory as the UCD, or in a
+subdirectory or sibling directory named security.\\
+\url{http://www.unicode.org/Public/security/latest/}uts39-data-\emph{version}.zip
+\end{itemize}
 
 \input{build-doc.tex} %%% doc
 The full, documented [[makefile.config]] is reproduced here for
@@ -11089,20 +11848,24 @@ start at [[UCD_LOC]].
 
 \input{makefile.config.tex} % make
 
-\chapter{API}
+\chapter{API Documentation}
 
 The easiest way to include this library's definitions is using
 [[#include "uni_all.h"]].  Linking requires [[-luni]].
 
-\section{Bit Sets}
+\section{Data Types for Storage}
+
+\subsection{Bit Sets}
 
 The following functions support storage of Unicode boolean properties
 in simple bit sets.  [[a]] is an array of any unsigned integer data
 type.  [[b]] is a bit number, and [[e]] is an index into [[a]].
+Normally, extra code would be added to shorten the array by indicating
+a lower and upper bound.
 
 \input{Simple bit set definitions.tex} % C
 
-\section{Sorted Code Point Arrays}
+\subsection{Sorted Code Point Arrays}
 
 An array of any data type whose first member is a 32-bit signed
 integer can be searched and sorted using the standard C [[bsearch]]
@@ -11125,10 +11888,11 @@ maximum [[int32_t]] value ([[0x7fffffff]]).
 
 \input{[[uni_cp_val_t]].tex} % C
 
-\section{Sorted Code Point Range Arrays}
+\subsection{Sorted Code Point Range Arrays}
 
-Sorted code point range arrays are generally stored as structures
-whose first two members define the (inclusive) range:
+Sorted code point range arrays are arrays of structures whose first
+two members define an (inclusive) range; the ranges do not overlap, so
+sorting can be done using only the low element.
 
 \input{[[uni_chrrng_t]].tex} % C
 
@@ -11189,13 +11953,20 @@ optimized lookup function is provided as well:
 
 % uni_chrrng_val prototype
 
-\section{Multilevel Tables}
+\subsection{Multilevel Tables}
 
-Multi-level tables are a data structure consisting of a sequence of
-32-bit words which are interpreted dynamically.  When reading such a
-data structure, only the pointer to the first word is needed.  When
-creating such a structure, both the sequence of words and the total
-length are returned.
+Multi-level tables are bit arrays split into smaller chunks, with
+pointers to those chunks in a table at the next level.  Each level
+except the top is also split into smaller chunks with the next level
+being pointers to that level.  Duplicates in lower levels are removed
+by having only one copy with multiple pointers to that copy.  All-zero
+data and all-one data are also stored with special pointer values,
+making sparse and repetitive bit arrays fairly storage-efficient.
+
+The tables are stored as an opaque sequence of 32-bit words which are
+interpreted dynamically.  When reading such a data structure, only the
+pointer to the first word is needed.  When creating such a structure,
+both the sequence of words and the total length are returned.
 
 Use the following function to convert a plain bit array to a
 multi-level table.  It may take a long time to run, so generally it
@@ -11294,7 +12065,49 @@ multiply code point values by 4 when using [[multi_tab_lookup]].
 
 % cp_val_to_multi prototype
 
-\section{Bit Set Operations}
+\section{Boolean Properties}
+
+The supported boolean properties are listed in table
+\ref{tab:boolprop}.  For each supported boolean property \emph{BP},
+the following symbols are defined:
+
+\begin{itemize}
+\item [[const uni_chrrng_t uni_]]\emph{BP}[[_rng[]]] is a sorted range
+table with entries for that property.
+\item [[uni_]]\emph{BP}[[_rng_len]] is the number of entries in that
+array (a preprocessor symbol).
+\item [[const uint32_t uni_]]\emph{BP}[[_mtab[]]] is a multi-level
+table for that property.
+\item [[int is_uni_]]\emph{BP}[[(uint32_t cp)]] is a boolean lookup
+function for that property.  It is actually a preprocessor macro which
+uses the multi-level table and [[is_uni_x]] internally.
+\end{itemize}
+
+For static linking, each property is in a separate object file, and
+the sorted range table and multi-level table are stored separately, as
+well.
+
+\begin{table}
+\begin{centering}
+\begin{tabular}{llll}
+AHex&Alpha&ASSIGNED&Bidi\_C\\
+Bidi\_M&Cased&CE&CI\\
+Comp\_Ex&CWCF&CWCM&CWKCF\\
+CWL&CWT&CWU&Dash\\
+Dep&DI&Dia&Ext\\
+Gr\_Base&Gr\_Ext&Hex&IDC\\
+Ideo&IDS&IDSB&IDST\\
+Join\_C&LOE&Lower&Math\\
+NChar&NFD\_QC&NFKD\_QC&Pat\_Syn\\
+Pat\_WS&QMark&Radical&SD\\
+STerm&Term&UIdeo&Upper\\
+VS&WSpace&XIDC&XIDS\\
+\end{tabular}
+\caption{\label{tab:boolprop}Boolean properties (Unicode canonical short name)}
+\end{centering}
+\end{table}
+
+\subsection{Bit Set Operations}
 
 The following functions perform a generic bit operation (see table
 \ref{tab:setop2} for a complete list of operations).
@@ -11353,47 +12166,6 @@ multi-level tables to range arrays first, and then convert the result
 back.  Alternately, the lookup function can simply be called for each
 table, and the lookup results combined instead, using [[BIT_SET_OP]].
 
-\section{Boolean Properties}
-
-The supported boolean properties are listed in table
-\ref{tab:boolprop}.  For each supported boolean property \emph{BP},
-the following symbols are defined:
-
-\begin{itemize}
-\item [[const uni_chrrng_t uni_]]\emph{BP}[[_rng[]]] is a sorted range
-table with entries for that property.
-\item [[uni_]]\emph{BP}[[_rng_len]] is the number of entries in that
-array (a preprocessor symbol).
-\item [[const uint32_t uni_]]\emph{BP}[[_mtab[]]] is a multi-level
-table for that property.
-\item [[int is_uni_]]\emph{BP}[[(uint32_t cp)]] is a boolean lookup
-function for that property.  It is actually a preprocessor macro which
-uses the multi-level table and [[is_uni_x]] internally.
-\end{itemize}
-
-For static linking, each property is in a separate object file, and
-the sorted range table and multi-level table are stored separately, as
-well.
-
-\begin{table}
-\begin{centering}
-\begin{tabular}{llll}
-AHex&Alpha&ASSIGNED&Bidi\_C\\
-Bidi\_M&Cased&CE&CI\\
-Comp\_Ex&CWCF&CWCM&CWKCF\\
-CWL&CWT&CWU&Dash\\
-Dep&DI&Dia&Ext\\
-Gr\_Base&Gr\_Ext&Hex&IDC\\
-Ideo&IDS&IDSB&IDST\\
-Join\_C&LOE&Lower&Math\\
-NChar&NFD\_QC&NFKD\_QC&Pat\_Syn\\
-Pat\_WS&QMark&Radical&SD\\
-STerm&Term&UIdeo&Upper\\
-VS&WSpace&XIDC&XIDS\\
-\end{tabular}
-\caption{\label{tab:boolprop}Boolean properties (Unicode canonical short name)}
-\end{centering}
-\end{table}
 
 \section{Enumerated Properties}
 
@@ -11462,11 +12234,20 @@ age&bc&blk&ccc\\
 dt&ea&gc&GCB\\
 hst&jg&jt&lb\\
 NFC\_QC&NFKC\_QC&nt&sc\\
-SB&WB&&\\
+SB&WB&IDNA\_Status&ID\_Restrict\_Status\\
+ID\_Restrict\_Type&&&\\
 \end{tabular}
 \caption{\label{tab:enumprop}Enumerated properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
+
+The IDNA\_Status property will not be available if the IDNA data files
+were not present when this library was compiled.  The
+ID\_Restricted\_Status and ID\_Restricted\_Type fields will not be
+available if the security data files were not available when this
+library was compiled.  The ID\_Restrict\_Type enumeration literals
+change minus signs to underscores; this is the only current
+enumeration that supports enumeration names with minus signs.
 
 In addition, the gc property defines a symbol to support aliases which
 cover more than one value.  For example, the enumeration literal
@@ -11554,8 +12335,10 @@ Note that the [[uni_str_rng_t]] data structure can also be cast to the
 [[uni_cp_val_t]] type, whose [[val]] element can then be cast to
 the [[uni_str_rng_val_t]] type.
 
-Unless otherwise stated, for each string property \emph{SP}, the
-following symbols are defined:
+The supported string properties are listed in table
+\ref{tab:stringprop}.  Unless otherwise stated in the subsequent
+sections, for each string property \emph{SP}, the following symbols
+are defined:
 
 \begin{itemize}
 \item [[const uint32_t uni_]]\emph{ST}[[_strs[]]] is a string table
@@ -11571,6 +12354,22 @@ table of 32-bit [[uni_str_rng_val_t]] values.
 
 For static linking, the string table, sorted code point table, and
 multi-level table are all in separate object files.
+
+\begin{table}
+\begin{centering}
+\begin{tabular}{llll}
+dm&canon\_decomp&compat\_decomp&canon\_comp\\
+lc&uc&tc&cf\\
+tcf&NFKC\_CF&bmg&cjkTraditionalVariant\\
+cjkSimplifiedVariant&cjkCompatibilityVariant&IDNA\_Mapping&DUCET\\
+scx&&&\\
+\end{tabular}
+
+\small{The following properties are not standard Unicode properties:
+canon\_decomp, compat\_decomp, canon\_comp, tcf.}
+\caption{\label{tab:stringprop}String Properties (Unicode canonical short name)}
+\end{centering}
+\end{table}
 
 \subsection{Raw Decomposition}
 
@@ -11730,6 +12529,18 @@ can be obtained using a wrapper macro as well:
 
 % uni_tcf prototype
 
+The only other case conversion string property is NFKC\_CF, which is a
+plain string property.
+
+\subsection{Other String Properties}
+
+The scx property is officially not a string property, but it is stored
+internally as a string property whose strings are sequences of
+enumeration literal values corresponding to the sc property.  For
+example, the code point U+0363 has the scx property ``Arab Syrc'',
+which is stored as string of length two.  The first character of the
+string is [[U_sc_Arab]], and the second is [[U_sc_Syrc]].
+
 \section{Name Tables}
 
 The following symbols are for internal use only.  They provide
@@ -11737,12 +12548,9 @@ information about ranges within the Unicode.txt data file.  These
 ranges have code points algorithmically generated from the range's
 base name.
 
-[[const uni_chrrng_dat_t uni_range_rng[]]]
-[[uni_range_rng_len]]
-[[const uint32_t uni_range_mtab[]]]
+[[const uni_chrrng_dat_t uni_range_rng[]]] \\
+[[uni_range_rng_len]] \\
+[[const uint32_t uni_range_mtab[]]] \\
 [[uni_range_invalid]]
-
-\chapter{Code Index}
-\nowebchunks
 
 \end{document}
