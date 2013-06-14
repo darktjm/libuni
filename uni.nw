@@ -3558,7 +3558,7 @@ for(j = 0; j < enum_vals_len[i]; j++) {
       putc('_', anf);
   }
   fprintf(anf, " }%s\n", j < enum_vals_len[i] - 1 ? "," : "");
-  free(approx_array[j].name);
+  free((char *)approx_array[j].name);
 }
 fputs("};\n", anf);
 fclose(anf);
@@ -4673,27 +4673,26 @@ outside of this range, and every LV and LVT combination is contained
 within this range.  There are defined decomposition mappings from LVT
 to LV and T, and from LV to L and V. Rather than fill the dm string
 table with easily generated values, the value is represented as an
-invalid decomposition result: 1.  A function is then provided to
-convert that 1 into the correct decomposition mapping.  The canonical
+empty result.  A function is then provided to convert that empty
+string into the correct decomposition mapping.  The canonical
 dm entry for LVT is LV T, so a flag is used to select the full L V T
 decomposition directly.
 
 <<Process a line of [[UnicodeData.txt]]>>=
 if(low == 0xAC00) {
   /* hangul syllables */
-  uint32_t str[1] = { 1 };
   add_enum_rng(&parsed_props[prop_dt], low, high, enum_val(prop_dt, "can"));
-  add_str_rng(&parsed_props[prop_dm], low, high, str, 1);
+  add_str_rng(&parsed_props[prop_dm], low, high, NULL, 0);
 }
 @
 
 <<Unicode property exports>>=
 /* requires 3-char buf; returns actual len */
-int hangul_syllable_decomp(char cp, uint32_t *res, int full);
+int hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full);
 @
 
 <<Unicode property functions>>=
-int hangul_syllable_decomp(char cp, uint32_t *res, int full)
+int hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full)
 {
   int L, V, T;
   if(cp < 0xAC00 || cp > 0xD7A3)
@@ -4701,7 +4700,7 @@ int hangul_syllable_decomp(char cp, uint32_t *res, int full)
   cp -= 0xac00;
   T = cp % 28;
   V = (cp / 28) % 21;
-  L = cp / (28 * 19);
+  L = cp / (28 * 21);
   if(!T) { /* LV -> L V */
     res[0] = 0x1100 + L;
     res[1] = 0x1161 + V;
@@ -4867,17 +4866,16 @@ static void dump_strs(prop_t *p, FILE *gen_h)
   fprintf(of, "#include <stdint.h>\n\n"
               "const uint32_t uni_%s_strs[] = {\n\t", p->name);
   for(i = 0, off = 0; i < p->rng_len; i++) {
-    uint32_t j, len;
+    uint32_t j, len = p->rng_str[i].len;
     if(i < p->rng_len - 1 && p->rng_str[i].off == p->rng_str[i + 1].off) {
-      p->rng_str[i].off = off;
+      p->rng_str[i].off = len ? off : 1;
       continue;
     }
-    len = p->rng_str[i].len;
     for(j = 0; j < len; j++)
       fprintf(of, "0x%X%s", p->strs[p->rng_str[i].off + j],
                             j == len - 1 && i == p->rng_len - 1 ? "\n};\n" :
 			          !((off + j + 1) % 8) ? ",\n\t" : ", ");
-    p->rng_str[i].off = off;
+    p->rng_str[i].off = len ? off : 1;
     off += len;
   }
   fclose(of);
@@ -5124,7 +5122,7 @@ lookups are used.
 #define uni_find_dm(cp, off, len, compat) \
   uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_full_strs)
 #define uni_get_decomp(cp, buf, off, len) do { \
-  if((off) == (uint16_t)~0) \
+  if((off) == -1) \
     hangul_syllable_decomp(cp, buf, (len) == 3); \
   else \
     memcpy(buf, uni_dm_full_strs + (off), (len) * 4); \
@@ -5141,12 +5139,12 @@ void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 
 <<Unicode property exports>>=
 void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
-               uint8_t *compat, int full, const uint32_t *strs);
+               uint8_t *compat, int h, const uint32_t *strs);
 @
 
 <<Unicode property functions>>=
 void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
-               uint8_t *compat, int full, const uint32_t *strs)
+               uint8_t *compat, int h, const uint32_t *strs)
 {
   const uint8_t *mr;
   multi_tab_lookup(tab, cp * 4, &mr, 0);
@@ -5158,9 +5156,9 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
     return;
   } else {
     uni_str_rng_val_t *v = (void *)mr;
-    if(v->len == 1 && strs[v->off] == 1) {
-      *off = ~0;
-      *len = full && (cp - 0xAC00) % 28 ? 3 : 2;
+    if(h >= 0 && !v->len && v->off) {
+      *off = -1;
+      *len = h && (cp - 0xAC00) % 28 ? 3 : 2;
       if(compat)
         *compat = 0;
     } else {
@@ -5216,43 +5214,50 @@ prop_t *fce_prop = &parsed_props[add_prop("Comp_Ex")];
 prop_t *cm_prop = &parsed_props[prop_cm];
 for(i = 0; i < dm_prop->rng_len; i++) {
   uint32_t str[2];
-  uint32_t cp = dm_prop->rng_str[i].cp;
-  if((cp >= 0x1100 && cp <= 0x1112) || /* L */
-     (cp >= 0xAC00 && cp <= 0xD7A3 && !((cp - 0xAC00) % 28))) { /* LV */
-    add_str_rng(cm_prop, cp, cp, NULL, 0);
-    /* ensure that entire entry is not 0 */
-    cm_prop->rng_str[cm_prop->rng_len - 1].off = 1;
-    continue;
-  }
+  uint32_t cp = dm_prop->rng_str[i].cp; /* cp == C */
   if(dm_prop->rng_str[i].len != 2 ||
      find_cp_chrrng(cp, dt_prop->rng_dat, dt_prop->rng_len, none_val) !=
          can_val ||
      is_cp_chrrng(cp, fce_prop->rng, fce_prop->rng_len))
     continue; /* skip if not canonical composition */
-  str[0] = cp;
-  str[1] = dmf_prop->strs[dm_prop->rng_str[i].off + 1];
-  cp = dmf_prop->strs[dm_prop->rng_str[i].off];
-  if(cm_prop->rng_len && cm_prop->rng_str[cm_prop->rng_len - 1].cp == cp) {
-    /* append if there is already one entry in B->C table */
-    uint32_t off = cm_prop->num_strs;
-    if(off + 2 > cm_prop->max_strs)
-      resize(cm_prop->strs, (cm_prop->max_strs *= 2));
-    cm_prop->rng_str[cm_prop->rng_len - 1].len += 2;
-    cm_prop->strs[off] = str[0];
-    cm_prop->strs[off + 1] = str[1];
-  } else
-    /* just add if not */
-    add_str_rng(cm_prop, cp, cp, str, 2);
+  str[0] = dmf_prop->strs[dm_prop->rng_str[i].off + 1]; /* B */
+  str[1] = cp;
+  cp = dmf_prop->strs[dm_prop->rng_str[i].off]; /* A */
+  /* just add; tables are merged later */
+  add_str_rng(cm_prop, cp, cp, str, 2);
 }
-@
-
-<<Parse UCD files>>=
-/* entries were added to B->C tables in arbitrary order, so sort them */
-for(i = 0; i < cm_prop->rng_len; i++)
-  if(cm_prop->rng_str[i].len > 2)
-    qsort(cm_prop->strs + cm_prop->rng_str[i].off,
-          cm_prop->rng_str[i].len / 2, 2 * sizeof(*cm_prop->strs),
-	  uni_cmp_cp);
+/* add entries for Hangul */
+add_str_rng(cm_prop, 0x1100, 0x1112, NULL, 0); /* L */
+for(i = 0xAC00; i <= 0xD7A3; i += 28) /* LV */
+  add_str_rng(cm_prop, i, i, NULL, 0);
+/* merge B->C tables */
+qsort(cm_prop->rng_str, cm_prop->rng_len, sizeof(*cm_prop->rng_str), uni_cmp_cp);
+for(i = cm_prop->rng_len - 1; i > 0; i--) {
+  int off, k;
+  j = i;
+  while(j > 0 && cm_prop->rng_str[i].cp == cm_prop->rng_str[j - 1].cp)
+    j--;
+  if(j == i)
+    continue;
+  while(cm_prop->num_strs + 2 * (i - j + 1) > cm_prop->max_strs)
+    resize(cm_prop->strs, (cm_prop->max_strs *= 2));
+  for(k = j, off = 0; k <= i; k++) {
+    cm_prop->strs[cm_prop->num_strs + off++] = cm_prop->strs[cm_prop->rng_str[k].off];
+    cm_prop->strs[cm_prop->num_strs + off++] = cm_prop->strs[cm_prop->rng_str[k].off + 1];
+  }
+  cm_prop->rng_str[j].off = cm_prop->num_strs;
+  cm_prop->rng_str[j].len = 2 * (i - j + 1);
+  cm_prop->num_strs += 2 * (i - j + 1);
+  /* sort B->C table by B */
+  qsort(cm_prop->strs + cm_prop->rng_str[j].off, (i - j) + 1,
+        2 * sizeof(*cm_prop->strs), uni_cmp_cp);
+  /* remove excess entries */
+  memmove(cm_prop->rng_str + j + 1, cm_prop->rng_str + i + 1,
+          (cm_prop->rng_len - i - 1) * sizeof(*cm_prop->rng_str));
+  cm_prop->rng_len -= j - i;
+  if(!(i = j))
+    break;
+}
 @
 
 <<Unicode property exports>>=
@@ -5326,10 +5331,10 @@ binary search is performed.  This is hand-coded for speed.
 /* to compose A+B->C: */
 /* look up B->C table for A (cp) */
 #define uni_find_canon_comp(cp, off, len) \
-  uni_x_dec(cp, uni_canon_comp_mtab, off, len, NULL, 0, uni_canon_comp_strs)
+  uni_x_dec(cp, uni_canon_comp_mtab, off, len, NULL, -1, uni_canon_comp_strs)
 /* then look up C given B->C table info */
 #define uni_canon_comp(cpa, cpb, off, len) \
-  ((len) > 0 ? uni_lookup_decent(cpb, uni_canon_comp_strs + (off), len) : \
+  ((len) > 0 ? uni_lookup_compent(cpb, uni_canon_comp_strs + (off), len) : \
                hangul_syllable_comp(cpa, cpb))
 @
 
@@ -5339,11 +5344,11 @@ uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
 @
 
 <<Unicode property exports>>=
-uint32_t uni_lookup_decent(uint32_t cp, const uint32_t *tab, uint32_t len);
+uint32_t uni_lookup_compent(uint32_t cp, const uint32_t *tab, uint32_t len);
 @
 
 <<Unicode property functions>>=
-uint32_t uni_lookup_decent(uint32_t cp, const uint32_t *tab, uint32_t len)
+uint32_t uni_lookup_compent(uint32_t cp, const uint32_t *tab, uint32_t len)
 {
   int32_t l = 0, h = len / 2 - 1;
   while(h >= l) {
@@ -5868,7 +5873,7 @@ int uni_NFKC_Casefold(uint32_t *buf, int blen);
       if(len) { \
         memmove(buf + i + len, buf + i + 1, (blen - i - 1)*sizeof(int)); \
         blen += len - 1; \
-	if(off == (uint16_t)~0) \
+	if(off == -1) \
 	  hangul_syllable_decomp(buf[i], buf + i, 1); \
 	else \
 	  memcpy(buf + i, str + off, len * sizeof(uint32_t)); \
@@ -5979,7 +5984,11 @@ int uni_NFC_comp(uint32_t *buf, int blen, int *nok)
     /* first char must be ccc=0 */
     if(ccc)
       continue;
-    /* could also skip if !is_cancomp1(buf[i]) */
+    int16_t off;
+    uint8_t len;
+    uni_find_canon_comp(buf[i], &off, &len);
+    if(!len && !off)
+      continue; /* no compositions for this char */
     last0 = i;
     int lastccc = 0;
     int j;
@@ -5995,18 +6004,19 @@ int uni_NFC_comp(uint32_t *buf, int blen, int *nok)
         break;
       }
       lastccc = ccc;
-      int16_t off;
-      uint8_t len;
-      uni_find_canon_comp(buf[i], &off, &len);
       int ccp = uni_canon_comp(buf[i], buf[j], off, len);
-      if(ccp >= 0) {
+      if(ccp > 0) {
         /* composition replaces char 1 and deletes char 2 */
         buf[i] = ccp;
-        memmove(buf + j, buf + j + 1, (blen - j - 1)*sizeof(int));
+        memmove(buf + j, buf + j + 1, (blen - j - 1)*sizeof(*buf));
         blen--;
-	/* start over at first potential 2nd char */
+	/* start over at first potential 2nd char (i + 1) */
         j = i;
         lastccc = 0;
+	/* new 1st char; update table */
+	uni_find_canon_comp(buf[i], &off, &len);
+	if(!len && !off)
+	  break; /* no compositions for this char */
         continue;
       }
       /* if no match and hit a ccc=0, try next 1st char */
@@ -6025,7 +6035,7 @@ int uni_NFC_comp(uint32_t *buf, int blen, int *nok)
       int16_t off;
       uint8_t len;
       uni_find_canon_comp(buf[last0], &off, &len);
-      *nok = len > 0 ? last0 : blen;
+      *nok = len || off ? last0 : blen;
     }
   }
   return blen;
@@ -6049,6 +6059,173 @@ int uni_NFKC_CF(uint32_t *buf, int blen);
 #define uni_NFKC(buf, blen) uni_NFC_comp(buf, uni_NFKD(buf, blen), NULL)
 #define uni_NFC(buf, blen) uni_NFC_comp(buf, uni_NFD(buf, blen), NULL)
 #define uni_NFKC_CF(buf, blen) uni_NFKC_Casefold(buf, uni_NFD(buf, blen))
+@
+
+\subsection{Testing - Normalization}
+
+To fully demonstrate that the normalization data is correct, the
+official test suite is run.  This is provided by the UCD in
+NormalizationTest.txt.  This time, rather than compiling the file's
+location in, it is simply fed into standard input.
+
+\lstset{language=make}
+<<C Test Support Executables>>=
+tstnorm \
+@
+
+<<makefile.vars>>=
+UNINORM_TEST = $(UCD_LOC)/NormalizationTest.txt
+@
+
+<<Additional Tests>>=
+./tstnorm <$(UNINORM_TEST)
+@
+
+\lstset{language=C}
+<<tstnorm.c>>=
+<<Common C Header>>
+#include "uni_all.h"
+
+/* longest line == 587 chars */
+char lbuf[1024];
+
+/* longest string == 18 chars */
+uint32_t ibuf[5][128], ilen[5];
+uint32_t obuf[128];
+
+<<Normalization test support>>
+
+int main(void)
+{
+  int ret = 0;
+  <<Read and process NormalizationTest.txt>>
+  return ret;
+}
+@
+
+First, we need to track when we're in part 1, and mark every code
+point encountered there as having been processed.  According to the
+test, after exiting part 1, we can run all four standard
+normalizations on any code point not encountered and get no effect.
+
+In general, when entering a new section, print the section name.
+Otherwise, print a dot after every 50 tests.
+
+<<Read and process NormalizationTest.txt>>=
+char *didnorm;
+inisize(didnorm, 0x110000);
+clearbuf(didnorm, 0x110000);
+int inpart1 = 0;
+int ntests = 0;
+while(fgets(lbuf, sizeof(lbuf), stdin)) {
+  if(*lbuf == '#')
+    continue;
+  if(*lbuf == '@') {
+    if(ntests)
+      putchar('\n');
+    if(lbuf[5] == '1')
+      inpart1 = 1;
+    else if(inpart1) {
+      inpart1 = 0;
+      int i;
+      for(i = 0; i < 0x110000; i++)
+        if(!didnorm[i]) {
+	  <<Test normalization does not affect [[i]]>>
+	}
+    }
+    fputs(lbuf, stdout);
+    continue;
+  }
+  if(inpart1) {
+    int cp = strtol(lbuf, NULL, 16);
+    didnorm[cp] = 1;
+  }
+  <<Run normalization test for [[lbuf]]>>
+  if(!(++ntests % 50)) {
+    putchar('.');
+    fflush(stdout);
+  }
+}
+putchar('\n');
+@
+
+First, let's parse a line into the input buffers.  Each line has five
+semicolon-separated fields, terminated by a semicolon.  Each field has
+space-separated hexadecimal numbers.
+
+<<Run normalization test for [[lbuf]]>>=
+int i;
+char *s = lbuf;
+for(i = 0; i < 5; i++) {
+  int l = 0;
+  while(1) {
+    ibuf[i][l++] = strtol(s, &s, 16);
+    while(isspace(*s))
+      s++;
+    if(*s == ';')
+      break;
+  }
+  ilen[i] = l;
+  if(*s == ';')
+    s++;
+  else {
+    fprintf(stderr, "bad line %s\n", lbuf);
+    exit(1);
+  }
+}
+@
+
+Then, run the conformance tests.
+
+<<Run normalization test for [[lbuf]]>>=
+/* fields i0 through il normalize to field r using function t */
+#define dotst(t, i0, il, r) do { \
+  for(i = i0; i < il; i++) { \
+    memcpy(obuf, ibuf[i], ilen[i] * sizeof(obuf[0])); \
+    int l = t(obuf, ilen[i]); \
+    if(l != ilen[r] || memcmp(obuf, ibuf[r], l * sizeof(obuf[0]))) { \
+      ret = 1; \
+      fprintf(stderr, "Failed "#t" test %d/%d on %s\nGot: ", r + 1, i + 1, lbuf); \
+      int j; \
+      for(j = 0; j < l; j++) \
+        fprintf(stderr, " %04X", obuf[j]); \
+      fputs("\nExpected: ", stderr); \
+      for(j = 0; j < ilen[r]; j++) \
+        fprintf(stderr, " %04X", ibuf[r][j]); \
+      fputc('\n', stderr); \
+      continue; \
+    } \
+  } \
+} while(0)
+@
+
+<<Run normalization test for [[lbuf]]>>=
+dotst(uni_NFC, 0, 3, 1);
+dotst(uni_NFC, 3, 5, 3);
+@
+
+<<Run normalization test for [[lbuf]]>>=
+dotst(uni_NFD, 0, 3, 2);
+dotst(uni_NFD, 3, 5, 4);
+@
+
+<<Run normalization test for [[lbuf]]>>=
+dotst(uni_NFKC, 0, 5, 3);
+@
+
+<<Run normalization test for [[lbuf]]>>=
+dotst(uni_NFKD, 0, 5, 4);
+@
+
+<<Test normalization does not affect [[i]]>>=
+obuf[0] = i;
+if(uni_NFC(obuf, 1) != 1 || obuf[0] != i ||
+   uni_NFD(obuf, 1) != 1 || obuf[0] != i ||
+   uni_NFKC(obuf, 1) != 1 || obuf[0] != i ||
+   uni_NFKD(obuf, 1) != 1 || obuf[0] != i) {
+  fprintf(stderr, "Failed Part1 end check at %04x\n", i);
+  ret = 1;
+}
 @
 
 \subsection{Parsing the UCD - Others}
@@ -10800,166 +10977,6 @@ blen = NFKC_Casefold(buf, blen);
 prbuf("After case folding (NFKC_CF)");
 @
 
-Since the normalization test above is inadequate, here is the full
-normalization test suite from the UCD.
-
-\lstset{language=make}
-<<C Test Support Executables>>=
-tstnorm \
-@
-
-<<makefile.vars>>=
-UNINORM_TEST = $(UCD_LOC)/NormalizationTest.txt
-@
-
-<<Additional Tests>>=
-./tstnorm <$(UNINORM_TEST)
-@
-
-\lstset{language=C}
-<<tstnorm.c>>=
-<<Common C Header>>
-#include "uni_all.h"
-
-/* longest line == 587 chars */
-char lbuf[1024];
-
-/* longest string == 18 chars */
-int ibuf[5][128], ilen[5];
-int obuf[128];
-
-int main(void)
-{
-  int ret = 0;
-  <<Read and process NormalizationTest.txt>>
-  return ret;
-}
-@
-
-First, we need to track when we're in part 1, and mark every code
-point encountered there as having been processed.  According to the
-test, after exiting part 1, we can run all four standard
-normalizations on any code point not encountered and get no effect.
-
-In general, when entering a new section, print the section name.
-Otherwise, print a dot after every 50 tests.
-
-<<Read and process NormalizationTest.txt>>=
-char *didnorm;
-inisize(didnorm, 0x110000);
-clearbuf(didnorm, 0x110000);
-int inpart1 = 0;
-int ntests = 0;
-while(fgets(lbuf, sizeof(lbuf), stdin)) {
-  if(*lbuf == '#')
-    continue;
-  if(*lbuf == '@') {
-    if(ntests)
-      putchar('\n');
-    if(lbuf[5] == '1')
-      inpart1 = 1;
-    else if(inpart1) {
-      inpart1 = 0;
-      int i;
-      for(i = 0; i < 0x110000; i++)
-        if(!didnorm[i]) {
-	  <<Test normalization does not affect [[i]]>>
-	}
-    }
-    fputs(lbuf, stdout);
-    continue;
-  }
-  if(inpart1) {
-    int cp = strtol(lbuf, NULL, 16);
-    didnorm[cp] = 1;
-  }
-  <<Run normalization test for [[lbuf]]>>
-  if(!(++ntests % 50)) {
-    putchar('.');
-    fflush(stdout);
-  }
-}
-putchar('\n');
-@
-
-First, let's parse a line into the input buffers.  Each line has five
-semicolon-separated fields, terminated by a semicolon.  Each field has
-space-separated hexadecimal numbers.
-
-<<Run normalization test for [[lbuf]]>>=
-int i;
-char *s = lbuf;
-for(i = 0; i < 5; i++) {
-  int l = 0;
-  while(1) {
-    ibuf[i][l++] = strtol(s, &s, 16);
-    while(isspace(*s))
-      s++;
-    if(*s == ';')
-      break;
-  }
-  ilen[i] = l;
-  if(*s == ';')
-    s++;
-  else {
-    fprintf(stderr, "bad line %s\n", lbuf);
-    exit(1);
-  }
-}
-@
-
-Then, run the conformance tests.
-
-<<Run normalization test for [[lbuf]]>>=
-#define dotst(t, i0, il, r) do { \
-  for(i = i0; i < il; i++) { \
-    memcpy(obuf, ibuf[i], ilen[i] * sizeof(obuf[0])); \
-    int l = t(obuf, ilen[i]); \
-    if(l != ilen[r] || memcmp(obuf, ibuf[r], l * sizeof(obuf[0]))) { \
-      ret = 1; \
-      fprintf(stderr, "Failed "#t" test %d/%d on %s\nGot: ", r + 1, i + 1, lbuf); \
-      int j; \
-      for(j = 0; j < l; j++) \
-        fprintf(stderr, " %04X", obuf[j]); \
-      fputs("\nExpected: ", stderr); \
-      for(j = 0; j < ilen[r]; j++) \
-        fprintf(stderr, " %04X", ibuf[r][j]); \
-      fputc('\n', stderr); \
-      continue; \
-    } \
-  } \
-} while(0)
-@
-
-<<Run normalization test for [[lbuf]]>>=
-dotst(NFC, 0, 3, 1);
-dotst(NFC, 3, 5, 3);
-@
-
-<<Run normalization test for [[lbuf]]>>=
-dotst(NFD, 0, 3, 2);
-dotst(NFD, 3, 5, 4);
-@
-
-<<Run normalization test for [[lbuf]]>>=
-dotst(NFKC, 0, 5, 3);
-@
-
-<<Run normalization test for [[lbuf]]>>=
-dotst(NFKD, 0, 5, 4);
-@
-
-<<Test normalization does not affect [[i]]>>=
-obuf[0] = i;
-if(NFC(obuf, 1) != 1 || obuf[0] != i ||
-   NFD(obuf, 1) != 1 || obuf[0] != i ||
-   NFKC(obuf, 1) != 1 || obuf[0] != i ||
-   NFKD(obuf, 1) != 1 || obuf[0] != i) {
-  fprintf(stderr, "Failed Part1 end check at %04x\n", i);
-  ret = 1;
-}
-@
-
 As a more thorough character name test, we can run every single known
 character through the [[tst]] program.  This does not guarantee that
 the lists themselves are OK, or that bad names will not trigger false
@@ -11699,8 +11716,10 @@ not canonical.
 % uni_find_dm prototype
 
 These macros use the internal-use only [[uni_x_dec]] function to do
-their work.  For Hangul syllable strings, the returned offset is
-always [[~0]], but the length is correct.
+their work.  For Hangul syllable strings, the [[h]] flag determines
+behavior.  If positive, it acts as the [[full]] flag below, and the
+returned offset is always $-1$, but the length is correct.  If
+negative, the returned offset is always 1, and the length is zero.
 
 % uni_x_dec prototype
 
@@ -11765,7 +11784,7 @@ To look up values in the sub-table, a separate search function is
 provided.  Again, a hand-coded binary search is used instead of
 [[bsearch]] for speed.
 
-% uni_lookup_decent prototype
+% uni_lookup_compent prototype
 
 To look up Hangul syllable compositions, another separate function is
 provided.  It returns zero if there is no valid composition; otherwise
