@@ -48,6 +48,7 @@ build a regular expression library and a compiler using these routines.
 
 \end{abstract}
 
+% Begin-doc Introduction
 \tableofcontents
 \listoftables
 
@@ -78,6 +79,7 @@ Repository (CLDR).%
 \footnote{\url{http://cldr.unicode.org},
 \url{http://unicode.org/Public/cldr/}}
 This library provides the CLDR data to C programs as well.
+% End-doc Introduction
 
 <<uni_all.h>>=
 <<Common C Warning>>
@@ -89,6 +91,7 @@ This library provides the CLDR data to C programs as well.
 #endif /* UNI_ALL_H */
 @
 
+% Begin-doc Introduction
 This document does not contain the UCD or CLDR itself; it is expected
 that the user download them manually and place them where they can be
 found.  Some Linux distributions may already provide at least the UCD
@@ -102,6 +105,7 @@ ASCII control characters optionally added to the name database.  This
 package was tested against CLDR version 22.1; I recommend always
 getting the latest version available.  In particular, care must be
 taken that the CLDR and UCD versions are compatible.
+% End-doc Introduction
 
 \lstset{language=make}
 <<makefile.config>>=
@@ -116,6 +120,7 @@ UNIHAN_LOC = $(UCD_LOC)
 CLDR_LOC = /usr/share/unicode-data/cldr
 @
 
+% Begin-doc Introduction
 Speaking of names, the Unicode character names are rather verbose.%
 \footnote{It is recommended in some places that common names be
 permitted in a less verbose manner, but that is locale-dependent and
@@ -130,12 +135,14 @@ This was tested with version 01 April 2010.%
 The only data file needed from that standard is unicode.xml,%
 \footnote{\url{http://www.w3.org/2003/entities/2007xml/unicode.xml}}
 which is linked from the standard.
+% End-doc Introduction
 
 <<makefile.config>>=
 # The XML entity database http://www.w3.org/2003/entities/2007xml/unicode.xml
 XMLUNI = /usr/share/unicode-data/unicode.xml
 @
 
+% Begin-doc Introduction
 Other libraries exist which provide similar functionality; I have
 looked at GLib\footnote{\url{http://www.gtk.org/}} and
 ICU\footnote{\url{http://www.icu-project.org/}} in particular.  The
@@ -165,6 +172,7 @@ implementation as well.  In addition, this library can be trimmed to
 the minimal necessary code with static linking, and does not include
 heavy wrapper code and additional utilities that the other libraries
 include.
+% End-doc Introduction
 
 \chapter{Properties}
 
@@ -179,27 +187,41 @@ shared by all properties, though; this is placed in a common file.
 
 \lstset{language=C}
 <<Library [[uni]] headers>>=
-#include "uni_common.h"
+#include "uni_prop.h"
 @
 
-<<uni_common.h>>=
-#ifndef UNI_COMMON_H
-#define UNI_COMMON_H
+<<uni_prop.h>>=
+<<Common C Warning>>
+#ifndef UNI_PROP_H
+#define UNI_PROP_H
 
-<<Common uni definitions>>
-
-#endif /* UNI_COMMON_H */
+<<Unicode property exports>>
+#endif /* UNI_PROP_H */
 @
 
 <<Library [[uni]] Members>>=
-uni_common.o
+uni_prop.o
 @
 
-<<uni_common.c>>=
+<<uni_prop.c>>=
 <<Common C Header>>
-#include "uni_common.h"
+#include "uni_prop.h"
+// static_proto
 
-<<Common uni functions>>
+<<Unicode property functions>>
+@
+
+Some Unicode property exports are generated, and some are hand-coded.
+Some of the hand-coded exports may be useful for generation, so they
+are in a separate code chunk, which can be included in the generator
+without depending on the generated output. 
+
+<<Unicode property exports>>=
+<<Unicode property exports for generator>>
+@
+
+<<Unicode property functions>>=
+<<Unicode property functions for generator>>
 @
 
 These properties come in a variety of formats, but for the purpose of
@@ -321,7 +343,7 @@ typedef enum {
 } uni_set_op_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<Simple bit set definitions>>
 /* set operation names */
 <<[[uni_setop_t]]>>
@@ -358,26 +380,39 @@ redefining the table type.  This prevents the need for a large,
 multi-chunk preprocessor macro which does not support [[#line]]
 directives.
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 #include <stdint.h>
+@
 
-#define setop_bitn_(n) \
-  void setop_bit##n(uint##n##_t *a, uint32_t a_low, uint32_t a_len, \
-                    uni_set_op_t op, \
-                    uint##n##_t *b, uint32_t b_low, uint32_t b_len, \
-		    uint##n##_t **res, uint32_t *res_low, uint32_t *res_len, \
-		    uint32_t *res_max)
-setop_bitn_(64); /* uint64_t is not standard, but common */
-setop_bitn_(32);
-setop_bitn_(16);
-setop_bitn_(8);
+<<Unicode property exports>>=
+/* uint64_t is not standard, but common */
+void setop_bit64(uint64_t *a, uint32_t a_low, uint32_t a_len,
+                 uni_set_op_t op,
+		 uint64_t *b, uint32_t b_low, uint32_t b_len,
+		 uint64_t **res, uint32_t *res_low, uint32_t *res_len,
+		 uint32_t *res_max);
+void setop_bit32(uint32_t *a, uint32_t a_low, uint32_t a_len,
+                 uni_set_op_t op,
+		 uint32_t *b, uint32_t b_low, uint32_t b_len,
+		 uint32_t **res, uint32_t *res_low, uint32_t *res_len,
+		 uint32_t *res_max);
+void setop_bit16(uint16_t *a, uint32_t a_low, uint32_t a_len,
+                 uni_set_op_t op,
+		 uint16_t *b, uint32_t b_low, uint32_t b_len,
+		 uint16_t **res, uint32_t *res_low, uint32_t *res_len,
+		 uint32_t *res_max);
+void setop_bit8(uint8_t *a, uint32_t a_low, uint32_t a_len,
+                uni_set_op_t op,
+		uint8_t *b, uint32_t b_low, uint32_t b_len,
+		uint8_t **res, uint32_t *res_low, uint32_t *res_len,
+		uint32_t *res_max);
 @
 
 <<makefile.rules>>=
-uni_common.c: setop_bitn.h
+uni_prop.c: setop_bitn.h
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 #define setop_src_t uint64_t
 #define setop_n 64
 #define setop_f setop_bit64
@@ -744,11 +779,11 @@ A plain bit array also makes it difficult to perform the
 \emph{members} operation: every single potential member needs to be
 tested.  Other storage strategies are needed.
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* List members enumeration not directly supported */
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 #if 0
   <<List bit array members>>
 #endif
@@ -777,8 +812,11 @@ odd-numbered ones:  inversion may be more expensive than with bit
 arrays.  This does not save much space for properties which apply to
 a large number of characters; in fact, it might even take more space.
 
-<<Common uni definitions>>=
-extern int uni_cmp_cp(const void *a, const void *b); /* for qsort/bsearch */
+<<Unicode property exports for generator>>=
+int uni_cmp_cp(const void *a, const void *b); /* for qsort/bsearch */
+@
+
+<<Unicode property exports>>=
 #define uni_is_cp(c, tab, tab_len) \
   bsearch(&c, tab, tab_len, sizeof(tab[0]), uni_cmp_cp)
 
@@ -790,14 +828,14 @@ extern int uni_cmp_cp(const void *a, const void *b); /* for qsort/bsearch */
 int uni_is_cp(elt_t c, elt_t *tab, size_t tab_len);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 int uni_cmp_cp(const void *a, const void *b)
 {
   return *(int32_t *)a - *(int32_t *)b;
 }
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 #if 0
   <<Perform set ops on cp array>>
 #endif
@@ -850,7 +888,7 @@ typedef struct {
 } uni_chrrng_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_chrrng_t]]>>
 int uni_cmprng(const void *a, const void *b); /* for qsort/bsearch */
 int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
@@ -860,7 +898,7 @@ int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
 uni_chrrng_t,%
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 int uni_cmprng(const void *a, const void *b)
 {
     const uni_chrrng_t *_a = a, *_b = b;
@@ -894,7 +932,7 @@ int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 /* members are already in list, albeit in compact form */
 void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
                       const uni_chrrng_t *b, uint32_t b_len,
@@ -908,7 +946,7 @@ below the current ranges plus one above the top-most range), and at
 most one range is removed (replaced by ranges below if top-most is at
 top, except if one is already at the bottom).
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 static void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
 		              uni_chrrng_t **rtab, uint32_t *r_len)
 {
@@ -950,7 +988,7 @@ changes state.  Then, the entire range where the the states where the
 same get the result from a single operation call whose result is
 almost staticaly calculated using constant inputs.
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
                       const uni_chrrng_t *b, uint32_t b_len,
 		      uni_chrrng_t **rtab, uint32_t *r_len)
@@ -1130,7 +1168,7 @@ case it may be necessary to keep more than one byte together
 contiguously at the lowest level; this may be specified using
 [[minwidth]].
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 #define UNI_MAX_MULTILEV 3
 void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
                    uint32_t high, uint8_t def, uint32_t minwidth,
@@ -1141,7 +1179,7 @@ int multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
                      const uint8_t **ret, uint8_t def);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
                    uint32_t high, uint8_t def, uint32_t minwidth,
 		   <<Multi-level table type>> **ml, uint32_t *ml_len)
@@ -1150,7 +1188,7 @@ void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
 }
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 int multi_tab_lookup(const <<Multi-level table type>>*dat, uint32_t val,
                      const uint8_t **ret, uint8_t def)
 {
@@ -1745,12 +1783,12 @@ doing it this way is simpler and probably not a big performance hit.
 A bigger speed gain could probably be had by optimizing the bit tester
 loop.
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 void multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
                         uint32_t *rlen);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 void multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
                         uint32_t *rlen)
 {
@@ -1901,12 +1939,12 @@ function already developed above to do the conversion.
 This is fairly inelegant and inefficient, but it is not meant to be
 called at run-time very often.  Tables are meant to be pre-generated.
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
                            uint32_t *ml_len);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
                            uint32_t *ml_len)
 {
@@ -2009,7 +2047,7 @@ tsttab \
 @
 
 <<makefile.rules>>=
-tsttab.o: uni_prop.gen.h
+tsttab.o: uni_prop.h
 @
 
 <<tsttab.c>>=
@@ -2159,31 +2197,15 @@ other C code without depending on that C code itself (as with
 either, since it needs to limit its include files.  One thing it does
 need, though, is the ability to read lines of arbitrary length.  This
 is provided in my support library, which is referenced rather than
-built here, again to avoid building [[cproto.h]].
+built here, again to avoid building [[cproto.h]].  Since
+[[uni_prop.h]] and [[uni_prop.c]] depend on the output of this
+program, but this program also needs to use some of the functions
+defined therein, the functions and definitions are reinserted directly
+into [[parse-ucd.c]] without any dependencies on the generated data.
 
 \lstset{language=make}
 <<C Build Executables>>=
 parse-ucd \
-@
-
-<<makefile.vars>>=
-PARSE_UCD_DEPS := uni_common.c uni_common.h \
-                  mfgets.c mfgets.h \
-		  mallocdef.h btricks.h \
-		  uni_strs.h
-PARSE_UCD_PROTO := cproto.h \
-                   $(patsubst %, %.static_proto, $(filter %.c, $(PARSE_UCD_DEPS)))
-PARSER_CFLAGS :=
-PARSER_LDFLAGS :=
-@
-
-<<makefile.rules>>=
-parse-ucd: parse-ucd.c $(PARSE_UCD_DEPS) mfgets.h $(SUPT_LIB)
-	mkdir cp.$$$$; (cd cp.$$$$; touch $(PARSE_UCD_PROTO)); \
-	  trap "rm -rf cp.$$$$" 0; \
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(PARSER_CFLAGS) -Icp.$$$$ \
-	   -o $@ $(filter %.c, $^) $(LDFLAGS) $(PARSER_LDFLAGS)
-	  $(SUPT_LIB)
 @
 
 \lstset{language=C}
@@ -2194,10 +2216,11 @@ parse-ucd: parse-ucd.c $(PARSE_UCD_DEPS) mfgets.h $(SUPT_LIB)
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
-#include "mallocdef.h"
-#include "btricks.h"
-#include "mfgets.h"
-#include "uni_common.h"
+#include <stdint.h>
+<<Additional parse-ucd includes>>
+<<Unicode property exports for generator>>
+
+<<Unicode property functions for generator>>
 
 <<UCD parser local definitions>>
 
@@ -2215,18 +2238,50 @@ int main(void)
 }
 @
 
+\lstset{language=C}
+<<makefile.vars>>=
+PARSE_UCD_DEPS := parse-ucd.c $(SUPT_LIB_LOC)/libsupt.a <<Additional parse-ucd C files>>
+
+PARSER_CFLAGS :=
+PARSER_LDFLAGS :=
+@
+
+<<makefile.config>>=
+# The location of my support library (tjm-ext.nw)
+SUPT_LIB_LOC := ../build
+@
+
+<<makefile.rules>>=
+parse-ucd: $(PARSE_UCD_DEPS)
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(PARSER_CFLAGS) \
+	   -o $@ parse-ucd.c -L$(SUPT_LIB_LOC) -lsupt $(LDFLAGS) $(PARSER_LDFLAGS)
+@
+
+<<Additional parse-ucd C files>>=
+mfgets.h \
+@
+
+\lstset{language=C}
+<<Additional parse-ucd includes>>=
+#include "mfgets.h"
+@
+
 All files will be parsed by the same program.  The only necessary
 parameters are the locations of the UCD files, which can just be
 compiled in based on the configuration parameters.
 
+\lstset{language=make}
 <<makefile.vars>>=
 PARSER_CFLAGS += -DUCD_LOC=\"$(UCD_LOC)\" -DUNIHAN_LOC=\"$(UNIHAN_LOC)\"
 @
 
 Rather than construct file names using the provided paths, the program
 just changes to the location directory before reading files, and all
-files are read relative to the current directory.
+files are read relative to the current directory.  In order to be able
+to change back to the starting directory, once again my utility
+library has a portable [[getcwd]] that does not use fixed buffer sizes.
 
+\lstset{language=C}
 <<UCD parser variables>>=
 FILE *f;
 char *lbuf = NULL;
@@ -2285,6 +2340,14 @@ static int num_fields, max_fields = 0;
 static char *line_comment;
 @
 
+<<Additional parse-ucd C files>>=
+mallocdef.h \
+@
+
+<<Additional parse-ucd includes>>=
+#include "mallocdef.h"
+@
+
 <<UCD parser local functions>>=
 static void split_line(char *buf)
 {
@@ -2332,7 +2395,7 @@ typedef struct {
 } uni_alias_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_alias_t]]>>
 @
 
@@ -2750,6 +2813,25 @@ things, and makes builds much slower.  In the future, this may be
 changed to use a recursive make, so that only generating the library
 is dependent on the generated code.
 
+\lstset{language=make}
+<<makefile.rules>>=
+uni_prop.gen.h: parse-ucd
+	./parse-ucd
+@
+
+\lstset{language=C}
+<<Library [[uni]] headers>>=
+#include "uni_prop.h"
+@
+
+<<Unicode property exports>>=
+#include "uni_prop.gen.h"
+@
+
+<<makefile.rules>>=
+uni_prop.h: uni_prop.gen.h
+@
+
 <<UCD parser local definitions>>=
 #define open_wf(f, fn) \
   FILE *f; \
@@ -2816,7 +2898,7 @@ for(i = 0; i < nparsed; i++) {
     char nbuf[64];
     sprintf(nbuf, "uni_%s_rng.gen.c", name);
     open_wf(of, nbuf);
-    fprintf(of, "#include \"uni_common.h\"\n\n"
+    fprintf(of, "#include \"uni_prop.h\"\n\n"
                 "const uni_chrrng_t uni_%s_rng[] = {\n", name);
     for(j = 0; j < parsed_props[i].rng_len; j++)
       fprintf(of, "\t{ %d, %d }%s\n", parsed_props[i].rng[j].low,
@@ -2840,11 +2922,11 @@ for(i = 0; i < nparsed; i++) {
 fclose(tstf);
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 int is_uni_x(uint32_t cp, const uint32_t *tab);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 int is_uni_x(uint32_t cp, const uint32_t *tab)
 {
   const uint8_t *mr;
@@ -2921,6 +3003,44 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
 }
 @
 
+\subsection{Additional Properties}
+
+A few specific character classes that are useful for the compiler do
+not warrant a full set of tables.  Instead, they are implemented as
+macros that compare directly to the limited set they contain.  These
+are:  characters which act as line terminators, and characters which
+may initiate backslash-escapes.
+
+\lstset{language=C}
+<<Unicode property exports>>=
+#define uni_is_nl(x) ((x) == '\n' || (x) == '\r' || (x) == '\v' || (x) == '\f' || \
+                  (x) == 0x0085 || (x) == 0x2028 || (x) == 0x2029)
+/* just use == '\\' for nfkc_cf */
+#define uni_is_bs(x) (c == '\\' || c == 0xFE68 || c == 0xFF3C)
+@
+
+<<C Prototypes>>=
+int uni_is_nl(uint32_t cp);
+int uni_is_bs(uint32_t cp);
+@
+
+<<FIXME>>=
+regex pseudo-booleans:
+  punct == gc==P & gc!=S & !alpha
+  uni_punct == gc==P
+  digit == 0-9
+  uni_digit == gc==Nd
+  xdigit == 0-9a-fA-F
+  uni_xdigit == gc=Nd + Hex_Digit
+  alnum == alpha + digit
+  uni_alnum == alpha + uni_digit
+  blank == gc=Zs + TAB
+  graph == anything but White_Space, gc=Cc, gc=Cs, gc=Cn
+  print == graph + blank - gc=Cc
+  word == alnum + _ (by default)
+  uni_word == uni_alnum + gc=M + gc=Pc plus Join_Control
+@
+
 \section{Enumerated Properties}
 
 Enumerated properties have a limited number of values, which have
@@ -2971,7 +3091,7 @@ typedef struct {
 } uni_chrrng_dat_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 #if 1
 <<[[uni_chrrng_dat_t]]>>
 #else /* 32-bit dat during testing */
@@ -2988,7 +3108,7 @@ uint32_t find_cp_chrrng(uint32_t cp, const uni_chrrng_dat_t *tab,
 uni_chrrng_dat_t,%
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 int uni_cmprng_dat(const void *a, const void *b)
 {
     const uni_chrrng_dat_t *_a = a, *_b = b;
@@ -3129,7 +3249,7 @@ typedef struct {
 } uni_valueof_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_valueof_t]]>>
 @
 
@@ -3142,11 +3262,11 @@ uni_valueof_t **enum_vals;
 uint32_t *enum_vals_len;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 int cmp_valueof(const void *a, const void *b);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 int cmp_valueof(const void *a, const void *b)
 {
   return strcmp(((uni_valueof_t *)a)->name, ((uni_valueof_t *)b)->name);
@@ -3256,12 +3376,11 @@ for(i = 0; i < nparsed; i++) {
 @
 
 <<Generate C code for enumeration constants>>=
-/* generating nameof array */
 fprintf(gen_h, "extern const uni_alias_t uni_%s_nameof[];\n", pn);
 char nbuf[64];
 sprintf(nbuf, "uni_%s_nameof.gen.c", pn);
 open_wf(nf, nbuf);
-fprintf(nf, "#include \"uni_common.h\"\n"
+fprintf(nf, "#include \"uni_prop.h\"\n"
             "#include <stdio.h>\n\n" /* for NULL */
 	    "const uni_alias_t uni_%s_nameof[] = {\n", pn);
 /* generating enum on gen_h */
@@ -3295,16 +3414,17 @@ for(j = 0; j < num_val_aliases[i]; j++) {
     continue;
   }
   /* use numeric values directly instead of making into enum */
-  if(!isdigit(va->short_name[0])) {
-    if(strchr(va->short_name, '-')) {
-      const char *np;
-      /* slow, but necessary with e.g. ID_Restrict_Type */
-      fprintf(gen_h, "\tU_%s_", pn);
-      for(np = va->short_name; *np; np++)
-        putc(*np == '-' ? '_' : *np, gen_h);
-      putc(',', gen_h);
-    } else
-      fprintf(gen_h, "\tU_%s_%s,", pn, va->short_name);
+  if(!isdigit(va->short_name[0]) || !strcmp(va->long_name, va->short_name)) {
+    const char *np;
+    /* slow, but necessary with e.g. ID_Restrict_Type */
+    fprintf(gen_h, "\tU_%s_", pn);
+    for(np = va->short_name; *np; np++) {
+      putc(isalnum(*np) ? *np : '_', gen_h);
+      /* + and - may both appear, so make + different */
+      if(*np == '+')
+        putc('_', gen_h);
+    }
+    putc(',', gen_h);
   }
   if(strcmp(va->long_name, va->short_name)) {
     fprintf(gen_h, "%cU_%s_%s = ", isdigit(va->short_name[0]) ? '\t' : ' ',
@@ -3326,21 +3446,21 @@ for(j = 0; j < num_val_aliases[i]; j++) {
 }
 fputs("};\n", nf);
 fprintf(gen_h, "\tU_NUM_%s\n} uni_%s_t;\n", pn, pn);
-/* now, print valueof table */
 fprintf(gen_h, "extern const uni_valueof_t uni_%s_valueof[];\n", pn);
-fprintf(nf, "#include \"uni_prop.gen.h\"\n\n"
-	    "const uni_valueof_t uni_%s_valueof[] = {\n", pn);
+fprintf(nf, "const uni_valueof_t uni_%s_valueof[] = {\n", pn);
 for(j = 0; j < enum_vals_len[i]; j++) {
   const char *name = val_aliases[i][enum_vals[i][j].val].short_name;
   if(isdigit(*name))
     name = val_aliases[i][enum_vals[i][j].val].long_name;
   fprintf(nf, "\t{ \"%s\", U_%s_", enum_vals[i][j].name, pn);
-  if(strchr(name, '-')) {
-    /* slow, but necessary with e.g. ID_Restrict_Type */
-    for(; *name; name++)
-      putc(*name == '-' ? '_' : *name, nf);
-  } else
-    fputs(name, nf);
+  /* slow, but necessary with e.g. ID_Restrict_Type */
+  /* also, the CLDR ones have /, +, space, etc. */
+  for(; *name; name++) {
+    putc(isalnum(*name) ? *name : '_', nf);
+    /* + and - may both appear, so make + different */
+    if(*name == '+')
+      putc('_', nf);
+  }
   fprintf(nf, " }%s\n", j < enum_vals_len[i] - 1 ? "," : "");
 }
 fputs("};\n", nf);
@@ -3353,6 +3473,99 @@ generate file names needs to skip the valueof array.
 
 <<Filter generated file names>>=
 fgrep -v _valueof | \
+@
+
+Another useful array to print is for approximate name matching.  In
+this case, approximate is defined by UAX\#44: case-insensitive,
+optionally without any prefix of is, and without any spaces,
+underscores, and dashes.  A function to perform most of this
+transformation in-place is provided as well.  If additional
+transformations are required, such as compatibility decomposition, they
+must be done before calling this function.  All enumerations are
+ASCII-only, so no decomposition is needed, and they are simply stored
+lower-case with dashes, spaces, and underscores removed.  Initial
+``is'' is left in; that should only be removed from user input.  To
+compare using this function, strip, find a match, and if none is found,
+search again with initial ``is'' removed if present.  A sample search
+function is provided.
+
+<<Unicode property exports for generator>>=
+void uni_enum_name_strip(char *n);
+@
+
+<<Unicode property functions for generator>>=
+void uni_enum_name_strip(char *n)
+{
+  char *s, *d;
+  for(s = d = n; *s; s++)
+    if(*s != '-' && *s != '_' && *s != ' ')
+      *d++ = tolower(*s);
+  *d = 0;
+}
+@
+
+<<Unicode property exports>>=
+/* note: this is not the fastest way to do this */
+uint8_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
+                             uint8_t def);
+@
+
+<<Unicode property functions>>=
+uint8_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
+                             uint8_t def)
+{
+  /* yuck - strdup on every call */
+  char *s = strdup(n);
+  uni_valueof_t v, *f;
+  uni_enum_name_strip(s);
+  v.name = s;
+  /* more yuck - bsearch is 1/2 as fast as hand-coded binary search */
+  f = bsearch(&v, tab, len, sizeof(*tab), cmp_valueof);
+  if(!f && !strncmp(s, "is", 2) && s[2]) {
+    v.name = s + 2;
+    /* more yuck - bsearch is 1/2 as fast as hand-coded binary search */
+    f = bsearch(&v, tab, len, sizeof(*tab), cmp_valueof);
+  }
+  free(s);
+  return f ? f->val : def;
+}
+@
+
+<<Generate C code for enumeration constants>>=
+sprintf(nbuf, "uni_%s_valueof_approx.gen.c", pn);
+open_wf(anf, nbuf);
+fprintf(gen_h, "extern const uni_valueof_t uni_%s_valueof_approx[];\n", pn);
+fprintf(anf, "const uni_valueof_t uni_%s_valueof_approx[] = {\n", pn);
+uni_valueof_t *approx_array;
+inisize(approx_array, enum_vals_len[i]);
+for(j = 0; j < enum_vals_len[i]; j++) {
+  approx_array[j].name = strdup(enum_vals[i][j].name);
+  approx_array[j].val = enum_vals[i][j].val;
+  uni_enum_name_strip((char *)approx_array[j].name);
+}
+qsort(approx_array, enum_vals_len[i], sizeof(*approx_array), cmp_valueof);
+for(j = 0; j < enum_vals_len[i]; j++) {
+  const char *name = val_aliases[i][approx_array[j].val].short_name;
+  if(isdigit(*name))
+    name = val_aliases[i][approx_array[j].val].long_name;
+  fprintf(anf, "\t{ \"%s\", U_%s_", approx_array[j].name, pn);
+  /* slow, but necessary with e.g. ID_Restrict_Type */
+  /* also, the CLDR ones have /, +, space, etc. */
+  for(; *name; name++) {
+    putc(isalnum(*name) ? *name : '_', anf);
+    /* + and - may both appear, so make + different */
+    if(*name == '+')
+      putc('_', anf);
+  }
+  fprintf(anf, " }%s\n", j < enum_vals_len[i] - 1 ? "," : "");
+  free(approx_array[j].name);
+}
+fputs("};\n", anf);
+fclose(anf);
+free(approx_array);
+fprintf(gen_h, "#define uni_%s_lookup(n) "
+                   "uni_x_valueof_approx(n, %s_valueof_approx, %d, ~0)\n",
+	       pn, pn, enum_vals_len[i]);
 @
 
 There is still one nagging issue:  the gc aliases include some that
@@ -3369,8 +3582,7 @@ have vertical bars in their last field.
 if(!strcmp(pn, "gc")) {
   fputs("extern const uint64_t uni_gc_trans[];\n", gen_h);
   open_wf(tf, "uni_gc_trans.gen.c");
-  fputs("#include \"uni_common.h\"\n"
-        "#include \"uni_prop.gen.h\"\n\n"
+  fputs("#include \"uni_prop.h\"\n\n"
 	"const uint64_t uni_gc_trans[] = {\n", tf);
   for(j = 0; j < num_val_aliases[i]; j++) {
     const char *desc;
@@ -3746,12 +3958,12 @@ one and the default value is aliased to zero as well.  The default
 value itself is never stored in the table; it is supplied in the
 lookup function as well.
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
                            uint32_t *ml_len, uint8_t def);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 uint32_t *rng_dat_to_multi(const uni_chrrng_dat_t *tab, uint32_t tab_len,
                            uint32_t *ml_len, uint8_t def)
 {
@@ -3833,8 +4045,7 @@ for(i = 0; i < nparsed; i++) {
     char nbuf[64];
     sprintf(nbuf, "uni_%s_rng.gen.c", name);
     open_wf(of, nbuf);
-    fprintf(of, "#include \"uni_common.h\"\n"
-                "#include \"uni_prop.gen.h\"\n\n"
+    fprintf(of, "#include \"uni_prop.h\"\n\n"
 		"const uni_chrrng_dat_t uni_%s_rng[] = {\n", name);
     for(j = 0; j < parsed_props[i].rng_len; j++) {
       uint32_t val = parsed_props[i].rng_dat[j].dat;
@@ -3876,11 +4087,11 @@ for(i = 0; i < nparsed; i++) {
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 {
   const uint8_t *mr;
@@ -3896,6 +4107,12 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 
 <<range table data for [[i]]>>=
 uni_x_of(i, mtab, def)
+@
+
+<<FIXME>>=
+add pseudo-enum "prop" == property names & aliases
+  perhaps when mtab present, also have val be the mtab?
+  limit to supported properties?
 @
 
 \section{Numeric Properties}
@@ -3924,7 +4141,7 @@ typedef struct {
 } uni_chrrng_num_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_chrrng_num_t]]>>
 void uni_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
                     uint32_t tab_len, int32_t *num, uint8_t *denom);
@@ -3934,7 +4151,7 @@ void uni_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
 uni_chrrng_num_t,%
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 void uni_chrrng_val(uint32_t cp, const uni_chrrng_num_t *tab,
                     uint32_t tab_len, int32_t *num, uint8_t *denom)
 {
@@ -4152,7 +4369,7 @@ if(!low || *s) { /* should never happen, but if it does: ignore */
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* extract l.r value; l!.r is encoded as l.-r */
 #define uni_kRSUnicode_val1(n, d, l, r) do { \
   l = (uint8_t)(n); \
@@ -4161,7 +4378,7 @@ if(!low || *s) { /* should never happen, but if it does: ignore */
 #define uni_kRSUnicode_val2(n, d, l, r) do { \
   l = (uint8_t)(n >> 8); \
   r = (int32_t)n >> 16; \
-} while(0)\n", gen_h);
+} while(0)
 @
 
 <<C Prototypes>>=
@@ -4181,12 +4398,12 @@ Once finished, the tables can be dumped.  Just as with other
 properties, only range tables have been built, so it's time to
 generate the multi-level table, assuming that the range data is correct.
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 uint32_t *rng_num_to_multi(const uni_chrrng_num_t *tab, uint32_t tab_len,
                            uint32_t *ml_len);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 uint32_t *rng_num_to_multi(const uni_chrrng_num_t *tab, uint32_t tab_len,
                            uint32_t *ml_len)
 {
@@ -4266,7 +4483,7 @@ for(i = 0; i < nparsed; i++) {
     char nbuf[64];
     sprintf(nbuf, "uni_%s_rng.gen.c", name);
     open_wf(of, nbuf);
-    fprintf(of, "#include \"uni_common.h\"\n\n"
+    fprintf(of, "#include \"uni_prop.h\"\n\n"
                 "const uni_chrrng_num_t uni_%s_rng[] = {\n", name);
     for(j = 0; j < parsed_props[i].rng_len; j++)
       fprintf(of, "\t{ %d, %d, %d, %d }%s\n",
@@ -4289,11 +4506,11 @@ for(i = 0; i < nparsed; i++) {
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 {
   const uint8_t *mr;
@@ -4312,6 +4529,12 @@ void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 
 <<range table val for [[i]]>>=
 uni_x_val(i, mtab, &mn, &md);
+@
+
+<<FIXME>>=
+numeric (UAX44-LM1):
+  compare as floating-point number w/ limited precision
+  e.g. 01.00 == 1
 @
 
 \section{String Properties}
@@ -4464,12 +4687,12 @@ if(low == 0xAC00) {
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* requires 3-char buf; returns actual len */
 int hangul_syllable_decomp(char cp, uint32_t *res, int full);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 int hangul_syllable_decomp(char cp, uint32_t *res, int full)
 {
   int L, V, T;
@@ -4716,7 +4939,7 @@ typedef struct {
 } uni_str_rng_val_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_str_rng_t]]>>
 <<[[uni_str_rng_val_t]]>>
 @
@@ -4731,8 +4954,8 @@ uni_str_rng_t *dec;
 inisize(dec, dmf_prop->rng_len);
 /* the easy table: canon full mapping is all w/ flags == 0 */
 open_wf(cf, "uni_canon_decomp_rng.gen.c");
-fputs("#include \"uni_common.h\"\n\n"
-      "uni_str_rng_t uni_canon_decomp_rng[] = {\n\t", cf);
+fputs("#include \"uni_prop.h\"\n\n"
+      "const uni_str_rng_t uni_canon_decomp_rng[] = {\n\t", cf);
 uint32_t curent;
 for(i = 0; dmf_prop->rng_str[i].flags; i++);
 for(curent = 0; i < dmf_prop->rng_len; i++, curent++) {
@@ -4764,7 +4987,7 @@ typedef struct {
 } uni_cp_val_t;
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<[[uni_cp_val_t]]>>
 uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
                            uint32_t *ml_len);
@@ -4774,7 +4997,7 @@ uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
 uni_cp_val_t,%
 @
 
-<<Common uni functions>>=
+<<Unicode property functions for generator>>=
 uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
                            uint32_t *ml_len)
 {
@@ -4811,8 +5034,8 @@ free(tmt);
 /* the next harder table: flags == 1 -> full compat decomp */
 /* needs to duplicate full canon decomp when empty */
 open_wf(kf, "uni_compat_decomp_rng.gen.c");
-fputs("#include \"uni_common.h\"\n\n"
-      "uni_str_rng_t uni_compat_decomp_rng[] = {\n\t", kf);
+fputs("#include \"uni_prop.h\"\n\n"
+      "const uni_str_rng_t uni_compat_decomp_rng[] = {\n\t", kf);
 for(i = curent = 0; i < dmf_prop->rng_len; i++, curent++) {
   raw_cp_str_t *cur = &dmf_prop->rng_str[i];
   /* could be canon followed by compat, or compat followed by dm */
@@ -4849,8 +5072,8 @@ free(tmt);
 /* needs to duplicate full compat decomp when empty & full canon empty*/
 /* needs to duplicate full canon decomp when empty */
 open_wf(dm, "uni_dm_rng.gen.c");
-fputs("#include \"uni_common.h\"\n\n"
-      "uni_str_rng_t uni_dm_rng[] = {\n\t", dm);
+fputs("#include \"uni_prop.h\"\n\n"
+      "const uni_str_rng_t uni_dm_rng[] = {\n\t", dm);
 for(i = curent = 0; i < dmf_prop->rng_len; i++) {
   raw_cp_str_t *cur = &dmf_prop->rng_str[i];
 
@@ -4891,14 +5114,7 @@ that the exact name of the string table and the special value for
 Hangul Syllables is encoded in these functions, rather than everywhere
 lookups are used.
 
-<<Common uni definitions>>=
-/* this prototype needs to appear before macros using it so build.nw */
-/* doesn't get confused */
-void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
-               uint8_t *compat, int full, const uint32_t *strs);
-@
-
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* 2-step lookup: uni_find_xxx followed by uni_get_decomp */
 /* off is uint16_t; len and compat are uint8_t; compat is optional */
 #define uni_find_canon_decomp(cp, off, len) \
@@ -4923,7 +5139,12 @@ void uni_find_dm(uint32_t cp, int16_t *off, uint8_t *len, uint8_t *compat);
 void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 @
 
-<<Common uni functions>>=
+<<Unicode property exports>>=
+void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
+               uint8_t *compat, int full, const uint32_t *strs);
+@
+
+<<Unicode property functions>>=
 void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
                uint8_t *compat, int full, const uint32_t *strs)
 {
@@ -5034,12 +5255,12 @@ for(i = 0; i < cm_prop->rng_len; i++)
 	  uni_cmp_cp);
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* returns 0 if invalid */
 uint32_t hangul_syllable_comp(uint32_t a, uint32_t b);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 uint32_t hangul_syllable_comp(uint32_t a, uint32_t b)
 {
   if(a >= 0x1100 && a <= 0x1112) /* L */
@@ -5077,8 +5298,8 @@ composition entry corresponds to at least one decomposition entry.
 <<Dump character information as C code>>=
 qsort(cm_prop->rng_str, cm_prop->rng_len, sizeof(*cm_prop->rng_str), uni_cmp_cp);
 open_wf(cm, "uni_canon_comp_rng.gen.c");
-fputs("#include \"uni_common.h\"\n\n"
-      "uni_str_rng_t uni_canon_comp_rng[] = {\n\t", cm);
+fputs("#include \"uni_prop.h\"\n\n"
+      "const uni_str_rng_t uni_canon_comp_rng[] = {\n\t", cm);
 for(i = 0; i < cm_prop->rng_len; i++) {
   raw_cp_str_t *cur = &cm_prop->rng_str[i];
   dec[i].cp = cur->cp;
@@ -5101,13 +5322,7 @@ The same lookup function as was used for decomposition lookups mostly
 works for the A-indexed level as well.  For the B-indexed level, a
 binary search is performed.  This is hand-coded for speed.
 
-<<Common uni definitions>>=
-/* this prototype needs to appear before macros using it so build.nw */
-/* doesn't get confused */
-uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len);
-@
-
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* to compose A+B->C: */
 /* look up B->C table for A (cp) */
 #define uni_find_canon_comp(cp, off, len) \
@@ -5123,8 +5338,12 @@ void uni_find_canon_comp(uint32_t cp, int16_t *off, uint8_t *len);
 uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
 @
 
-<<Common uni functions>>=
-uint32_t uni_lookup_decent(uint32_t cp, uint32_t *tab, uint32_t len)
+<<Unicode property exports>>=
+uint32_t uni_lookup_decent(uint32_t cp, const uint32_t *tab, uint32_t len);
+@
+
+<<Unicode property functions>>=
+uint32_t uni_lookup_decent(uint32_t cp, const uint32_t *tab, uint32_t len)
 {
   int32_t l = 0, h = len / 2 - 1;
   while(h >= l) {
@@ -5220,7 +5439,7 @@ gathered.
 #define UNI_SC_FL_LEN_MASK          0xffff
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports for generator>>=
 <<Special casing conditions>>
 @
 
@@ -5334,6 +5553,14 @@ postproc_sc(uc);
 postproc_sc(tc);
 @
 
+<<Additional parse-ucd C files>>=
+btricks.h
+@
+
+<<Additional parse-ucd includes>>=
+#include "btricks.h"
+@
+
 <<UCD parser local functions>>=
 static void dump_str_tabs(prop_t *prop, FILE *gen_h)
 {
@@ -5346,8 +5573,8 @@ static void dump_str_tabs(prop_t *prop, FILE *gen_h)
   qsort(prop->rng_str, prop->rng_len, sizeof(*prop->rng_str), uni_cmp_cp);
   sprintf(nbuf, "uni_%s_rng.gen.c", prop->name);
   open_wf(rt, nbuf);
-  fprintf(rt, "#include \"uni_common.h\"\n\n"
-              "uni_str_rng_t uni_%s_rng[] = {\n\t", prop->name);
+  fprintf(rt, "#include \"uni_prop.h\"\n\n"
+              "const uni_str_rng_t uni_%s_rng[] = {\n\t", prop->name);
   for(i = 0; i < prop->rng_len; i++) {
     short_str[i].cp = prop->rng_str[i].cp;
     short_str[i].off = prop->rng_str[i].off;
@@ -5382,7 +5609,7 @@ While the properties were named after the final result, these tables
 only provide a small part of it.  To get the final result, a helper
 function is provided, along with macros to use that function.
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* return is len; buf filled w/ up to buf_len chars */
 /* simple, special are mtabs for simple/special casing */
 /* strs is strings for special */
@@ -5396,7 +5623,7 @@ int uni_case_convert(uint32_t cp, uint32_t *buf, uint32_t buf_len,
 		     const uint32_t *strs, uint32_t cond);
 @
 
-<<Common uni functions>>=
+<<Unicode property functions>>=
 int uni_case_convert(uint32_t cp, uint32_t *buf, uint32_t buf_len,
                      const uint32_t *simple, const uint32_t *special,
 		     const uint32_t *strs, uint32_t cond)
@@ -5461,7 +5688,7 @@ int uni_case_convert(uint32_t cp, uint32_t *buf, uint32_t buf_len,
 }
 @
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 /* note for all 3 below: if(uni_xx(cp, buf, ...) < 0) { buf_len = 1; *buf = cp } */
 #define uni_lc(cp, buf, buf_len, cond) \
   uni_case_convert(cp, buf, buf_len, uni_slc_mtab, uni_lc_mtab, uni_lc_strs, \
@@ -5532,7 +5759,7 @@ case.  Like with the case conversions, a macro is provided for cf
 property lookup.  Since there is no condition input, a special macro
 is provided for Turkic locales as well.
 
-<<Common uni definitions>>=
+<<Unicode property exports>>=
 #define uni_cf(cp, buf, buf_len) \
   uni_case_convert(cp, buf, buf_len, uni_scf_mtab, uni_cf_mtab, uni_cf_strs, 0)
 #define uni_tcf(cp, buf, buf_len) \
@@ -5574,6 +5801,254 @@ removal of default ignorable code points is difficult to tell.
 <<FIXME>>=
  combine case folding and normalization here
    create string tabs NFC_CF, NFC_SCF, NFKC_SCF(?)
+@
+
+\subsection{Additional Support for Normalization}
+
+The raw property lookup functions are not meant to be used directly. 
+Instead, here are some more high-level functions.  They are stored in
+their own object file, even though the actual amount of code is tiny.
+
+<<Library [[uni]] Members>>=
+uni_norm.o
+@
+
+<<Library [[uni]] headers>>=
+#include "uni_norm.h"
+@
+
+<<uni_norm.h>>=
+<<Common C Warning>>
+#ifndef UNI_NORM_H
+#define UNI_NORM_H
+
+#include "uni_prop.h"
+<<Unicode normalization support exports>>
+#endif /* UNI_NORM_H */
+@
+
+<<uni_norm.c>>=
+<<Common C Header>>
+#include "uni_norm.h"
+
+<<Unicode normalization support local definitions>>
+
+<<Unicode normalization support functions>>
+@
+
+The first step in any normalization is to decompose.  The only
+difference in the three functions is what table they use.
+
+<<FIXME>>=
+make these functions take a max_size and offset arg, and allow resizing
+@
+
+<<Unicode normalization support exports>>=
+/* wrappers */
+
+/* decomp functions can operate on any number of chars, including 1 */
+/* decomp functions return final length */
+/* remember to leave 18x blen worth of space */
+int uni_NFD_dec(uint32_t *buf, int blen);
+int uni_NFKD_dec(uint32_t *buf, int blen);
+/* NFKC_Casefold assumes NFD has already been run */
+int uni_NFKC_Casefold(uint32_t *buf, int blen);
+@
+
+<<Unicode normalization support functions>>=
+#define any_dec(n, tab, str) \
+  int uni_##n(uint32_t *buf, int blen) \
+  { \
+    int i; \
+    for(i = 0; i < blen; i++) { \
+      int16_t off; \
+      uint8_t len; \
+      uint8_t compat; \
+      uni_x_dec(buf[i], tab, &off, &len, &compat, 1, str); \
+      if(len) { \
+        memmove(buf + i + len, buf + i + 1, (blen - i - 1)*sizeof(int)); \
+        blen += len - 1; \
+	if(off == (uint16_t)~0) \
+	  hangul_syllable_decomp(buf[i], buf + i, 1); \
+	else \
+	  memcpy(buf + i, str + off, len * sizeof(uint32_t)); \
+        /* result is fully expanded, so skip it */ \
+        i += len - 1; \
+      } \
+    } \
+    return blen; \
+  }
+any_dec(NFKD_dec, uni_compat_decomp_mtab, uni_dm_full_strs)
+any_dec(NFD_dec, uni_canon_decomp_mtab, uni_dm_full_strs)
+any_dec(NFKC_Casefold, uni_NFKC_CF_mtab, uni_NFKC_CF_strs)
+@
+
+Canonical ordering is the second step in any normalization.  This
+requires that any consecutive characters with non-zero canonical
+combining class be ordered by their canonial combining class.  The
+procedure is described as a bubble sort, so the sort must be stable.
+If the last character passed in has a non-zero ccc, there may be more,
+so a continuation is requested.
+
+<<Unicode normalization support exports>>=
+/* canon order function may need more chars than passed in */
+/* set last to 1 if no continuations possible */
+/* returns less than blen if more chars needed */
+/* can skip # of chars equal to return value */
+int uni_Canon_Order(uint32_t *buf, int blen, int last);
+@
+
+<<Unicode normalization support local definitions>>=
+/* uni_ccc_of */
+#include "uni_prop.h"
+
+/* for stable sort */
+struct ccs {
+    int cp, ccc;
+    int opos;
+};
+
+static int cmpcc(const void *a, const void *b)
+{
+    const struct ccs *p1 = (const struct ccs *)a;
+    const struct ccs *p2 = (const struct ccs *)b;
+    if(p1->ccc != p2->ccc)
+        return p1->ccc - p2->ccc;
+    return p1->opos - p2->opos;
+}
+@
+
+<<Unicode normalization support functions>>=
+/* pass in last=1 if string is whole */
+/* otherwise, if return is < blen, needs more chars */
+/* but can safely skip return-val chars */
+int uni_Canon_Order(uint32_t *buf, int blen, int last)
+{
+    int i;
+    for(i = 0; i < blen; i++) {
+        int cc = uni_ccc_of(buf[i]);
+        if(cc) {
+            int j;
+            for(j = i + 1; j < blen; j++) {
+                int cc2 = uni_ccc_of(buf[j]);
+                if(!cc2)
+                    break;
+            }
+            if(j == blen && !last)
+                return i;
+            struct ccs ccbuf[j-i];
+            ccbuf[0].ccc = cc;
+            ccbuf[0].cp = buf[i];
+            ccbuf[0].opos = i;
+            int k;
+            for(k = i + 1; k < j; k++) {
+                ccbuf[k-i].ccc = uni_ccc_of(buf[k]);
+                ccbuf[k-i].cp = buf[k];
+                ccbuf[k-i].opos = k;
+            }
+            qsort(ccbuf, j - i, sizeof(*ccbuf), cmpcc);
+            for(k = i; k < j; k++)
+                buf[k] = ccbuf[k-i].cp;
+        }
+    }
+    return blen;
+}
+@
+
+The last step in any composition normalization is canonical
+composition.  Two characers may be combined if the first character has
+a canonical combining class of zero and all intervening characters
+have a non-zero canonical combining class less than the canonical
+combining class of the second character.
+
+<<Unicode normalization support exports>>=
+/* canon comp function may need more chars than passed in */
+/* set nok to non-NULL if continuation possible */
+/* returns nok < blen if more chars needed */
+/* can skip nok chars */
+/* return value is updated length */
+int uni_NFC_comp(uint32_t *buf, int blen, int *nok);
+@
+
+<<Unicode normalization support functions>>=
+int uni_NFC_comp(uint32_t *buf, int blen, int *nok)
+{
+  int i, last0 = -1;
+  for(i = 0; i < blen; i++) {
+    int ccc = uni_ccc_of(buf[i]);
+    /* first char must be ccc=0 */
+    if(ccc)
+      continue;
+    /* could also skip if !is_cancomp1(buf[i]) */
+    last0 = i;
+    int lastccc = 0;
+    int j;
+    for(j = i + 1; j < blen; j++) {
+      ccc = uni_ccc_of(buf[j]);
+      /* second char must have no intervening equal ccc */
+      /* this assumes canonical ordering has been done */
+      if(ccc && lastccc && ccc == lastccc)
+        continue;
+      /* or greater ccc; this only happens if back down to 0 */
+      if(!ccc && lastccc) {
+        i = j - 1;
+        break;
+      }
+      lastccc = ccc;
+      int16_t off;
+      uint8_t len;
+      uni_find_canon_comp(buf[i], &off, &len);
+      int ccp = uni_canon_comp(buf[i], buf[j], off, len);
+      if(ccp >= 0) {
+        /* composition replaces char 1 and deletes char 2 */
+        buf[i] = ccp;
+        memmove(buf + j, buf + j + 1, (blen - j - 1)*sizeof(int));
+        blen--;
+	/* start over at first potential 2nd char */
+        j = i;
+        lastccc = 0;
+        continue;
+      }
+      /* if no match and hit a ccc=0, try next 1st char */
+      if(!ccc) {
+        i = j - 1;
+        break;
+      }
+    }
+  }
+  if(nok) {
+    /* need more if we got a potential start char */
+    /* but don't need to look at anything before that char */
+    if(last0 < 0)
+      *nok = blen;
+    else {
+      int16_t off;
+      uint8_t len;
+      uni_find_canon_comp(buf[last0], &off, &len);
+      *nok = len > 0 ? last0 : blen;
+    }
+  }
+  return blen;
+}
+@
+
+To demonstrate proper normalization, here are some macros which do the
+full procedure.
+
+<<C Prototypes>>=
+int uni_NFKD(uint32_t *buf, int blen);
+int uni_NFD(uint32_t *buf, int blen);
+int uni_NFKC(uint32_t *buf, int blen);
+int uni_NFC(uint32_t *buf, int blen);
+int uni_NFKC_CF(uint32_t *buf, int blen);
+@
+
+<<Unicode normalization support exports>>=
+#define uni_NFKD(buf, blen) uni_Canon_Order(buf, uni_NFKD_dec(buf, blen), 1)
+#define uni_NFD(buf, blen) uni_Canon_Order(buf, uni_NFD_dec(buf, blen), 1)
+#define uni_NFKC(buf, blen) uni_NFC_comp(buf, uni_NFKD(buf, blen), NULL)
+#define uni_NFC(buf, blen) uni_NFC_comp(buf, uni_NFD(buf, blen), NULL)
+#define uni_NFKC_CF(buf, blen) uni_NFKC_Casefold(buf, uni_NFD(buf, blen))
 @
 
 \subsection{Parsing the UCD - Others}
@@ -5680,12 +6155,17 @@ str_to_enum(&parsed_props[prop_Name_Alias], NULL);
 #endif
 @
 
-#endif
-@
-
 <<FIXME>>=
- dump names & name aliases
- add name lookup function
+dump names & name aliases
+add name lookup function
+name (UAX44-LM2):
+  ignore case, whitespace, underscore, and medial hyphens except 1180
+name (UTS18-2.5.1):
+  ignore case, whitespace, underscore, and all hyphens except 1180,
+     0F60, 0FB0
+  allow "namespace": prefix to apply if name doesn't match otherwise
+    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
+      insert CAPITAL and LOWER into appropriate spot.
 @
 
 Unofficially, [[Unihan_Variants]] provides some properties as well.
@@ -5941,2061 +6421,23 @@ dump_str_tabs(&parsed_props[prop_DUCET], gen_h);
 
 <<FIXME>>=
 DUCET needs more support
-@
-
-\chapter{XML Data Files}
-
-As mentioned in the introduction, the XML standard's entity names are
-generally much shorter than Unicode names, so a facility to use them
-instead is provided.  This requires parsing the XML entity database.
-One way to deal with this would be to turn it into a simple-to-parse
-format using XSLT.  An earlier version of this library did just that.
-However, since there are other XML files to parse as well, and
-everything else is being done in parse-ucd, it is now read in directly
-using libxml2.%
-\footnote{\url{http://xmlsoft.org/}}
-For maximum simplicity, each file is simply read in using the
-document-at-once
-parser\footnote{\url{http://xmlsoft.org/html/libxml-parser.html}}.
-While the incremental (xmlreader) mode would probably be more
-efficient for memory usage, this program is only run once, during
-build time, so the memory usage should not matter much.  At least the
-XML structure can be freed when finished.  Scanning the tree is done
-using manual traversal.  While the associated libxslt could be used to
-run the old code directly, the C code is actually much simpler.
-
-<<UCD parser local definitions>>=
-#include <libxml/parser.h>
-#include <libxml/xmlerror.h>
-@
-
-\lstset{language=make}
-<<makefile.vars>>=
-XML_CFLAGS := $(shell xml2-config --cflags)
-XML_LDFLAGS := $(shell xml2-config --libs)
-# adding xml flags only to PARSER_CFLAGS would be nice, but hard
-# to integrate w/ static_proto gen
-PARSER_CFLAGS += -DXMLUNI=\"$(XMLUNI)\"
-EXTRA_CFLAGS += $(XML_CFLAGS)
-PARSER_LDFLAGS += $(XML_LDFLAGS)
-@
-
-\lstset{language=C}
-<<UCD parser local definitions>>=
-#define xml_opts XML_PARSE_NOENT | /* expand known entities */ \
-                 XML_PARSE_NONET | /* forbid network access */ \
-		 XML_PARSE_NOCDATA | /* merge CDATA as text */ \
-                 XML_PARSE_COMPACT | /* compact small text nodes */ \
-		 XML_PARSE_HUGE /* no hard-coded limits */
-#define xml_isname(n, s) !strcmp((const char *)n->name, s)
-@
-
-<<Parse character data files>>=
-xmlInitParser();  /* xmlCleanupParser() when done */
-xmlDocPtr doc = xmlReadFile(XMLUNI, NULL, xml_opts);
-if(!doc) {
-  perror(XMLUNI);
-  exit(1);
-}
-xmlNodePtr n;
-for(n = doc->children; n; n = n->next)
-  if(n->children && xml_isname(n, "unicode"))
-    break;
-if(!n) {
-  perror(XMLUNI);
-  exit(1);
-}
-@
-
-The name database has subsets called groups.  Using every single name
-is certain to frequently collide with Unicode names, so a particular
-group should be chosen.  The 2007 group is used by my own
-applications, and seems like a reasonable default.
-
-\lstset{language=make}
-<<makefile.config>>=
-# XML entity name group
-XML_ENTITY_NAME_GROUP = 2007
-@
-
-<<makefile.vars>>=
-PARSER_CFLAGS += -DXML_ENTITY_NAME_GROUP=\"$(XML_ENTITY_NAME_GROUP)\"
-@
-
-\lstset{language=C}
-<<UCD parser local definitions>>=
-#define xml_prop(n, p) (const char *)xmlGetProp(n, (const xmlChar *)p)
-@
-
-<<Parse character data files>>=
-xmlNodePtr c;
-const char **grp_set;
-int ngrp_set;
-for(c = n->children; c; c = c->next) {
-  if(!c->children || !xml_isname(c, "entitygroups"))
-    continue;
-  for(c = c->children; c; c = c->next) {
-    if(!c->children || !xml_isname(c, "group"))
-      continue;
-    const char *gn = xml_prop(c, "name");
-    if(gn && !strcmp(gn, XML_ENTITY_NAME_GROUP))
-      break;
-  }
-  break;
-}
-if(!c) {
-  perror("group " XML_ENTITY_NAME_GROUP " not in " XMLUNI);
-  exit(1);
-}
-{
-  xmlNodePtr cc;
-  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
-    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
-      continue;
-    ngrp_set++;
-  }
-  inisize(grp_set, ngrp_set);
-  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
-    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
-      continue;
-    grp_set[ngrp_set++] = xml_prop(cc, "name");
-  }
-  qsort(grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp);
-}
-@
-
-<<UCD parser local functions>>=
-static int sort_strcmp(const void *a, const void *b)
-{
-  return strcmp(*(const char **)a, *(const char **)b);
-}
-@
-
-Once the group's set names are known, the charlist is scanned for
-character tags with an entity descriptor belonging to one of those
-sets.  The id of the entity is the entity name, and the id of the
-character is the Unicode code point.  Some of these define
-multi-character code points; these will be added along with the named
-multi-character Unicode groups later.
-
-<<Parse character data files>>=
-decl_str(xmlname);
-for(n = n->children; n; n = n->next)
-  if(n->children && xml_isname(n, "charlist"))
-    break;
-if(!n) {
-  perror("charlist not in " XMLUNI);
-  exit(1);
-}
-for(n = n->children; n; n = n->next) {
-  if(!n->children || !xml_isname(n, "character"))
-    continue;
-  for(c = n->children; c; c = c->next) {
-    const char *set;
-    const char *cid, *eid;
-    if(c->type != XML_ELEMENT_NODE || !xml_isname(c, "entity") ||
-       !(set = xml_prop(c, "set")) ||
-       !bsearch(&set, grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp) ||
-       !(eid = xml_prop(c, "id")) || !(cid = xml_prop(n, "id")))
-      continue;
-    if(!strchr(cid, '-')) {
-      low = high = strtol(cid + 1, NULL, 16);
-      /* note: duplicates will occur: */
-      /*   both fully duplicated entries and multiple names for one cp */
-      add_str_raw(xmlname, eid);
-    } else {
-      <<Add multi-char xml entity>>
-    }
-  }
-}
-xmlFreeDoc(doc);
-@
-
-<<Parse character data files>>=
-/* for testing to see if read properly */
-#if 0
-str_to_enum(&parsed_props[prop_xmlname], NULL);
-#endif
-@
-
-The CLDR also uses XML rather than simple tables.  Doing hand-coded
-XSLT for hundreds of data files seemed excessive, which is the main
-reason why I abandoned XSLT.  Note that unlike unicode.xml, there is a
-local, valid DTD for every CLDR file.
-
-\lstset{language=make}
-<<makefile.vars>>=
-PARSER_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\"
-@
-
-\lstset{language=C}
-<<UCD parser local definitions>>=
-#define xml_opts_dtd xml_opts | \
-		     XML_PARSE_DTDLOAD | XML_PARSE_DTDATTR | \
-		     XML_PARSE_DTDVALID /* use DTD if on local disk */
-@
-
-<<Parse character data files>>=
-chdir(cwd);
-chdir(CLDR_LOC);
-<<Parse CLDR files>>
-@
-
-Since the CLDR deals with locale data, the first thing to do is
-determine what locale is being used.  The locale name consists of a
-language identifier, followed by optional extensions.  The language
-identifier consists of a language subtag, followed by an optional
-script subtag, followed by an optional territory subtag, followed by
-optional variant subtags.  These are all case-insensitive, and are
-separated by either dashes or underscores.  The supported language
-identifier tags are listed in the supplemental metadata.  As with all
-of the CLDR data, versioning information is ignored.\footnote{One day,
-the versions of all data files used in building this library should be
-obtainable as a global variable or API call.  However, only overall
-version numbers should be used, and not the individual constituent
-file modification times.}
-
-<<Parse CLDR files>>=
-doc = xmlReadFile("common/supplemental/supplementalMetadata.xml",
-                  NULL, xml_opts_dtd);
-if(!doc) {
-  perror("supplementalMetadata.xml");
-  exit(1);
-}
-<<Prepare for parsing CLDR supplemental metadata>>
-for(n = doc->children; n; n = n->next) {
-  if(n->children && xml_isname(n, "supplementalData")) {
-    for(n = n->children; n; n = n->next) {
-      /* ignore version, generation, cldrVersion */
-      if(!n->children || !xml_isname(n, "metadata"))
-        continue;
-      for(n = n->children; n; n = n->next) {
-        if(!n->children)
-	  continue;
-        <<Parse CLDR supplemental metadata>>
-      }
-      break;
-    }
-    break;
-  }
-}
-<<Finish parsing CLDR supplemental metadata>>
-xmlFreeDoc(doc);
-@
-
-The data we're looking for is under the validity tag.  Each set is
-listed as a ``variable'' whose value is the whitespace-separated list
-of names.  In fact, one could make an argument that all of the
-variables of type choice are useful to add as enumerations.  The main
-argument against this is that some of the lists are rather long, and
-the enumerations' use of binary searching (rather than, say, hash
-tables) may be slow.
-
-<<Parse CLDR supplemental metadata>>=
-else if(xml_isname(n, "validity")) {
-  for(c = n->children; c; c = c->next) {
-    if(!c->children)
-      continue;
-    <<Parse CLDR validity entries>>
-  }
-}
-@
-
-<<Parse CLDR validity entries>>=
-else if(xml_isname(c, "variable")) {
-  const char *t = xml_prop(c, "type");
-  if(!strcmp(t, "choice")) {
-    const char *v = xml_prop(c, "id");
-    if(!c->children || !c->children->content || !v || v[0] != '$')
-      continue; /* should never happpen */
-    int pno = add_prop(v + 1);
-    uint32_t str[64];
-    for(s = (char *)c->children->content; isspace(*s); s++);
-    for(i = 0; *s; i++) {
-      char *p = (char *)str;
-      while(!isspace(*s) && *s)
-        *p++ = *s++;
-      while((p - (char *)str) % 4)
-        *p++ = 0;
-      add_str_rng(&parsed_props[pno], i, i, str, (p - (char *)str) / 4);
-      while(isspace(*s))
-        s++;
-    }
-    str_to_enum(&parsed_props[pno], NULL);
-    free(parsed_props[pno].rng_dat);
-    parsed_props[pno].rng_dat = NULL;
-  }
-  <<Process other CLDR validity variables>>
-}
-@
-
-<<Ignore unimplemented enums>>=
-/* ignore auto-generated enums for obsolete properties */
-if(!parsed_props[i].rng_dat && i < num_prop_aliases)
-  continue;
-@
-
-In addition, the entries in \$grandfathered and some other ISO
-language codes are treated differently within Unicode and the CLDR.
-These translations are under the alias tag, in languageAlias elements.
-Similarly, script, territory, and variants have aliases as well.
-
-<<Parse CLDR supplemental metadata>>=
-else if(xml_isname(n, "alias")) {
-  
-}
-@
-
-The extensions supported by the CLDR are listed in the common/bcp47
-data files.
-
-<<UCD parser local definitions>>=
-#include <dirent.h>
-@
-
-<<Parse CLDR files>>=
-/* note: in most files, version info is silently ignored/dropped */
-/* however, when generating files, it might be a good idea to put that */
-/* info in to allow strings to determine versioning */
-
-/* bcp47: locale variants */
-/* need lookup by extension first (u/t), then name/aliases */
-/* for each keyword, need lookup of valid values */
-
-/* need parser function for locale names */
-/*  en_US-u-ca-blah */
-/*    -> en_US is full locale name (name+script) */
-/*       u-ca is a keyword with value blah */
-/*  en_US@ca=blah is equivalent */
-/*     but keywords with aliases may only use aliases in @-notation */
-struct dirent *de;
-DIR *d = opendir("common/bcp47");
-if(!d) {
-  perror("CLDR bcp47");
-  exit(1);
-}
-chdir("common/bcp47");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  doc = xmlReadFile(de->d_name, NULL, xml_opts_dtd);
-  if(!doc) {
-    perror(de->d_name);
-    exit(1);
-  }
-  for(n = doc->children; n; n = n->next)
-    /* not sure why 1st entry is always empty ldmlBCP47 */
-    if(n->children && xml_isname(n, "ldmlBCP47")) {
-      for(n = n->children; n; n = n->next) {
-        /* ignore version */
-	/*  although version/number could be added as literal text to output */
-	/* ignore generation */
-	/*  although generation/date could be added with version/number */
-	/* ignore deprecated cldrVersion */
-        if(n->children && xml_isname(n, "keyword")) {
-          for(n = n->children; n; n = n->next) {
-	    if(xml_isname(n, "key") ||
-	       /* attribute is actually 3-letter standalone attribute flag */
-	       xml_isname(n, "attribute")) {
-	      const char *name = xml_prop(n, "name");
-	      const char *desc = xml_prop(n, "description");
-	      const char *alias = xml_prop(n, "alias");
-	      const char *depr = xml_prop(n, "deprecated");
-	      const char *ext = xml_prop(n, "extension");
-	      /* ignoring since= attr */
-	      if(!ext)
-	        ext = "u";
-	      if(!alias)
-	        alias = name;
-	      /* note: alias may be multiple space-separated aliases */
-	      /* if alias present, only alias may be used in loc@var */
-	      /* but none observed in wild */
-              if(depr && !strcmp(depr, "false"))
-	        depr = NULL;
-#if 0
-	      printf("%s-%s/%s %s\n", ext, name, alias,
-	             depr ? "deprecated" : "");
-#endif
-	      /* note: t_i0 may have other valid keys: tags indicating method */
-	      /* note: t_k0 is same way */
-	      /* note: t_t0 is same way */
-	      /* note: t_x0 is generic tags only */
-	      for(c = n->children; c; c = c->next) {
-	        if(xml_isname(c, "type")) {
-		  name = xml_prop(c, "name");
-		  alias = xml_prop(c, "alias");
-		  desc = xml_prop(c, "description");
-		  depr = xml_prop(c, "deprecated");
-		  /* ignoring since= attr */
-		  if(!alias)
-		    alias = name;
-		  /* note: alias may be multiple space-separated aliases */
-		  /* 1st alias is preferred */
-		  if(depr && !strcmp(depr, "false"))
-		    depr = NULL;
-		  /* special names: */
-		  /*   REORDER_CODE reordering block name(s) */
-		  /*   CODEPOINTS one or more 4-6 hex digits */
-#if 0
-		  printf("  %s/%s %s\n", name, alias, depr ? "deprecated" : "");
-#endif
-	        }
-	      }
-	    }
-	  }
-	  break;
-	}
-      }
-      break;
-    }
-  xmlFreeDoc(doc);
-}
-chdir(cwd);
-chdir(CLDR_LOC);
-@
-
-<<UCD parser local functions>>=
-static void parse_ldml(const char *name)
-{
-  /* ignore special tags everywhere, since it's undefined */
-  xmlDocPtr doc = xmlReadFile(name, NULL, xml_opts_dtd);
-  if(!doc) {
-    perror(name);
-    exit(1);
-  }
-  xmlNodePtr n, c;
-  for(n = doc->children; n; n = n->next)
-    /* not sure why 1st entry is always empty ldml */
-    if(n->children && xml_isname(n, "ldml")) {
-      /* ignore draft attribute */
-      /* ignore deprecated fallback tag */
-      for(n = n->children; n; n = n->next) {
-	if(!n->children)
-	  continue;
-	<<Parse ldml sections>>
-      }
-      break;
-    }
-  xmlFreeDoc(doc);
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "identity")) {
-  /* ignore version, generation */
-  const char *lang = NULL;
-  const char *scr = NULL;
-  const char *ter = NULL;
-  const char *var = NULL;
-  const char *alias = NULL, *alias_path = NULL;
-  for(c = n->children; c; c = c->next) {
-    /* e.g. zh in zh_Hans_SG */
-    if(xml_isname(c, "language"))
-      lang = xml_prop(c, "type");
-    /* e.g. Hans in zh_Hans_SG */
-    else if(xml_isname(c, "script"))
-      scr = xml_prop(c, "type");
-    /* e.g. SG in zh_Hans_SG */
-    else if(xml_isname(c, "territory"))
-      ter = xml_prop(c, "type");
-    /* e.g. POSIX in en_US_POSIX */
-    else if(xml_isname(c, "variant"))
-      var = xml_prop(c, "type");
-    else if(xml_isname(c, "alias")) {
-      /* note: should this even be supported?  is it used? */
-      alias = xml_prop(c, "source");
-      alias_path = xml_prop(c, "path");
-    }
-    /* note that draft, references, alt fields ignored above */
-  }
-  /* file name should be following text */
-#if 0
-  printf("lang: %s", lang);
-  if(scr)
-    printf("_%s", scr);
-  if(ter)
-    printf("_%s", ter);
-  if(var)
-    printf("_%s", var);
-  putchar('\n');
-#endif
-}
-@
-
-<<Parse CLDR files>>=
-/* casing: special casing rules */
-/* need to convert this to a binary file format */
-/* need to load at run-time based on locale var or desired locale */
-/* is this even useful?  supposedly internal-use-only */
-d = opendir("common/casing");
-if(!d) {
-  perror("CLDR casing");
-  exit(1);
-}
-chdir("common/casing");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name);
-}
-chdir(cwd);
-chdir(CLDR_LOC);
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "metadata")) {
-  for(c = n->children; c; c = c->next)
-    if(xml_isname(c, "casingData")) {
-      for(c = c->children; c; c = c->next) {
-        if(!xml_isname(c, "casingItem"))
-	  continue;
-	/* type should be enum of all potential types */
-	    /* calendar-field day-format-except-narrow */
-	    /* day-narrow day-standalone-except-narrow */
-	    /* displayName displayName-count era-abbr */
-	    /* era-name era-narrow language key */
-	    /* metazone-long month-format-except-narrow */
-	    /* month-standalone-except-narrow */
-	    /* month-narrow quarter-abbreviated */
-	    /* quarter-format-wide tense territory */
-	    /* quarter-standalone-wide script symbol */
-	    /* type metazone-short zone-exemplarCity */
-	  /* not sure if should allow "other" types */
-	/* content should be enum of values: */
-	  /* titlecase/uppercase/lowercase */
-#if 0
-        printf(" casing %s: %s\n", xml_prop(c, "type"),
-	                           c->children->content);
-#endif
-      }
-      break;
-    }
-}
-@
-
-<<Parse CLDR files>>=
-/* collation: locale-specific collation rules */
-d = opendir("common/collation");
-if(!d) {
-  perror("CLDR collation");
-  exit(1);
-}
-chdir("common/collation");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name);
-}
-chdir(cwd);
-chdir(CLDR_LOC);
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "collations")) {
-  const char *subl = xml_prop(n, "validSubLocales");
-#if 0
-  /* space-separated list of full locale names */
-  if(subl)
-    printf("sublang: %s\n", subl);
-#endif
-  /* ignore version, draft attrs */
-  const char *def = "standard";
-  for(c = n->children; c; c = c->next) {
-    /* should be same enum type as types below */
-    if(xml_isname(c, "default")) {
-      def = xml_prop(c, "choice");
-      if(!def)
-        def = xml_prop(c, "type"); /* deprecated, but used */
-      /* ignore draft, references, alt attrs */
-      /* can have more than one, but why would you? */
-    } else if(xml_isname(c, "collation")) {
-      /* ignore draft, standard, references, alt */
-      if(!subl) /* technically, this isn't a req, but it's safe */
-        subl = xml_prop(c, "validSubLocales");
-      /* ignore draft, standard, references, alt attrs */
-      /* ignore visibility attr */
-      /* all available types should be an enum */
-      /* or at least easily looked up on per-lang basis */
-      /* most langs have no alt types, but some have many */
-#if 0
-      printf("[rules for type %s]\n", xml_prop(c, "type"));
-#endif
-      xmlNodePtr cc;
-      const char *base = NULL; /* DUCET by default */
-      for(cc = c->children; cc; cc = cc->next) {
-        if(xml_isname(cc, "base")) {
-	  xmlNodePtr ccc;
-	  for(ccc = cc->children; ccc; ccc = ccc->next)
-	    if(xml_isname(ccc, "alias")) {
-	      base = xml_prop(ccc, "source");
-	      /* path should always be /ldml/collations */
-	      break;
-	    }
-	} else if(xml_isname(cc, "settings")) {
-	  xmlAttrPtr a;
-	  /* note: only settings in wild are: */
-	  /*   backwards=on */
-	  /*   caseFirst=upper */
-	  /*   normalization=on */
-	  /*   alternate=shifted */
-	  /*   variableTop=<n> */
-	  /*   strength=Tertiary */
-	  /*   hiraganaQuaterary=on */
-	  /* valid, though: */
-	  /*  strength=primary|secondary|tertiary|quaternary|identical */
-	  /*  alternate=non-ignorable|shifted */
-	  /*  backwards=on|off */
-	  /*  normalization=on|off */
-	  /*  caseLevel=on|off */
-	  /*  caseFirst=upper|lower|off */
-	  /*  hiraganaQuarternary=on|off */
-	  /*  hiraganaQuaternary=on|off */
-	  /*  numeric=on|off */
-	  /*  private=true|false */  /* deprecated */
-	  /*  variableTop='x' */
-	  /*  reorder=? */
-#if 0
-          fputs("  settings", stdout);
-	  for(a = cc->properties; a; a = a->next)
-	    printf(" %s=%s", a->name, a->children->content);
-	  putchar('\n');
-#endif
-        } else if(xml_isname(cc, "rules")) {
-	  xmlNodePtr r;
-	  for(r = cc->children; r; r = r->next) {
-	    if(r->type != XML_ELEMENT_NODE)
-	      continue;
-	    /* r->name may be alias.  not seen in wild. */
-	    /* r->name may be import (repeatedly).  not seen in wild. */
-	    /* r->name should be enum */
-	    /* reset [before=primary/secondary/tertiary] */
-	    /* note: reset arg may be tag: */
-	    /*    <when>_<lev>_ignorable */
-	    /*      <lev>=primary secondary tertiary non */
-	    /*      <when>=first last */
-	    /*    <when>_variable */
-	    /*    <when>_trailing */
-	    /*    cp hex=... */
-	    /* p pc s sc t tc i ic */ /* q qc are deprecated */
-	    /*   each takes interleaved raw data, <cp hex=>, <last_variable/> */
-	    /* x [<context>..</>] {p pc s sc ...}* [<extend>..</>] */
-	    /*  context & extend are interleaved raw data & <cp hex=> */
-#if 0
-            printf(" rule: %s%s '%s'\n", r->name,
-	           r->properties &&
-		     r->properties->children ?
-		       r->properties->children->content : "",
-		   r->children->type == XML_ELEMENT_NODE ?
-		      r->children->name :
-		      r->children->content);
-#endif
-          }
-        } else if(xml_isname(cc, "suppress_contractions")) {
-#if 0
-          printf("  suppress %s\n", cc->children->content);
-	  /* note: may be interleaved raw data and <cp hex="...."> tags */
-#endif
-        } else if(xml_isname(cc, "optimize")) {
-	  /* ??? */
-	  /* interleaved raw data and <cp hex="..."> tags */
-	}
-      }
-    } else if(xml_isname(c, "alias")) {
-      /* path should always be //ldml/collations */
-#if 0
-      printf("  [copy from %s (%s)]\n", xml_prop(c, "source"),
-             xml_prop(c, "path"));
-#endif
-    }
-  }
-#if 0
-  printf("[default: %s]\n", def);
-#endif
-}
-@
-
-<<Parse CLDR files>>=
-/* main: "other" rules */
-d = opendir("common/main");
-if(!d) {
-  perror("CLDR main");
-  exit(1);
-}
-chdir("common/main");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name);
-}
-chdir(cwd);
-chdir(CLDR_LOC);
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "dates")) {
-  /* ignore draft/standard/references/alt tags */
-  const char *subl = xml_prop(n, "validSubLocales");
-  for(c = n->children; c; c = c->next) {
-    if(xml_isname(c, "alias")) {
-    } else if(xml_isname(c, "localizedPatternChars")) {
-      /* deprecated */
-      /* ignore draft/standard/references/alt */
-      if(!subl)
-        subl = xml_prop(c, "validSubLocales");
-      /* data is interleaved raw data & <cp hex=> */
-    } else if(xml_isname(c, "dateRangePattern")) {
-      /* deprecated */
-      /* ignore draft/standard/references/alt */
-      if(!subl)
-        subl = xml_prop(c, "validSubLocales");
-      /* data is interleaved raw data & <cp hex=> */
-    } else if(xml_isname(c, "calendars")) {
-      /* calendar type=gregorian */
-      /*      months */
-      /*        monthContext type="format" */
-      /*          monthWidth type="wide" */
-      /*            <month type="8">Leqeeni</month> */
-    } else if(xml_isname(c, "timeZoneNames")) {
-    }
-  }
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "alias")) {
-  /* is this even used?  should it be supported? */
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "localeDisplayNames")) {
-  /* <languages><language type="..">...</>.... */
-  /* <scripts><script type="..">...</>... */
-  /* <territories><territory type='..'>...</>...*/
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "layout")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "contextTransforms")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "characters")) {
-  /* exemplarCharacters [type=...]>[uniset]</> */
-  /* note: this is an optional Unicode property */
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "delimiters")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "measurement")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "numbers")) {
-  /* <currenceis><currency type="DJF"><symbol>Fdj</symbol>...*/
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "units")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "listPatterns")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "posix")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "segmentations")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "rbnf")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "references")) {
-}
-@
-
-<<FIXME>>=
-implement
-main -> info other than that covered in special dirs
-  doctype = ldml
-    alias
-    fallback
-    localeDisplayNames
-    layout
-    contextTransforms
-    characters
-    delimiters
-    measurement
-    dates
-    numbers
-    units
-    listPatterns
-    collations(*)
-    posix
-    segmentations?
-    rbnf
-    metadata
-    references
-    special
-
-rbnf -> rbnf for generating number names from numbers
-  doctype = ldml
-segments -> patterns for text segmentation
-  doctype = ldml
-supplemental -> various
-  doctype = ldmlSupplemental
-transforms -> mappings (no real single name for each, though)
-@
-
-\chapter{Unicode Normalization}
-
-After reading raw Unicode, it needs to be normalized.
-
-%< <Library [[uni]] Members> >=
-%uni_norm.o
-%@
-
-<<Library [[uni]] headers>>=
-#include "uni_norm.h"
-@
-
-<<uni_norm.h>>=
-<<Common C Warning>>
-#ifndef UNI_NORM_H
-#define UNI_NORM_H
-
-#include "uni_common.h"
-<<Unicode normalization support exports>>
-#endif /* UNI_NORM_H */
-@
-
-<<uni_norm.c>>=
-<<Common C Header>>
-#include "uni_norm.h"
-
-<<Unicode normalization support local definitions>>
-
-<<Unicode normalization support functions>>
-@
-
-The raw property lookup functions are not meant to be used directly. 
-Instead, here are some more high-level functions.  The first step in
-any normalization is to decompose.  The only difference in the three
-functions is what table they use.
-
-<<Unicode normalization support exports>>=
-/* wrappers */
-
-/* decomp functions can operate on any number of chars, including 1 */
-/* decomp functions return final length */
-/* remember to leave 18x blen worth of space */
-int NFD_dec(int *buf, int blen);
-int NFKD_dec(int *buf, int blen);
-/* NFKC_Casefold assumes NFD has already been run */
-int NFKC_Casefold(int *buf, int blen);
-@
-
-<<Unicode normalization support functions>>=
-#define any_dec(n, fn, len) \
-  int n(int *buf, int blen) \
-  { \
-    int i; \
-    for(i = 0; i < blen; i++) { \
-      const uni_decent_t *de = fn; \
-      if(de) { \
-        int l = len; \
-        memmove(buf + i + l, buf + i + 1, (blen - i - 1)*sizeof(int)); \
-        blen += l - 1; \
-        memcpy(buf + i, deccp + de->off, l * sizeof(int)); \
-        /* result is fully expanded, so skip it */ \
-        i += l - 1; \
-      } \
-    } \
-    return blen; \
-  }
-any_dec(NFKD_dec, find_decomp(buf[i], 0), de->len < 0 ? -de->len : de->len)
-any_dec(NFD_dec, find_decomp(buf[i], 1), de->len)
-any_dec(NFKC_Casefold, find_nfkc_cf(buf[i]), de->len)
-@
-
-Canonical ordering is the second step in any normalization.  This
-requires that any consecutive characters with non-zero canonical
-combining class be ordered by their canonial combining class.  The
-procedure is described as a bubble sort, so the sort must be stable.
-If the last character passed in has a non-zero ccc, there may be more,
-so a continuation is requested.
-
-<<Unicode normalization support exports>>=
-/* canon order function may need more chars than passed in */
-/* set last to 1 if no continuations possible */
-/* returns less than blen if more chars needed */
-/* can skip # of chars equal to return value */
-int Canon_Order(int *buf, int blen, int last);
-@
-
-<<Unicode normalization support local definitions>>=
-/* uni_ccc_of */
-#include "uni_prop.h"
-
-/* for stable sort */
-struct ccs {
-    int cp, ccc;
-    int opos;
-};
-
-static int cmpcc(const void *a, const void *b)
-{
-    const struct ccs *p1 = (const struct ccs *)a;
-    const struct ccs *p2 = (const struct ccs *)b;
-    if(p1->ccc != p2->ccc)
-        return p1->ccc - p2->ccc;
-    return p1->opos - p2->opos;
-}
-@
-
-<<Unicode normalization support functions>>=
-/* pass in last=1 if string is whole */
-/* otherwise, if return is < blen, needs more chars */
-/* but can safely skip return-val chars */
-int Canon_Order(int *buf, int blen, int last)
-{
-    int i;
-    for(i = 0; i < blen; i++) {
-        int cc = uni_ccc_of(buf[i]);
-        if(cc) {
-            int j;
-            for(j = i + 1; j < blen; j++) {
-                int cc2 = uni_ccc_of(buf[j]);
-                if(!cc2)
-                    break;
-            }
-            if(j == blen && !last)
-                return i;
-            struct ccs ccbuf[j-i];
-            ccbuf[0].ccc = cc;
-            ccbuf[0].cp = buf[i];
-            ccbuf[0].opos = i;
-            int k;
-            for(k = i + 1; k < j; k++) {
-                ccbuf[k-i].ccc = uni_ccc_of(buf[k]);
-                ccbuf[k-i].cp = buf[k];
-                ccbuf[k-i].opos = k;
-            }
-            qsort(ccbuf, j - i, sizeof(*ccbuf), cmpcc);
-            for(k = i; k < j; k++)
-                buf[k] = ccbuf[k-i].cp;
-        }
-    }
-    return blen;
-}
-@
-
-The last step in any composition normalization is canonical
-composition.  Two characers may be combined if the first character has
-a canonical combining class of zero and all intervening characters
-have a non-zero canonical combining class less than the canonical
-combining class of the second character.
-
-<<Unicode normalization support exports>>=
-/* canon comp function may need more chars than passed in */
-/* set nok to non-NULL if continuation possible */
-/* returns nok < blen if more chars needed */
-/* can skip nok chars */
-/* return value is updated length */
-int NFC_comp(int *buf, int blen, int *nok);
-@
-
-<<Unicode normalization support functions>>=
-int NFC_comp(int *buf, int blen, int *nok)
-{
-  int i, last0 = -1;
-  for(i = 0; i < blen; i++) {
-    int ccc = uni_ccc_of(buf[i]);
-    /* first char must be ccc=0 */
-    if(ccc)
-      continue;
-    /* could also skip if !is_cancomp1(buf[i]) */
-    last0 = i;
-    int lastccc = 0;
-    int j;
-    for(j = i + 1; j < blen; j++) {
-      ccc = uni_ccc_of(buf[j]);
-      /* second char must have no intervening equal ccc */
-      /* this assumes canonical ordering has been done */
-      if(ccc && lastccc && ccc == lastccc)
-        continue;
-      /* or greater ccc; this only happens if back down to 0 */
-      if(!ccc && lastccc) {
-        i = j - 1;
-        break;
-      }
-      lastccc = ccc;
-      int ccp = find_cancomp(buf[i], buf[j]);
-      if(ccp >= 0) {
-        /* composition replaces char 1 and deletes char 2 */
-        buf[i] = ccp;
-        memmove(buf + j, buf + j + 1, (blen - j - 1)*sizeof(int));
-        blen--;
-	/* start over at first potential 2nd char */
-        j = i;
-        lastccc = 0;
-        continue;
-      }
-      /* if no match and hit a ccc=0, try next 1st char */
-      if(!ccc) {
-        i = j - 1;
-        break;
-      }
-    }
-  }
-  if(nok)
-    /* need more if we got a potential start char */
-    /* but don't need to look at anything before that char */
-    *nok = last0 >= 0 && is_cancomp1(buf[last0]) ? last0 : blen;
-  return blen;
-}
-@
-
-To demonstrate proper normalization, here are some macros which do the
-full procedure.
-
-<<Unicode normalization support exports>>=
-#define NFKD(buf, blen) Canon_Order(buf, NFKD_dec(buf, blen), 1)
-#define NFD(buf, blen) Canon_Order(buf, NFD_dec(buf, blen), 1)
-#define NFKC(buf, blen) NFC_comp(buf, NFKD(buf, blen), NULL)
-#define NFC(buf, blen) NFC_comp(buf, NFD(buf, blen), NULL)
-@
-
-To actually generate the tables, a C program ([[mkuninorm]]) is used.  A
-simple table generator could be done using shell and sed, but there
-are some caveats that make the C program much better suited to the
-task.  Rather than compile in the file locations, they are supplied on
-the command line.
-
-\lstset{language=make}
-<<C Build Executables>>=
-mkuninorm \
-@
-
-<<makefile.vars>>=
-MKUNINORM_C := mkuninorm.c
-MKUNINORM_PROTO := $(MKUNINORM_C:%=%.static_proto) cproto.h
-@
-
-<<makefile.rules>>=
-uninorm.gen: mkuninorm $(UNIDATA) $(UNINORM)
-	./$< $(UNIDATA) $(UNINORM) >$@
-
-mkuninorm: mkuninorm.c
-	mkdir cp.$$$$; (cd cp.$$$$; touch $(MKUNINORM_PROTO)); trap "rm -rf cp.$$$$" 0; \
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -Icp.$$$$ $(LDFLAGS) -o $@ $^
-@
-
-\lstset{language=C}
-<<mkuninorm.c>>=
-<<Common C Header>>
-
-<<[[mkuninorm]] globals>>
-
-int main(int argc, const char **argv)
-{
-  if(argc != 3) {
-    fprintf(stderr, "Usage: %s path/to/UnicodeData.txt"
-                       " path/to/DerivedNormalizationProps.txt\n",
-            argv[0]);
-    exit(1);
-  }
-    const char *unif = argv[1];
-    const char *normf = argv[2];
-  <<Make [[uninorm.gen]]>>
-  return 0;
-}
-@
-
-In order to save a little space on the [[deccp]] table, all entries
-are read in, sorted, and combined if possible.  Thus the information
-is stored in an expandable master decomposition table ([[dec]]) while
-being read in.  A [[type]] field indicates which table it eventually
-goes to.
-
-<<[[mkuninorm]] globals>>=
-typedef struct {
-    int cp;
-    uint32_t off;
-    unsigned char len;
-    unsigned char type;
-    /* 0 = composition */
-    /* 1 = canonical decomposition */
-    /* 2 = compatibility decomposition */
-    /* 3 = NFKC_CF */
-} uni_decent_t;
-uni_decent_t *dec;
-int ndec = 0, maxdec;
-@
-
-<<Known Data Types>>=
-uni_decent_t,%
-@
-
-<<Make [[uninorm.gen]]>>=
-maxdec = 128;
-inisize(dec, maxdec);
-@
-
-[[mkuninorm]] also has its own private [[deccp]] equivalent expandable
-table ([[decs]]).
-
-<<[[mkuninorm]] globals>>=
-int *decs;
-int ndecs = 0, maxdecs;
-@
-
-<<Make [[uninorm.gen]]>>=
-maxdecs = 128;
-inisize(decs, maxdecs);
-@
-
-For a first pass, the information provided by UnicodeData.txt is read.
-This includes the ccc (field 4) and the non-casefolding decomposition
-(field 6).  In order to create the composition table at the same time,
-the DerivedNormalizationInfo.txt is read at the same time, only to
-extract the Full Composition Exclusion information.
-
-<<[[mkuninorm]] globals>>=
-/* longest line is actually 218 chars */
-char lbuf[512];
-@
-
-<<Make [[uninorm.gen]]>>=
-FILE *f, *f2;
-if(!(f = fopen(unif, "r"))) {
-  perror(unif);
-  exit(1);
-}
-if(!(f2 = fopen(normf, "r"))) {
-  perror(normf);
-  exit(1);
-}
-<<Stuff to do before reading [[unif]]>>
-while(fgets(lbuf, sizeof(lbuf), f)) {
-  <<Process a line of [[unif]]>>
-}
-fclose(f);
-fclose(f2);
-@
-
-There is one list that is not in any file: Hangul syllables.  These
-are only described in the standard. A Hangul syllable consists of
-three parts, called L, V, and T.  There are code points for each L, V,
-and T, as well as every combination of LV and LVT.  While LVT can
-technically be decomposed directly to L, V, and T, it is instead
-decomposed to LV and T, so that canonical composition (which only
-works on pairs) can be performed. Thus, all entries for Hangul
-syllables are type 0 (canonical composition).  No check is made in
-Full Composition Exception, since as of version 6, there are no
-matches.  If a future version has matches, this will need to change.
-
-<<Add Hangul syllables>>=
-/* hangul syllables */
-int L, V, T;
-int cp = 0xac00;
-for(L = 0; L < 19; L++)
-  for(V = 0; V < 21; V++)
-    for(T = 0; T < 28; T++, cp++) {
-      if(ndec == maxdec) {
-        maxdec *= 2;
-        resize(dec, maxdec);
-      }
-      dec[ndec].cp = cp;
-      dec[ndec].off = ndecs;
-      dec[ndec].len = 2;
-      /* assuming none of these will get added to F_C_E */
-      dec[ndec].type = 0;
-      if(ndecs + 2 > maxdecs) {
-        maxdecs *= 2;
-        resize(decs, maxdecs);
-      }
-      if(!T) {
-        decs[ndecs++] = 0x1100 + L;
-        decs[ndecs++] = 0x1161 + V;
-      } else {
-        decs[ndecs++] = 0xac00 + 28 * (L * 21 + V);
-        decs[ndecs++] = 0x11a7 + T;
-      }
-      ndec++;
-    }
-@
-
-All relevant information is stored, so there is no need to avoid
-intermingling data.  First, the decomposition mapping field is
-extracted and stored. Compatibility decompositions are denoted by a
-reason in angle brackets; all others are canonical decompositions.  In
-order to retain numerical order, the Hangul syllables are added at the
-appropriate point.
-
-<<Process a line of [[unif]]>>=
-if(isspace(*lbuf) || *lbuf == '#') /* technically impossible */
-  continue;
-/* field 1: code point */
-char *s = strchr(lbuf, ';');
-if(!s)
-  exit(1);
-*s++ = 0;
-/* field 2 */
-s = strchr(s, ';');
-if(!s)
-  exit(1);
-/* field 3 */
-s = strchr(s + 1, ';');
-if(!s)
-  exit(1);
-/* field 4 */
-s = strchr(s + 1, ';');
-if(!s)
-  exit(1);
-/* field 5 */
-s = strchr(s + 1, ';');
-if(!s)
-   exit(1);
-/* field 6: decomp */
-char *deccp = s + 1;
-s = strchr(deccp, ';');
-if(!s)
-  exit(1);
-*s = 0;
-if(!strcmp(lbuf, "AC00")) {
-  <<Add Hangul syllables>>
-}
-/* store non-empty deccp for later processing */
-while(isspace(*deccp))
-  deccp++;
-if(!*deccp)
-  continue;
-int iscomp = *deccp == '<'; /* compatibility */
-if(iscomp) {
-  /* skip compatibility reason */
-  while(*++deccp && *deccp != '>');
-  if(!*deccp)
-    exit(1);
-  while(isspace(*++deccp));
-  if(!*deccp)
-    exit(1);
-}
-/* count # of code points */
-int len;
-for(len = 0, s = deccp; *s; len++) {
-  while(*s && !isspace(*s))
-    s++;
-  while(isspace(*s)) s++;
-}
-/* store a new decomp entry */
-if(ndec == maxdec) {
-  maxdec *= 2;
-  resize(dec, maxdec);
-}
-dec[ndec].cp = strtol(lbuf, NULL, 16);
-dec[ndec].off = ndecs;
-dec[ndec].len = len;
-dec[ndec].type = iscomp ? 2 : 1;
-/* store decomp string */
-if(ndecs + len > maxdecs) {
-  maxdecs *= 2;
-  resize(decs, maxdecs);
-}
-for(len = 0, s = deccp; *s && len < dec[ndec].len; len++) {
-  decs[ndecs + len] = strtol(s, &s, 16);
-  while(isspace(*s)) s++;
-}
-if(dec[ndec].len != len)
-  exit(1);
-ndecs += len;
-@
-
-Before leaving this new decomposition entry, it needs to be checked to
-see if it is a canonical composition entry as well.  This requires
-checking the Full Composition Exclusion flag.  This flag is listed
-in code point order, as a set of ranges.  The most relevant range is
-kept; once the range becomes irrelevant, a new range is read from the
-file.
-
-<<[[mkuninorm]] globals>>=
-char lbuf2[512];
-@
-
-<<Stuff to do before reading [[unif]]>>=
-int exl = -1, exh = -1;
-@
-
-<<Process a line of [[unif]]>>=
-/* composition is always in pairs, so no point if len != 2 */
-if(dec[ndec].type == 1 && len == 2) {
-  /* load a new range if currently above range */
-  while(dec[ndec].cp > exh) {
-    exl = exh = 0x110000;
-    while(fgets(lbuf2, sizeof(lbuf2), f2)) {
-      if((s = strchr(lbuf2, '#')))
-        *s = 0;
-      if(!strstr(lbuf2, "; Full_Composition_Exclusion "))
-       continue;
-      exl = strtol(lbuf2, &s, 16);
-      if(*s == '.' && s[1] == '.')
-        exh = strtol(s + 2, NULL, 16);
-      else
-        exh = exl;
-      break;
-    }
-  }
-  if(dec[ndec].cp < exl)
-    dec[ndec].type = 0;
-}
-@
-
-<<Process a line of [[unif]]>>=
-++ndec;
-@
-
-The case folding decomposition strings are fully expanded; that is,
-any code point in the target string which might also be decomposed has
-already been decomposed.  The entries pulled from UnicodeData.txt,
-however, are not fully expanded.  Neither are the Hangul syllable
-entries.  Having them fully expanded reduces processing at run-time,
-so they will be expanded here.
-
-Each entry is extracted, converted to a fully expanded form, and added
-back.  The old entries are kept, in order, for further expansion, so
-the old entry count is retained.
-
-<<[[mkuninorm]] globals>>=
-int decbuf[256];
-@
-
-<<Make [[uninorm.gen]]>>=
-/* Fully exapnd entries added so far */
-int ondec = ndec;
-int i;
-for(i = 0; i < ondec; i++) {
-  int declen = dec[i].len;
-  memcpy(decbuf, decs + dec[i].off, declen * sizeof(int));
-  <<Fully expand [[dec[i]]]/[[decbuf]]>>
-}
-@
-
-Type 0 expansions and type 1 expansions can be applied to type 0 and 1
-expansions to form type 1 expansions.  Type 2 expansions can be
-applied to type 0, 1, and 2 expansions to form type 2 expansions.
-When a new expansion type is created, a new entry with duplicate code
-point but new type is created.  The target type is stored in [[ntype]].
-
-<<Fully expand [[dec[i]]]/[[decbuf]]>>=
-int ntype = dec[i].type;
-@
-
-First, all type 0 and 1 expansions are applied.  The number of
-canonical expansions applied is saved to indicate if anything was
-done.  Since the initial segment of entries is in code point order,
-expansions are searched on that list using a binary search.  Any
-expansion changes the type to 1.
-
-<<[[mkuninorm]] globals>>=
-static int cmpdeccp(const void *a, const void *b)
-{
-    const uni_decent_t *d1 = a, *d2 = b;
-
-    return d1->cp - d2->cp;
-}
-@
-
-<<Fully expand [[dec[i]]]/[[decbuf]]>>=
-int didex = 0;
-/* apply canonical decomp only */
-if(ntype < 2) {
-  int j;
-
-  for(j = 0; j < declen; j++) {
-    int cp = decbuf[j];
-    uni_decent_t de = {cp}, *mdec;
-    /* FIXME: change to manual bsearch */
-    if((mdec = bsearch(&de, dec, ondec, sizeof(*dec), cmpdeccp)) &&
-       mdec->type < 2) {
-      ++didex;
-      ntype = 1;
-      if(mdec->len != 1) {
-        memmove(decbuf + j + mdec->len, decbuf + j + 1,
-                (declen - (j + 1)) * sizeof(int));
-        declen += mdec->len - 1;
-      }
-      if(mdec->len)
-        memcpy(decbuf + j, decs + mdec->off, mdec->len * sizeof(int));
-      /* redo newly added character(s) */
-      j--;
-    }
-  }
-}
-int didex_canon = didex;
-@
-
-Next, any type of expansion is allowed.  This may perform additional
-canonical expansion, but only if a compatibility expansion was done
-first.  Thus, all exansions done in this phase are considered
-compatibility expansions, and change the type to 2.  If a previous
-expansion was already done, the result must be saved before changing
-the type to 2.
-
-<<Fully expand [[dec[i]]]/[[decbuf]]>>=
-int j;
-
-for(j = 0; j < declen; j++) {
-  int cp = decbuf[j];
-  uni_decent_t de = {cp}, *mdec;
-    /* FIXME: change to manual bsearch */
-  if((mdec = bsearch(&de, dec, ondec, sizeof(*dec), cmpdeccp))) {
-    ++didex;
-    if(didex_canon) {
-      <<Add/replace fully expanded entry>>
-       didex_canon = 0;
-     }
-     ntype = 2;
-     if(mdec->len != 1) {
-       memmove(decbuf + j + mdec->len, decbuf + j + 1,
-               (declen - (j + 1)) * sizeof(int));
-       declen += mdec->len - 1;
-     }
-     if(mdec->len)
-       memcpy(decbuf + j, decs + mdec->off, mdec->len * sizeof(int));
-      /* redo newly added character(s) */
-     j--;
-   }
-}
-@
-
-Finally, the fully expanded entry replaces the old one (if types did
-not change) or gets added (if types changed).
-
-<<Fully expand [[dec[i]]]/[[decbuf]]>>=
-if(didex) {
-  <<Add/replace fully expanded entry>>
-}
-@
-
-<<Add/replace fully expanded entry>>=
-if(ntype == dec[i].type) {
-  /* if type didn't change, just replace */
-  dec[i].off = ndecs;
-  dec[i].len = declen;
-} else {
-  /* otherwise, add a new, duplicate entry */
-  if(ndec == maxdec) {
-    maxdec *= 2;
-    resize(dec, maxdec);
-  }
-  dec[ndec].off = ndecs;
-  dec[ndec].len = declen;
-  dec[ndec].cp = dec[i].cp;
-  dec[ndec].type = ntype;
-  ndec++;
-}
-if(ndecs + declen > maxdecs) {
-  maxdecs *= 2;
-  resize(decs, maxdecs);
-}
-memcpy(decs + ndecs, decbuf, declen * sizeof(int));
-ndecs += declen;
-@
-
-Now all canonical and compatibility decomposition information has been
-read in.  The only thing that remains is the case folding information.
-Like the Full Composition Exclusion flag, the code points for case
-folding are ranges.  The values are fully decomposed strings.
-
-<<Make [[uninorm.gen]]>>=
-/* NFKC_CF */
-if(!(f = fopen(normf, "r"))) {
-  perror(normf);
-  exit(1);
-}
-while(fgets(lbuf, sizeof(lbuf), f)) {
-  char *s;
-  if(isspace(*lbuf) || *lbuf == '#' || !strstr(lbuf, "; NFKC_CF;"))
-    continue;
-  if((s = strchr(lbuf, '#')))
-    *s = 0;
-  /* field 1: code point(s) */
-  if(!(s = strchr(lbuf, ';')))
-    exit(1);
-  *s++ = 0;
-  /* field 2: flag name */
-  if(!(s = strchr(s, ';')))
-    exit(1);
-  /* field 3: decomposition string */
-  while(isspace(*++s));
-  char *deccp = s;
-  /* count # of code points */
-  int len;
-  for(len = 0, s = deccp; *s; len++) {
-    while(*s && !isspace(*s))
-      s++;
-    while(isspace(*s))
-      s++;
-  }
-  /* parse field 1 */
-  int rlow = strtol(lbuf, &s, 16), rhigh = rlow;
-  if(*s == '.' && s[1] == '.') {
-    rhigh = strtol(s + 2, &s, 16);
-    if(rhigh < rlow)
-      exit(1);
-  }
-  /* add entry for each code point in field 1 */
-  /* all sharing the same target string */
-  for(;rlow <= rhigh; rlow++, ndec++) {
-    if(ndec == maxdec) {
-      maxdec *= 2;
-      resize(dec, maxdec);
-    }
-    dec[ndec].cp = rlow;
-    dec[ndec].off = ndecs;
-    dec[ndec].len = len;
-    dec[ndec].type = 3;
-  }
-  /* add target string */
-  if(ndecs + len > maxdecs) {
-    maxdecs *= 2;
-    resize(decs, maxdecs);
-  }
-  for(len = 0, s = deccp; *s && len < dec[ndec-1].len; len++) {
-    decs[ndecs + len] = strtol(s, &s, 16);
-    while(isspace(*s)) s++;
-  }
-  if(dec[ndec-1].len != len)
-    exit(1);
-  ndecs += len;
-}
-fclose(f);
-@
-
-Now that everything has been read in, it is time to compress the
-decomposition strings.  There are two easy compressions:  all equal
-strings are shared, and a string may have the previous string as its
-prefix.  It is also possible to have a string share a suffix of the
-previous string as a prefix, but that is more difficult and probably
-not worth the effort.  The easy compressions are made easy by first
-sorting by decomposition string.
-
-<<[[mkuninorm]] globals>>=
-static int cmpdecs(const void *a, const void *b)
-{
-    const uni_decent_t *d1 = a, *d2 = b;
-    int l = d1->len < d2->len ? d1->len : d2->len;
-    int i, c;
-    for(i = 0; i < l; i++) {
-        c = decs[d1->off + i] - decs[d2->off + i];
-        if(c)
-            return c;
-    }
-    return (int)d1->len - (int)d2->len;
-}
-@
-
-<<Make [[uninorm.gen]]>>=
-/* Reorder/merge decs */
-qsort(dec, ndec, sizeof(*dec), cmpdecs);
-@
-
-Then, a new string buffer is created, where the compressed strings
-will be added.  It is initially as large as the old one, so there is
-no need to check the size.
-
-<<Make [[uninorm.gen]]>>=
-int *decs2, ndecs2 = 0;
-inisize(decs2, ndecs);
-@
-
-Next, just add strings if they are not identical to the previous
-entry, or just add a suffix if they have a prefix equal to the
-previous entry.  Since there are gaps, the savings due to compression
-cannot be calculated simply, so instead every time a string is not
-added, it is counted towards the saved space.
-
-<<Make [[uninorm.gen]]>>=
-int saved = 0;
-for(i = 0; i < ndec; ) {
-  int l = dec[i].len;
-   if(i > 0) {
-    /* share prefix if identical to previous entry */
-    int l2 = dec[i-1].len;
-    if(l2 < l && !memcmp(decs2 + dec[i-1].off, decs + dec[i].off,
-                         l2 * sizeof(*decs))) {
-      ndecs2 -= l2;
-      saved += l2;
-    }
-  }
-  memcpy(decs2 + ndecs2, decs+dec[i].off, l * sizeof(*decs));
-  /* share decomp string if identical to previous entry */
-  int j;
-  for(j = i + 1; j < ndec; j++) {
-    if(cmpdecs(&dec[i], &dec[j]))
-      break;
-    else
-      saved += l;
-  }
-  for(; i < j; i++)
-    dec[i].off = ndecs2;
-  ndecs2 += l;
-}
-@
-
-Now that the table has been compressed, the old table can be removed.
-The string table statistics are printed for my amusement.
-
-<<Make [[uninorm.gen]]>>=
-free(decs);
-fprintf(stderr, "Total string table length %d (%d saved)\n", ndecs2, saved);
-@
-
-In this program, string offsets were stored as integers.  However, in
-the main program, string offsets are short integers.  Thus, if the
-final, compressed table is large enough for offset overflow, this is a
-good time to say it.  The size was already printed, so die without
-comment.
-
-<<Make [[uninorm.gen]]>>=
-if(ndecs2 > 0x10000)
-  exit(1);
-@
-
-Now that all the tables have been generated, it is time to print them.
-Order doesn't really matter, so here's the string table.
-
-<<Make [[uninorm.gen]]>>=
-/* dump string table */
-fputs("const int deccp[] = {", stdout);
-for(i = 0; i < ndecs2 - 1; i++) {
-  if(!(i%8))
-    fputs("\n\t", stdout);
-  else
-    putchar(' ');
-  printf("0x%04X,", decs2[i]);
-}
-if(!(i%8))
-  fputs("\n\t", stdout);
-else
-  putchar(' ');
-printf("0x%04X\n"
-       "};\n", decs2[i]);
-@
-
-Since we already sorted by decomposition string, the canonical
-composition table should be next.  This consists of all type 0
-entries.  In order to assist debugging, the pair is displayed in a
-comment after each entry.
-
-<<Stuff to do before reading [[unif]]>>=
-const char *nxt = "";
-@
-
-<<Make [[uninorm.gen]]>>=
-/* Print canonical composition table ordered by decomp */
-puts("static const uni_decent_t cancomp[] = {");
-nxt = "";
-for(i = 0; i < ndec; i++)
-  if(!dec[i].type) {
-    printf("%s\t{0x%04X, %u, %u} /* %04X %04X */", nxt, dec[i].cp,
-           (int)dec[i].off, (int)dec[i].len, decs2[dec[i].off],
-           decs2[dec[i].off + 1]);
-    nxt = ",\n";
-  }
-puts("\n};");
-@
-
-The decomposition tables need to be sorted by code point.  In
-addition, the combined canonical/compatibility table should be sorted
-by type for duplicate code points.
-
-<<[[mkuninorm]] globals>>=
-static int cmpdeccp_t(const void *a, const void *b)
-{
-  const uni_decent_t *d1 = a, *d2 = b;
-
-  if(d1->cp == d2->cp)
-    return d1->type - d2->type;
-  else
-    return d1->cp - d2->cp;
-}
-@
-
-<<Make [[uninorm.gen]]>>=
-/* next tables need ordering by cp again */
-qsort(dec, ndec, sizeof(*dec), cmpdeccp_t);
-@
-
-The combined table for canonical and compatibility decomposition
-consists of all type 1 and 2 entries, and all type 0 entries for which
-there is not also a type 1 entry.  The sign of the length needs to be
-negative for type 2 entries.
-
-<<Make [[uninorm.gen]]>>=
-/* combined table for canonical/compatible decomp */
-puts("static const uni_decent_t decomp[] = {");
-nxt = "";
-for(i = 0; i < ndec; i++)
-  if(dec[i].type < 3) {
-    /* skip canonial comp if canonical decomp exists for it */
-    if(!dec[i].type && i < ndec - 1 && dec[i + 1].cp == dec[i].cp &&
-       dec[i + 1].type == 1)
-      i++;
-    printf("%s\t{0x%04X, %u, %s%u}", nxt, dec[i].cp,
-           (int)dec[i].off, dec[i].type > 1 ? "-" : "", (int)dec[i].len);
-    nxt = ",\n";
-  }
-puts("\n};");
-@
-
-Finally, the case folding table is just all type 3 entries.
-
-<<Make [[uninorm.gen]]>>=
-/* NFKC_CF table */
-puts("static const uni_decent_t nfkc_cf[] = {");
-nxt = "";
-for(i = 0; i < ndec; i++)
-  if(dec[i].type == 3) {
-    printf("%s\t{0x%04X, %u, %u}", nxt, dec[i].cp,
-           (int)dec[i].off, (int)dec[i].len);
-    nxt = ",\n";
-  }
-puts("\n};");
-@
-
-\chapter{Character Classification}
-
-Once the characters arrive, they need to be classified for lexical
-analysis and other purposes.
-
-<<Library [[uni]] Members>>=
-uni_prop.o
-@
-
-<<Library [[uni]] headers>>=
-#include "uni_prop.h"
-@
-
-<<uni_prop.h>>=
-<<Common C Warning>>
-#ifndef UNI_PROP_H
-#define UNI_PROP_H
-
-#include "uni_common.h"
-<<Character type exports>>
-#endif /* UNI_PROP_H */
-@
-
-<<makefile.rules>>=
-uni_prop.h: uni_common.h
-@
-
-<<uni_prop.c>>=
-<<Common C Header>>
-
-<<Character type local definitions>>
-
-<<Character type functions>>
-@
-
-<<Character type exports>>=
-#include "uni_prop.gen.h"
-@
-
-\lstset{language=make}
-<<makefile.rules>>=
-uni_prop.gen.h: parse-ucd
-	./parse-ucd
-@
-
-For regex:
-\begin{verbatim}
-Don't forgot sloppiness rules:
-numeric (UAX44-LM1):
-  compare as floating-point number w/ limited precision
-  e.g. 01.00 == 1
-name (UAX44-LM2):
-  ignore case, whitespace, underscore, and medial hyphens except 1180
-name (UTS18-2.5.1):
-  ignore case, whitespace, underscore, and all hyphens except 1180,
-     0F60, 0FB0
-  allow "namespace": prefix to apply if name doesn't match otherwise
-    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
-      insert CAPITAL and LOWER into appropriate spot.
-enum/propname (UAX44-LM3):
-  - case-insensitive
-  - remove *PREFIX* of is (not entire value if value is "is")
-  - remove all spaces, underscores, dashes
-
-bool:
-  punct == gc==P & gc!=S & !alpha
-  uni_punct == gc==P
-  digit == 0-9
-  uni_digit == gc==Nd
-  xdigit == 0-9a-fA-F
-  uni_xdigit == gc=Nd + Hex_Digit
-  alnum == alpha + digit
-  uni_alnum == alpha + uni_digit
-  blank == gc=Zs + TAB
-  graph == anything but White_Space, gc=Cc, gc=Cs, gc=Cn
-  print == graph + blank - gc=Cc
-  word == alnum + _ (by default)
-  uni_word == uni_alnum + gc=M + gc=Pc plus Join_Control
-opt:
-string
-  exemplar == CLDR://ldml/characters/exemplarCharacters (UnicodeSet)
-  Collation_Primary == UCA/allkeys.txt; not sure what to do about multi
-\end{verbatim}
-
-A few specific character classes that are useful for the compiler do
-not warrant a range table.  Instead, they are implemented as macros
-that compare directly to the limited set they contain.  These are:
-characters which act as line terminators, and characters which may
-initiate backslash-escapes.
-
-\lstset{language=C}
-<<Character type exports>>=
-#define is_nl(x) ((x) == '\n' || (x) == '\r' || (x) == '\v' || (x) == '\f' || \
-                  (x) == 0x0085 || (x) == 0x2028 || (x) == 0x2029)
-/* just use == '\\' for nfkc_cf */
-#define is_bs(x) (c == '\\' || c == 0xFE68 || c == 0xFF3C)
-@
-
-<<C Prototypes>>=
-int is_nl(uint32_t cp);
-int is_bs(uint32_t cp);
-@
-
-A mainline is provided for testing some of the mess above.  It also
-makes it easy to figure out what the gaps are, and what to do about
-them.
-
-\lstset{language=make}
-<<C Test Support Executables>>=
-chartypes \
-@
-
-<<makefile.rules>>=
-CHARTYPES_OBJS = uni_norm.o uni_io.o uni_common.o
-chartypes: uni_prop.c uni_prop.o $(CHARTYPES_OBJS)
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -DRNG_MAIN $(LDFLAGS) -o $@ $< $(CHARTYPES_OBJS)
-@
-
-\lstset{language=C}
-<<Character type functions>>=
-#ifdef RNG_MAIN
-#include "uni_norm.h"
-
-int main(int argc, const char **argv)
-{
-  <<Test character type functions>>
-  return 0;
-}
-#endif
-@
-
-First is to loop over all possible code points, and print the flags and
-classes.
-
-<<Test character type functions>>=
-int i;
-for(i = 0; i < 0x110000; i++) {
-  printf("%06X ", i);
-  <<Print flags and classes of cp [[i]]>>
-  putchar('\n');
-}
-@
-
-<<Print flags and classes of cp [[i]]>>=
-/* standard character class */
-fputs(uni_gc_nameof[uni_gc_of(i)].short_name, stdout);
-putchar(' ');
-@
-
-<<Print flags and classes of cp [[i]]>>=
-/* other flags */
-if(uni_ccc_of(i))
-  putchar('-'); /* can be moved by canon_order */
-if(!is_uni_ASSIGNED(i))
-  putchar('?');
-if(is_uni_Dep(i))
-  putchar('D');
-if(is_uni_DI(i))
-  putchar('!');
+for regex, only exported portion is string prop Collation_Primary (multi?)
 @
 
 \chapter{Character Names}
 
-Another way to get input is to use backslash-escapes.  These require
-knowledge of all Unicode character names.
+It is difficult to come up with a good storage mechanism for character
+names.  For one thing, there are a lot of them, even if the
+algorithmically generated names are removed.  Another issue is that
+the storage method should match the usage, so a variety of storage
+mechanims may need to be supported.  Rather than supporting every use
+case, the raw list of names can be easily retrieved and used in a
+per-application static data generator similar to parse-ucd.  Instead,
+a few common use cases are considered.
 
-First, let's collect the names and their values in comma-separated
-value files.  We can generate all single-character Unicode names which
-are not algorithmically generated directly from UnicodeData.txt.
-
-\lstset{language=make}
-<<Plain Built Files>>=
-charnames.uni \
-@
-
-<<makefile.rules>>=
-charnames.uni: $(UNIDATA)
-	cut -d\; -f1-2 $(UNIDATA) | \
-	  egrep -v '<|CJK COMPATIBILITY IDEOGRAPH' | \
-	    while IFS=\; read cp n; do \
-              echo "$$n,$$((0x$$cp))"; \
-            done | sort >$@
-@
-
-Aliases come from NameAliases.txt, from the exact same feild numbers.
-
-<<makefile.vars>>=
-UNIALTNAM = $(UCD_LOC)/NameAliases.txt
-@
-
-<<Plain Built Files>>=
-charnames.unia \
-@
-
-<<makefile.rules>>=
-charnames.unia: $(UNIALTNAM)
-	grep '^[0-9A-F]' $(UNIALTNAM) | cut -d\; -f1-2 | \
-	  while IFS=\; read cp n; do \
-            echo "$$n,$$((0x$$cp))"; \
-          done | sort >$@
-@
-
-Similarly, all multi-character Unicode names can be generated directly
-from NamedSequences.txt.
-
-<<makefile.vars>>=
-UNISEQ = $(UCD_LOC)/NamedSequences.txt
-@
-
-<<Plain Built Files>>=
-charnames.uniseq \
-@
-
-<<makefile.rules>>=
-charnames.uniseq: $(UNISEQ)
-	grep '^[A-Z]' $< | while IFS=\; read n cp; do \
-           echo -n "$$n"; \
-           for y in $$cp; do \
-              echo -n ,$$((0x$$y)); \
-           done; \
-           echo; \
-         done > $@
-@
-
-Extracting the XML names could be done with sed as well, but since it
-is XML, and the file format is more likely to retain the same XML
-structure than to retain the same exact text format, XSLT is used
-instead.  The name database has subsets called groups.  Using every
-single name is certain to frequently collide with Unicode names, so a
-particular group should be chosen.  The 2007 group is used by my own
-applications.
-
-<<makefile.config>>=
-# XML entity name group
-XML_ENTITY_NAME_GROUP = 2007
-@
-
-<<Plain Built Files>>=
-charnames.xml \
-@
-
-<<makefile.rules>>=
-charnames.xml: uxml.xslt $(XMLUNI)
-	xsltproc --stringparam GROUP '$(XML_ENTITY_NAME_GROUP)' $^ | \
-	  sed 's/,U/,0x/;s/;//;s/-/,0x/g' | sort -u >$@
-@
-
-<<Plain Build Files>>=
-uxml.xslt
-@
-
-\lstset{language=xml}
-
-<<uxml.xslt>>=
-<?xml version="1.0"?>
-<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
-<<Output XML entity names in more managable form>>
-</xsl:stylesheet>
-@
-
-First, the output format needs to set to plain text.  In order to
-avoid formatting of the XML to creep into the text file, all elements
-strip plain spaces.
-
-<<Output XML entity names in more managable form>>=
-<xsl:output method="text"/>
-<xsl:strip-space elements="*"/>
-@
-
-Next, we extract the group.  Each group defines which sets it contains.
-
-<<Output XML entity names in more managable form>>=
-<xsl:param name="GROUP"/>
-<xsl:template match="/unicode/entitygroups">
-  <xsl:for-each select="group[@name=$GROUP]/set">
-    <<Process XML entity set>>
-  </xsl:for-each>
-</xsl:template>
-@
-
-To process each set, a separate template is used.  This template takes
-the set name as a parameter.
-
-<<Process XML entity set>>=
-<xsl:apply-templates select="/unicode/charlist">
-  <xsl:with-param name="set" select="@name"/>
-</xsl:apply-templates>
-@
-
-The per-set template searches the charlist for entities which claim
-membership in the set.  For each such entity, it prints the id
-attribute, whose value is the XML entity name, and the parent's id,
-whose value is the Unicode code point.  A semicolon is gratuitously
-appended to force a newline (otherwise the extreme whitespace
-stripping will remove it).  The Unicode code point is in the form
-\verb|U######| (the code point in hexadecimal) or
-\verb|U######-######| (two hexadecimal code points).  It may be
-possible to convert the dash to a comma and eliminate the semicolon
-and U using XSLT, but I don't know how.  Instead, that transformation
-is done by sed above.
-
-<<Output XML entity names in more managable form>>=
-<xsl:template match="/unicode/charlist">
-  <xsl:param name="set"/>
-  <xsl:for-each select="character/entity[@set=$set]"
-><xsl:value-of select="@id"/>,<xsl:value-of select="parent::*/@id"/>;
-</xsl:for-each>
-</xsl:template>
+<<note>>=
+CJK COMPATIBILITY IDEOGRAPH is algorithmically generated, but not a range
+Multi-character Unicode names are from NamedSequences.txt
 @
 
 So, what do we do with all of these names?  The obvious thing is to
@@ -8027,10 +6469,10 @@ For that, the ideal structure is probably a suffix table.  Of
 course such structures can be much larger than the equivalent hash
 table.
 
-\chapter{Persistent Strings}
+\section{Persistent Strings}
 
 Note that GLib provides some of this functionality with its
-q[[GStringChunk]] and [[GQuark]] datatypes.  The main difference is
+[[GStringChunk]] and [[GQuark]] datatypes.  The main difference is
 that my code stored a length, and GLib stores a terminating zero.  The
 terminating zero (rarely) takes up less space, but disallows zeroes in
 the strings. For my compiler-wide table, I also stored constant
@@ -8075,7 +6517,7 @@ uni_strs.o
 #ifndef UNI_STRS_H
 #define UNI_STRS_H
 
-#include "uni_common.h"
+#include "uni_prop.h"
 /* if 0-len string, use 0; don't call this function! */
 /* if len == 0, function does strlen() for you */
 /* 0 returned if len == 0 or !autoadd and not already there */
@@ -8091,12 +6533,10 @@ const char *str_for(uint32_t no, int *len);
 #endif /* UNI_STRS_H */
 @
 
-<<Common C Includes>>=
-#include "uni_strs.h"
-@
-
 <<uni_strs.c>>=
 <<Common C Header>>
+#include "uni_strs.h"
+// static_proto
 
 <<Master string table definitions>>
 
@@ -8488,7 +6928,7 @@ strhash[h] = hen + 1;
 return hen + 1;
 @
 
-\chapter{Character Names, Revisited}
+\section{Storing the Names}
 
 Now that we have the ability to use a table of built-in strings, the
 various name tables can be added.  A general string table generator is
@@ -8513,6 +6953,7 @@ mkstrs \
 \lstset{language=C}
 <<mkstrs.c>>=
 <<Common C Header>>
+#include "uni_strs.h"
 
 <<[[mkstrs]] definitions>>
 
@@ -9397,6 +7838,7 @@ mkstrs-hash: mkstrs-hash.c
 \lstset{language=C}
 <<mkstrs-hash.c>>=
 <<Common C Header>>
+#include "uni_strs.h"
 @
 
 In order to generate the hash table, it needs to be built in memory.
@@ -9699,7 +8141,7 @@ name lookup.
 #ifndef CHARNAMES_H
 #define CHARNAMES_H
 
-#include "uni_common.h"
+#include "uni_prop.h"
 <<Character name lookup exports>>
 
 #endif
@@ -10312,6 +8754,820 @@ while(--tl >= 0)
 return fulllen;
 @
 
+\chapter{XML Data Files}
+
+As mentioned in the introduction, the XML standard's entity names are
+generally much shorter than Unicode names, so a facility to use them
+instead is provided.  This requires parsing the XML entity database.
+One way to deal with this would be to turn it into a simple-to-parse
+format using XSLT.  An earlier version of this library did just that.
+However, since there are other XML files to parse as well, and
+everything else is being done in parse-ucd, it is now read in directly
+using libxml2.%
+\footnote{\url{http://xmlsoft.org/}}
+For maximum simplicity, each file is simply read in using the
+document-at-once
+parser\footnote{\url{http://xmlsoft.org/html/libxml-parser.html}}.
+While the incremental (xmlreader) mode would probably be more
+efficient for memory usage, this program is only run once, during
+build time, so the memory usage should not matter much.  At least the
+XML structure can be freed when finished.  Scanning the tree is done
+using manual traversal.  While the associated libxslt could be used to
+run the old code directly, the C code is actually much simpler.
+
+<<UCD parser local definitions>>=
+#include <libxml/parser.h>
+#include <libxml/xmlerror.h>
+@
+
+\lstset{language=make}
+<<makefile.vars>>=
+XML_CFLAGS := $(shell xml2-config --cflags)
+XML_LDFLAGS := $(shell xml2-config --libs)
+# adding xml flags only to PARSER_CFLAGS would be nice, but hard
+# to integrate w/ static_proto gen
+PARSER_CFLAGS += -DXMLUNI=\"$(XMLUNI)\"
+EXTRA_CFLAGS += $(XML_CFLAGS)
+PARSER_LDFLAGS += $(XML_LDFLAGS)
+@
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+#define xml_opts XML_PARSE_NOENT | /* expand known entities */ \
+                 XML_PARSE_NONET | /* forbid network access */ \
+		 XML_PARSE_NOCDATA | /* merge CDATA as text */ \
+                 XML_PARSE_COMPACT | /* compact small text nodes */ \
+		 XML_PARSE_HUGE /* no hard-coded limits */
+/* avoid type cast in every strcmp */
+#define xml_isname(n, s) !strcmp((const char *)n->name, s)
+@
+
+<<Parse character data files>>=
+xmlInitParser();  /* xmlCleanupParser() when done */
+xmlDocPtr doc = xmlReadFile(XMLUNI, NULL, xml_opts);
+if(!doc) {
+  perror(XMLUNI);
+  exit(1);
+}
+xmlNodePtr n;
+for(n = doc->children; n; n = n->next)
+  if(n->children && xml_isname(n, "unicode"))
+    break;
+if(!n) {
+  perror(XMLUNI);
+  exit(1);
+}
+@
+
+The name database has subsets called groups.  Using every single name
+is certain to frequently collide with Unicode names, so a particular
+group should be chosen.  The 2007 group is used by my own
+applications, and seems like a reasonable default.
+
+\lstset{language=make}
+<<makefile.config>>=
+# XML entity name group
+XML_ENTITY_NAME_GROUP = 2007
+@
+
+<<makefile.vars>>=
+PARSER_CFLAGS += -DXML_ENTITY_NAME_GROUP=\"$(XML_ENTITY_NAME_GROUP)\"
+@
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+/* avoid multiple type casts in every attr search */
+#define xml_prop(n, p) (const char *)xmlGetProp(n, (const xmlChar *)p)
+@
+
+<<Parse character data files>>=
+xmlNodePtr c;
+const char **grp_set;
+int ngrp_set;
+for(c = n->children; c; c = c->next) {
+  if(!c->children || !xml_isname(c, "entitygroups"))
+    continue;
+  for(c = c->children; c; c = c->next) {
+    if(!c->children || !xml_isname(c, "group"))
+      continue;
+    const char *gn = xml_prop(c, "name");
+    if(gn && !strcmp(gn, XML_ENTITY_NAME_GROUP))
+      break;
+  }
+  break;
+}
+if(!c) {
+  perror("group " XML_ENTITY_NAME_GROUP " not in " XMLUNI);
+  exit(1);
+}
+{
+  xmlNodePtr cc;
+  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
+    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
+      continue;
+    ngrp_set++;
+  }
+  inisize(grp_set, ngrp_set);
+  for(ngrp_set = 0, cc = c->children; cc; cc = cc->next) {
+    if(cc->type != XML_ELEMENT_NODE || !xml_isname(cc, "set"))
+      continue;
+    grp_set[ngrp_set++] = xml_prop(cc, "name");
+  }
+  qsort(grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp);
+}
+@
+
+<<UCD parser local functions>>=
+static int sort_strcmp(const void *a, const void *b)
+{
+  return strcmp(*(const char **)a, *(const char **)b);
+}
+@
+
+Once the group's set names are known, the charlist is scanned for
+character tags with an entity descriptor belonging to one of those
+sets.  The id of the entity is the entity name, and the id of the
+character is the Unicode code point.  Some of these define
+multi-character code points; these will be added along with the named
+multi-character Unicode groups later.
+
+<<Parse character data files>>=
+decl_str(xmlname);
+for(n = n->children; n; n = n->next)
+  if(n->children && xml_isname(n, "charlist"))
+    break;
+if(!n) {
+  perror("charlist not in " XMLUNI);
+  exit(1);
+}
+for(n = n->children; n; n = n->next) {
+  if(!n->children || !xml_isname(n, "character"))
+    continue;
+  for(c = n->children; c; c = c->next) {
+    const char *set;
+    const char *cid, *eid;
+    if(c->type != XML_ELEMENT_NODE || !xml_isname(c, "entity") ||
+       !(set = xml_prop(c, "set")) ||
+       !bsearch(&set, grp_set, ngrp_set, sizeof(*grp_set), sort_strcmp) ||
+       !(eid = xml_prop(c, "id")) || !(cid = xml_prop(n, "id")))
+      continue;
+    if(!strchr(cid, '-')) {
+      low = high = strtol(cid + 1, NULL, 16);
+      /* note: duplicates will occur: */
+      /*   both fully duplicated entries and multiple names for one cp */
+      add_str_raw(xmlname, eid);
+    } else {
+      <<Add multi-char xml entity>>
+    }
+  }
+}
+xmlFreeDoc(doc);
+@
+
+<<Parse character data files>>=
+/* for testing to see if read properly */
+#if 0
+str_to_enum(&parsed_props[prop_xmlname], NULL);
+#endif
+@
+
+The CLDR also uses XML rather than simple tables.  Doing hand-coded
+XSLT for hundreds of data files seemed excessive, which is the main
+reason why I abandoned XSLT.  Note that unlike unicode.xml, there is a
+local, valid DTD for every CLDR file.
+
+\lstset{language=make}
+<<makefile.vars>>=
+PARSER_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\"
+@
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+#define xml_opts_dtd xml_opts | \
+		     XML_PARSE_DTDLOAD | XML_PARSE_DTDATTR | \
+		     XML_PARSE_DTDVALID /* use DTD if on local disk */
+@
+
+<<Parse character data files>>=
+chdir(cwd);
+chdir(CLDR_LOC);
+<<Parse CLDR files>>
+@
+
+Since the CLDR deals with locale data, the first thing to do is
+determine what locale is being used.  The locale name consists of a
+language identifier, followed by optional extensions.  The language
+identifier consists of a language subtag, followed by an optional
+script subtag, followed by an optional territory subtag, followed by
+optional variant subtags.  These are all case-insensitive, and are
+separated by either dashes or underscores.  The supported language
+identifier tags are listed in the supplemental metadata.  As with all
+of the CLDR data, versioning information is ignored.\footnote{One day,
+the versions of all data files used in building this library should be
+obtainable as a global variable or API call.  However, only overall
+version numbers should be used, and not the individual constituent
+file modification times.}
+
+<<Parse CLDR files>>=
+doc = xmlReadFile("common/supplemental/supplementalMetadata.xml",
+                  NULL, xml_opts_dtd);
+if(!doc) {
+  perror("supplementalMetadata.xml");
+  exit(1);
+}
+<<Prepare for parsing CLDR supplemental metadata>>
+for(n = doc->children; n; n = n->next) {
+  if(n->children && xml_isname(n, "supplementalData")) {
+    for(n = n->children; n; n = n->next) {
+      /* ignore version, generation, cldrVersion */
+      if(!n->children || !xml_isname(n, "metadata"))
+        continue;
+      for(n = n->children; n; n = n->next) {
+        if(!n->children)
+	  continue;
+        <<Parse CLDR supplemental metadata>>
+      }
+      break;
+    }
+    break;
+  }
+}
+<<Finish parsing CLDR supplemental metadata>>
+xmlFreeDoc(doc);
+@
+
+The data we're looking for is under the validity tag.  Each set is
+listed as a ``variable'' whose value is the whitespace-separated list
+of names.  In fact, one could make an argument that all of the
+variables of type choice are useful to add as enumerations.  The main
+argument against this is that some of the lists are rather long, and
+the enumerations' use of binary searching (rather than, say, hash
+tables) may be slow.
+
+<<Parse CLDR supplemental metadata>>=
+else if(xml_isname(n, "validity")) {
+  for(c = n->children; c; c = c->next) {
+    if(!c->children)
+      continue;
+    <<Parse CLDR validity entries>>
+  }
+}
+@
+
+<<Parse CLDR validity entries>>=
+else if(xml_isname(c, "variable")) {
+  const char *t = xml_prop(c, "type");
+  if(!strcmp(t, "choice")) {
+    const char *v = xml_prop(c, "id");
+    if(!c->children || !c->children->content || !v || v[0] != '$')
+      continue; /* should never happpen */
+    int pno = add_prop(v + 1);
+    uint32_t str[64];
+    for(s = (char *)c->children->content; isspace(*s); s++);
+    for(i = 0; *s; i++) {
+      char *p = (char *)str;
+      while(!isspace(*s) && *s)
+        *p++ = *s++;
+      while((p - (char *)str) % 4)
+        *p++ = 0;
+      add_str_rng(&parsed_props[pno], i, i, str, (p - (char *)str) / 4);
+      while(isspace(*s))
+        s++;
+    }
+    str_to_enum(&parsed_props[pno], NULL);
+    free(parsed_props[pno].rng_dat);
+    parsed_props[pno].rng_dat = NULL;
+  }
+  <<Process other CLDR validity variables>>
+}
+@
+
+<<Ignore unimplemented enums>>=
+/* ignore auto-generated enums for obsolete properties */
+if(!parsed_props[i].rng_dat && i < num_prop_aliases)
+  continue;
+@
+
+In addition, the entries in \$grandfathered and some other ISO
+language codes are treated differently within Unicode and the CLDR.
+These translations are under the alias tag, in languageAlias elements.
+Similarly, script, territory, and variants have aliases as well.
+
+<<Parse CLDR supplemental metadata>>=
+else if(xml_isname(n, "alias")) {
+  
+}
+@
+
+The extensions supported by the CLDR are listed in the common/bcp47
+data files.
+
+<<UCD parser local definitions>>=
+#include <dirent.h>
+@
+
+<<Parse CLDR files>>=
+/* note: in most files, version info is silently ignored/dropped */
+/* however, when generating files, it might be a good idea to put that */
+/* info in to allow strings to determine versioning */
+
+/* bcp47: locale variants */
+/* need lookup by extension first (u/t), then name/aliases */
+/* for each keyword, need lookup of valid values */
+
+/* need parser function for locale names */
+/*  en_US-u-ca-blah */
+/*    -> en_US is full locale name (name+script) */
+/*       u-ca is a keyword with value blah */
+/*  en_US@ca=blah is equivalent */
+/*     but keywords with aliases may only use aliases in @-notation */
+struct dirent *de;
+DIR *d = opendir("common/bcp47");
+if(!d) {
+  perror("CLDR bcp47");
+  exit(1);
+}
+chdir("common/bcp47");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  doc = xmlReadFile(de->d_name, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(de->d_name);
+    exit(1);
+  }
+  for(n = doc->children; n; n = n->next)
+    /* not sure why 1st entry is always empty ldmlBCP47 */
+    if(n->children && xml_isname(n, "ldmlBCP47")) {
+      for(n = n->children; n; n = n->next) {
+        /* ignore version */
+	/*  although version/number could be added as literal text to output */
+	/* ignore generation */
+	/*  although generation/date could be added with version/number */
+	/* ignore deprecated cldrVersion */
+        if(n->children && xml_isname(n, "keyword")) {
+          for(n = n->children; n; n = n->next) {
+	    if(xml_isname(n, "key") ||
+	       /* attribute is actually 3-letter standalone attribute flag */
+	       xml_isname(n, "attribute")) {
+	      const char *name = xml_prop(n, "name");
+	      const char *desc = xml_prop(n, "description");
+	      const char *alias = xml_prop(n, "alias");
+	      const char *depr = xml_prop(n, "deprecated");
+	      const char *ext = xml_prop(n, "extension");
+	      /* ignoring since= attr */
+	      if(!ext)
+	        ext = "u";
+	      if(!alias)
+	        alias = name;
+	      /* note: alias may be multiple space-separated aliases */
+	      /* if alias present, only alias may be used in loc@var */
+	      /* but none observed in wild */
+              if(depr && !strcmp(depr, "false"))
+	        depr = NULL;
+#if 0
+	      printf("%s-%s/%s %s\n", ext, name, alias,
+	             depr ? "deprecated" : "");
+#endif
+	      /* note: t_i0 may have other valid keys: tags indicating method */
+	      /* note: t_k0 is same way */
+	      /* note: t_t0 is same way */
+	      /* note: t_x0 is generic tags only */
+	      for(c = n->children; c; c = c->next) {
+	        if(xml_isname(c, "type")) {
+		  name = xml_prop(c, "name");
+		  alias = xml_prop(c, "alias");
+		  desc = xml_prop(c, "description");
+		  depr = xml_prop(c, "deprecated");
+		  /* ignoring since= attr */
+		  if(!alias)
+		    alias = name;
+		  /* note: alias may be multiple space-separated aliases */
+		  /* 1st alias is preferred */
+		  if(depr && !strcmp(depr, "false"))
+		    depr = NULL;
+		  /* special names: */
+		  /*   REORDER_CODE reordering block name(s) */
+		  /*   CODEPOINTS one or more 4-6 hex digits */
+#if 0
+		  printf("  %s/%s %s\n", name, alias, depr ? "deprecated" : "");
+#endif
+	        }
+	      }
+	    }
+	  }
+	  break;
+	}
+      }
+      break;
+    }
+  xmlFreeDoc(doc);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<UCD parser local functions>>=
+static void parse_ldml(const char *name)
+{
+  /* ignore special tags everywhere, since it's undefined */
+  xmlDocPtr doc = xmlReadFile(name, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(name);
+    exit(1);
+  }
+  xmlNodePtr n, c;
+  for(n = doc->children; n; n = n->next)
+    /* not sure why 1st entry is always empty ldml */
+    if(n->children && xml_isname(n, "ldml")) {
+      /* ignore draft attribute */
+      /* ignore deprecated fallback tag */
+      for(n = n->children; n; n = n->next) {
+	if(!n->children)
+	  continue;
+	<<Parse ldml sections>>
+      }
+      break;
+    }
+  xmlFreeDoc(doc);
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "identity")) {
+  /* ignore version, generation */
+  const char *lang = NULL;
+  const char *scr = NULL;
+  const char *ter = NULL;
+  const char *var = NULL;
+  const char *alias = NULL, *alias_path = NULL;
+  for(c = n->children; c; c = c->next) {
+    /* e.g. zh in zh_Hans_SG */
+    if(xml_isname(c, "language"))
+      lang = xml_prop(c, "type");
+    /* e.g. Hans in zh_Hans_SG */
+    else if(xml_isname(c, "script"))
+      scr = xml_prop(c, "type");
+    /* e.g. SG in zh_Hans_SG */
+    else if(xml_isname(c, "territory"))
+      ter = xml_prop(c, "type");
+    /* e.g. POSIX in en_US_POSIX */
+    else if(xml_isname(c, "variant"))
+      var = xml_prop(c, "type");
+    else if(xml_isname(c, "alias")) {
+      /* note: should this even be supported?  is it used? */
+      alias = xml_prop(c, "source");
+      alias_path = xml_prop(c, "path");
+    }
+    /* note that draft, references, alt fields ignored above */
+  }
+  /* file name should be following text */
+#if 0
+  printf("lang: %s", lang);
+  if(scr)
+    printf("_%s", scr);
+  if(ter)
+    printf("_%s", ter);
+  if(var)
+    printf("_%s", var);
+  putchar('\n');
+#endif
+}
+@
+
+<<Parse CLDR files>>=
+/* casing: special casing rules */
+/* need to convert this to a binary file format */
+/* need to load at run-time based on locale var or desired locale */
+/* is this even useful?  supposedly internal-use-only */
+d = opendir("common/casing");
+if(!d) {
+  perror("CLDR casing");
+  exit(1);
+}
+chdir("common/casing");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "metadata")) {
+  for(c = n->children; c; c = c->next)
+    if(xml_isname(c, "casingData")) {
+      for(c = c->children; c; c = c->next) {
+        if(!xml_isname(c, "casingItem"))
+	  continue;
+	/* type should be enum of all potential types */
+	    /* calendar-field day-format-except-narrow */
+	    /* day-narrow day-standalone-except-narrow */
+	    /* displayName displayName-count era-abbr */
+	    /* era-name era-narrow language key */
+	    /* metazone-long month-format-except-narrow */
+	    /* month-standalone-except-narrow */
+	    /* month-narrow quarter-abbreviated */
+	    /* quarter-format-wide tense territory */
+	    /* quarter-standalone-wide script symbol */
+	    /* type metazone-short zone-exemplarCity */
+	  /* not sure if should allow "other" types */
+	/* content should be enum of values: */
+	  /* titlecase/uppercase/lowercase */
+#if 0
+        printf(" casing %s: %s\n", xml_prop(c, "type"),
+	                           c->children->content);
+#endif
+      }
+      break;
+    }
+}
+@
+
+<<Parse CLDR files>>=
+/* collation: locale-specific collation rules */
+d = opendir("common/collation");
+if(!d) {
+  perror("CLDR collation");
+  exit(1);
+}
+chdir("common/collation");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "collations")) {
+  const char *subl = xml_prop(n, "validSubLocales");
+#if 0
+  /* space-separated list of full locale names */
+  if(subl)
+    printf("sublang: %s\n", subl);
+#endif
+  /* ignore version, draft attrs */
+  const char *def = "standard";
+  for(c = n->children; c; c = c->next) {
+    /* should be same enum type as types below */
+    if(xml_isname(c, "default")) {
+      def = xml_prop(c, "choice");
+      if(!def)
+        def = xml_prop(c, "type"); /* deprecated, but used */
+      /* ignore draft, references, alt attrs */
+      /* can have more than one, but why would you? */
+    } else if(xml_isname(c, "collation")) {
+      /* ignore draft, standard, references, alt */
+      if(!subl) /* technically, this isn't a req, but it's safe */
+        subl = xml_prop(c, "validSubLocales");
+      /* ignore draft, standard, references, alt attrs */
+      /* ignore visibility attr */
+      /* all available types should be an enum */
+      /* or at least easily looked up on per-lang basis */
+      /* most langs have no alt types, but some have many */
+#if 0
+      printf("[rules for type %s]\n", xml_prop(c, "type"));
+#endif
+      xmlNodePtr cc;
+      const char *base = NULL; /* DUCET by default */
+      for(cc = c->children; cc; cc = cc->next) {
+        if(xml_isname(cc, "base")) {
+	  xmlNodePtr ccc;
+	  for(ccc = cc->children; ccc; ccc = ccc->next)
+	    if(xml_isname(ccc, "alias")) {
+	      base = xml_prop(ccc, "source");
+	      /* path should always be /ldml/collations */
+	      break;
+	    }
+	} else if(xml_isname(cc, "settings")) {
+	  xmlAttrPtr a;
+	  /* note: only settings in wild are: */
+	  /*   backwards=on */
+	  /*   caseFirst=upper */
+	  /*   normalization=on */
+	  /*   alternate=shifted */
+	  /*   variableTop=<n> */
+	  /*   strength=Tertiary */
+	  /*   hiraganaQuaterary=on */
+	  /* valid, though: */
+	  /*  strength=primary|secondary|tertiary|quaternary|identical */
+	  /*  alternate=non-ignorable|shifted */
+	  /*  backwards=on|off */
+	  /*  normalization=on|off */
+	  /*  caseLevel=on|off */
+	  /*  caseFirst=upper|lower|off */
+	  /*  hiraganaQuarternary=on|off */
+	  /*  hiraganaQuaternary=on|off */
+	  /*  numeric=on|off */
+	  /*  private=true|false */  /* deprecated */
+	  /*  variableTop='x' */
+	  /*  reorder=? */
+#if 0
+          fputs("  settings", stdout);
+	  for(a = cc->properties; a; a = a->next)
+	    printf(" %s=%s", a->name, a->children->content);
+	  putchar('\n');
+#endif
+        } else if(xml_isname(cc, "rules")) {
+	  xmlNodePtr r;
+	  for(r = cc->children; r; r = r->next) {
+	    if(r->type != XML_ELEMENT_NODE)
+	      continue;
+	    /* r->name may be alias.  not seen in wild. */
+	    /* r->name may be import (repeatedly).  not seen in wild. */
+	    /* r->name should be enum */
+	    /* reset [before=primary/secondary/tertiary] */
+	    /* note: reset arg may be tag: */
+	    /*    <when>_<lev>_ignorable */
+	    /*      <lev>=primary secondary tertiary non */
+	    /*      <when>=first last */
+	    /*    <when>_variable */
+	    /*    <when>_trailing */
+	    /*    cp hex=... */
+	    /* p pc s sc t tc i ic */ /* q qc are deprecated */
+	    /*   each takes interleaved raw data, <cp hex=>, <last_variable/> */
+	    /* x [<context>..</>] {p pc s sc ...}* [<extend>..</>] */
+	    /*  context & extend are interleaved raw data & <cp hex=> */
+#if 0
+            printf(" rule: %s%s '%s'\n", r->name,
+	           r->properties &&
+		     r->properties->children ?
+		       r->properties->children->content : "",
+		   r->children->type == XML_ELEMENT_NODE ?
+		      r->children->name :
+		      r->children->content);
+#endif
+          }
+        } else if(xml_isname(cc, "suppress_contractions")) {
+#if 0
+          printf("  suppress %s\n", cc->children->content);
+	  /* note: may be interleaved raw data and <cp hex="...."> tags */
+#endif
+        } else if(xml_isname(cc, "optimize")) {
+	  /* ??? */
+	  /* interleaved raw data and <cp hex="..."> tags */
+	}
+      }
+    } else if(xml_isname(c, "alias")) {
+      /* path should always be //ldml/collations */
+#if 0
+      printf("  [copy from %s (%s)]\n", xml_prop(c, "source"),
+             xml_prop(c, "path"));
+#endif
+    }
+  }
+#if 0
+  printf("[default: %s]\n", def);
+#endif
+}
+@
+
+<<Parse CLDR files>>=
+/* main: "other" rules */
+d = opendir("common/main");
+if(!d) {
+  perror("CLDR main");
+  exit(1);
+}
+chdir("common/main");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
+}
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "dates")) {
+  /* ignore draft/standard/references/alt tags */
+  const char *subl = xml_prop(n, "validSubLocales");
+  for(c = n->children; c; c = c->next) {
+    if(xml_isname(c, "alias")) {
+    } else if(xml_isname(c, "localizedPatternChars")) {
+      /* deprecated */
+      /* ignore draft/standard/references/alt */
+      if(!subl)
+        subl = xml_prop(c, "validSubLocales");
+      /* data is interleaved raw data & <cp hex=> */
+    } else if(xml_isname(c, "dateRangePattern")) {
+      /* deprecated */
+      /* ignore draft/standard/references/alt */
+      if(!subl)
+        subl = xml_prop(c, "validSubLocales");
+      /* data is interleaved raw data & <cp hex=> */
+    } else if(xml_isname(c, "calendars")) {
+      /* calendar type=gregorian */
+      /*      months */
+      /*        monthContext type="format" */
+      /*          monthWidth type="wide" */
+      /*            <month type="8">Leqeeni</month> */
+    } else if(xml_isname(c, "timeZoneNames")) {
+    }
+  }
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "alias")) {
+  /* is this even used?  should it be supported? */
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "localeDisplayNames")) {
+  /* <languages><language type="..">...</>.... */
+  /* <scripts><script type="..">...</>... */
+  /* <territories><territory type='..'>...</>...*/
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "layout")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "contextTransforms")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "characters")) {
+  /* exemplarCharacters [type=...]>[uniset]</> */
+  /* note: this is an optional Unicode property */
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "delimiters")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "measurement")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "numbers")) {
+  /* <currenceis><currency type="DJF"><symbol>Fdj</symbol>...*/
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "units")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "listPatterns")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "posix")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "segmentations")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "rbnf")) {
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "references")) {
+}
+@
+
+<<FIXME>>=
+implement
+
+rbnf -> rbnf for generating number names from numbers
+  doctype = ldml
+segments -> patterns for text segmentation
+  doctype = ldml
+supplemental -> various
+  doctype = ldmlSupplemental
+transforms -> mappings (no real single name for each, though)
+@
+
+<<FIXME>>=
+for regex:
+  string property "exemplar" is UnicodeSet ldml/characters/exmplarCharacters
+@
+
 \chapter{File Input}
 
 Basic I/O support is provided in the form of UTF decoders and
@@ -10341,7 +9597,7 @@ uni_io.o
 #ifndef UNI_IO_H
 #define UNI_IO_H
 
-#include "uni_common.h"
+#include "uni_prop.h"
 <<Unicode I/O Exports>>
 #endif
 @
@@ -11294,7 +10550,7 @@ should make the buffer automatically expand when necessary.
 <<Normalized input buffer state>>=
 /* maximal decomposition of a single char is 18 chars */
 /* leave room in buf for at least 2 */
-int buf[128];
+uint32_t buf[128];
 @
 
 We'll also need to know how many characters are in the buffer, and how
@@ -11309,7 +10565,7 @@ one character could not possibly be modified any more.
 
 <<Return normalized character if not EOF>>=
 int oklen = ufn->oklen;
-int *buf = ufn->buf;
+uint32_t *buf = ufn->buf;
 while(!oklen && !uf->eof) {
   /* read a char into end of buf, if needed & possible */
   <<Read and normalize a character>>
@@ -11345,14 +10601,14 @@ if(c != -1)
     case UN_NONE: /* here to remove warning */
     case UN_NFD:
     case UN_NFC:
-      bp += NFD_dec(buf + bp, 1);
+      bp += uni_NFD_dec(buf + bp, 1);
       break;
     case UN_NFKD:
     case UN_NFKC:
-      bp += NFKD_dec(buf + bp, 1);
+      bp += uni_NFKD_dec(buf + bp, 1);
       break;
     case UN_NFKC_CF:
-      bp += NFKC_Casefold(buf + bp, 1);
+      bp += uni_NFKC_Casefold(buf + bp, 1);
   }
 @
 
@@ -11361,7 +10617,7 @@ no characters can be obtained from canonical ordering, try to read
 more right away.
 
 <<Read and normalize a character>>=
-int oblen = Canon_Order(buf, bp, uf->eof);
+int oblen = uni_Canon_Order(buf, bp, uf->eof);
 if(!oblen) {
   ufn->blen = bp;
   continue;
@@ -11383,7 +10639,7 @@ switch(nt) {
   case UN_NFC:
   case UN_NFKC:
   case UN_NFKC_CF: {
-    int cblen = NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
+    int cblen = uni_NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
     if(uf->eof)
       oklen = cblen;
     /* move unordered characters down if composition removed chars */
@@ -11807,14 +11063,15 @@ int main(void)
 % For this document, I'm making the appendix the "user documentation"
 \appendix
 
+% Begin-doc Users-Guide
 \chapter{Building}
 
 Before starting, ensure that all prerequisites are present.  To build
-this, build.nw is required.  If you obtained the PDF or HTML version
-of this document, build.nw is included.  Otherwise, it may be obtained
-the same place you got this.  The other prerequisites are the Unicode
-data files.  Make sure the file locations are also set correctly in
-the config file.
+this, build.nw and tjm-ext.nw are required.  If you obtained the PDF
+or HTML version of this document, these are included.  Otherwise, they
+may be obtained the same place you got this.  The other prerequisites
+are the Unicode data files.  Make sure the file locations are also set
+correctly in the config file.
 
 \begin{itemize}
 \item The Unicode Character Database; this library was tested using
@@ -12259,13 +11516,13 @@ classes themselves only have one bit set; to check if a class is a
 base class, simply check if the bit is set for itself.
 
 There are two additional support macros for the gc property.
-[[is_nl]] checks if a character is any valid newline-type character,
-and [[is_bs]] checks if a character is any valid backslash-type
+[[uni_is_nl]] checks if a character is any valid newline-type character,
+and [[uni_is_bs]] checks if a character is any valid backslash-type
 character.  [[is_bs]] is not necessary for text already processed
 using NFKC\_CF.
 
-% is_nl prototype
-% is_bs prototype
+% uni_is_nl prototype
+% uni_is_bs prototype
 
 \section{Numeric Properties}
 
@@ -12371,7 +11628,54 @@ canon\_decomp, compat\_decomp, canon\_comp, tcf.}
 \end{centering}
 \end{table}
 
-\subsection{Raw Decomposition}
+\subsection{Normalization}
+
+Normalization data includes the decomposition, composition, full case
+folding, and character combining class information.  This is all
+combined into convenient functions for normalization.  Each
+Unicode-defined normalization method has its own function:  canonical
+decomposition (NFD), canonical composition (NFC), compatibility
+decomposition (NFKD), compatibility composition (NFKC), and
+compatibility decomposition with case folding (NFKC\_CF).  Each
+function takes a buffer ([[buf]]) with a given number of input
+characters ([[blen]]), and returns the updated number of characters.
+Care must be taken to enusre enough space for the result:  generally
+18 times the length of the input.  All of these assume that the innput
+buffer is complete; that is, there are no more possible characters for
+input into the normalization process.
+
+% uni_NFD prototype
+% uni_NFC prototype
+% uni_NFKD prototype
+% uni_NFKC prototype
+% uni_NFKC_CF prototype
+
+To support the normalization macros above, canonical ordering must be
+performed.  The following function takes a buffer ([[buf]]) of a given
+length ([[blen]]), and sorts the characters in-place.  It will never
+need to expand the length of the array.  However, it may need more
+characters to fully sort the input.  The [[last]] parameter indicates
+that the function must assume there are no more characters available.
+Otherwise, it will return the full length of the input if no more
+characters are needed, or less than the full length if more are
+needed.  If more are needed, the return value indicates the number of
+characters which have already been sorted; these can safely be removed
+before the next pass.
+
+% uni_Canon_Order prototype
+
+\subsection{Decomposition}
+
+The raw decomposition data is not meant to be used directly.  Instead,
+the following wrapper functions are provided.  They perform just the
+decomposition step for the decomposition normal forms; canonical
+ordering needs to be performed manually afterwards.  Like the full
+normalization functions, they modify buffers in-place, so enough room
+for the output (maximum 18 times the size of the input) needs to be
+provided.  The return value is the length after transformation.
+
+% uni_NFD_dec prototype
+% uni_NFKD_dec prototype
 
 Raw decomposition data is stored in [[uni_dm_full_strs]] (i.e.,
 \emph{ST} is dm\_full).  This includes the raw dm property, as well as
@@ -12421,7 +11725,24 @@ after [[uni_find_]]\emph{xxx}, using its results combined with the
 
 % uni_get_decomp prototype
 
-\subsection{Raw Composition}
+\subsection{Composition}
+
+The raw composition data is not meant to be used directly.  Instead,
+the following wrapper functions are provided.  They perform just the
+composition step for the composition normal forms; canonical
+decomposition needs to be performed manually beforehand.  Like the
+full normalization functions, they modify buffers in-place.  However,
+composition never extends the length of the input, so no extra space
+needs to be available in the buffer.  However, more characters may be
+needed to determine if composition is possible.  if [[nok]] is NULL,
+the input buffer is assumed to be complete.  Otherwise, if the
+returned [[*nok]] is less than the returned (updated) buffer length,
+then the first [[*nok]] characters have been composed successfully,
+but the remainder needs additional input before completion.  In any
+case, the return value is the updated length of the buffer after
+composition.
+
+% uni_NFC_comp prototype
 
 The raw composition tables, derived from the dm and Comp\_Ex
 properties, are designed for multi-step lookup as well. In addition to
@@ -12460,7 +11781,7 @@ for all candidates for the second input to composition with
 
 % uni_canon_comp prototype
 
-\subsection{Raw Case Conversion}
+\subsection{Case Conversion}
 
 The slc, suc, and stc properties are provided as if they were numeric
 properties; the numerator result is the single character to which the
@@ -12530,7 +11851,10 @@ can be obtained using a wrapper macro as well:
 % uni_tcf prototype
 
 The only other case conversion string property is NFKC\_CF, which is a
-plain string property.
+plain string property.  However, for convenience, a lookup function
+similar to the decomposition functions is provided as well.
+
+% uni_NFKC_Casefold prototype
 
 \subsection{Other String Properties}
 
@@ -12552,5 +11876,7 @@ base name.
 [[uni_range_rng_len]] \\
 [[const uint32_t uni_range_mtab[]]] \\
 [[uni_range_invalid]]
+
+% End-doc Users-Guide
 
 \end{document}

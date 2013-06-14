@@ -1,0 +1,26 @@
+% -*- mode: Noweb; noweb-code-mode: c-mode; -*-
+% Build with noweb:
+%  notangle -t8 build.nw > makefile
+%  make
+\documentclass[twoside,english]{report}
+\usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
+%%% latex preamble
+\RCS $Id$
+\RCS $Revision$
+\RCS $Date$
+
+%%% requires uni
+%%% no-ext-ref
+
+\begin{document}
+
+\title{Unicode Support Routines (Users' Guide)}
+\author{Thomas J. Moore}
+\date{Version 1.0\\Revision \RCSRevision\\\RCSDate}
+\maketitle
+
+\input{Introduction.tex} %%% doc
+
+\input{Users-Guide.tex} %%% doc
+
+\end{document}
