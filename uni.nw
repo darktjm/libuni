@@ -1150,23 +1150,31 @@ other hand, their straight lookup performance benefit over ranged
 tables is three-fold or more for many Unicode tables, without a need
 to do any special optimizations.
 
-There are probably very efficient algorithms to generate multi-level
-tables, but I am not aware of them.  The optimal number of levels and
-level size is difficult to find, but a pretty good number can be found
-by taking each level in turn, and finding the size which produces the
-minimum total length taking into account all uniques and the length of
-the array at the next level.  Of course the size of the next level is
-determined by redundancy elimination as well, so this requires a
-recursive search with backtracking.  In addition, having too many
-levels eliminates some of the performance benefit, so backtracking is
-not infinite.  The initial bit array may be a subset of the desired
-values, in which case an initial range can (actually, must) be
-specified as well.  When a value lies outside of that range, it can be
-given a default; currently only all zeroes and all ones are supported.
-The structure may also store multiple bit arrays at once, in which
-case it may be necessary to keep more than one byte together
-contiguously at the lowest level; this may be specified using
-[[minwidth]].
+There are probably very efficient algorithms to generate efficient
+multi-level tables, but I am not aware of them.  The optimal number of
+levels and level size is difficult to find, but a pretty good number
+can be found by taking each level in turn, and finding the size which
+produces the minimum total length taking into account all uniques and
+the length of the array at the next level.  Of course the size of the
+next level is determined by redundancy elimination as well, so this
+requires a recursive search with backtracking.  In addition, having
+too many levels eliminates some of the performance benefit, so the
+search depth cannot be infinite.%
+\footnote{Then again, a specific structure could be imposed,
+eliminating the need for a search, but not always selecting the
+optimal size.  For example, choosing a 3-level X/16/8 table might be
+good enough for most cases.  However, in order to gain the space
+savings, the routine would still need to perform a lot of block
+comparisons to eliminate redundancy.  If it's going to take a lot of
+time and memory anyway, why not go all the way?}
+The initial bit array may be a subset of the desired values, in which
+case an initial range can (actually, must) be specified as well.  When
+a value lies outside of that range, it can be given a default;
+currently only all zeroes and all ones are supported. The structure
+may also store multiple bit arrays at once, in which case it may be
+necessary to keep more than one byte together contiguously at the
+lowest level; this may be specified using [[minwidth]].  By default,
+[[minwidth]] can never be lower than 4, since 32-bit words are used.
 
 <<Unicode property exports for generator>>=
 #define UNI_MAX_MULTILEV 3
@@ -2894,7 +2902,7 @@ MAKEFILES+=makefile.unidat
 makefile.unidat: uni_prop.gen.h
 	printf 'RNGDAT_NAMES := ' >$@
 	fgrep '[]' $^ | <<Filter generated file names>>
-	       sed -e 's/.* //;s/\[.*//' | tr \\n ' ' >>$@
+	       sed -e 's/\[.*//;s/.* //' | tr \\n ' ' >>$@
 -include makefile.unidat
 $(RNGDAT_NAMES:%=%.gen.c): uni_prop.gen.h
 	@touch "$@"
@@ -2942,12 +2950,11 @@ for(i = 0; i < nparsed; i++) {
 				      j < parsed_props[i].rng_len - 1 ? "," : "");
     fputs("};\n", of);
     fclose(of);
-    fprintf(gen_h, "/* %d lookups max */\n"
-		   "extern const uni_chrrng_t uni_%s_rng[];\n"
-		   "#define uni_%s_rng_len %d\n"
+    fprintf(gen_h, "extern const uni_chrrng_t uni_%s_rng[];\n"
+		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
                    "#define is_uni_%s(x) is_uni_x(x, uni_%s_mtab)\n",
-		   lg2(parsed_props[i].rng_len + 1),
-		   name, name, parsed_props[i].rng_len, name, name);
+		   name, name, lg2(parsed_props[i].rng_len + 1),
+		   parsed_props[i].rng_len, name, name);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "bool(%s);\n", name);
   }
@@ -3000,7 +3007,7 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
               "\t(0x%X << 1) + %d, 0x%X, %d,\n",
 	      mt[0] >> 1, mt[0] & 1, mt[1], (nskip = mt[2]));
   i = 3;
-  fprintf(gen_h, "/* %d", nskip);
+  fprintf(gen_h, "extern const uint32_t uni_%s_mtab[]; /* %d", name, nskip);
   for(l = 0; (desc = mt[i]); l++) {
     fprintf(mf, "\t/* level %d (pointers) */\n"
                 "\t0x%X, /* shift=%d psz=%d nextblk=%d */\n",
@@ -3034,8 +3041,7 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
 						                  ", ");
   fputs("};\n", mf);
   fclose(mf);
-  fprintf(gen_h, " (%d-level); len = %d */\n"
-                  "extern const uint32_t uni_%s_mtab[];\n", l + 1, i, name);
+  fprintf(gen_h, " (%d-level); len = %d */\n", l + 1, i);
 }
 @
 
@@ -3501,7 +3507,8 @@ for(j = 0; j < enum_vals_len[i]; j++) {
 }
 fputs("};\n", nf);
 fclose(nf);
-fprintf(gen_h, "#define uni_%s_valueof_len %d\n", pn, enum_vals_len[i]);
+fprintf(gen_h, "#define uni_%s_valueof_len %d /* %d lookups max */\n",
+               pn, enum_vals_len[i], lg2(enum_vals_len[i] + 1));
 @
 
 Since the two arrays are stored in the same file, the logic to
@@ -4109,13 +4116,12 @@ for(i = 0; i < nparsed; i++) {
     }
     fputs("};\n", of);
     fclose(of);
-    fprintf(gen_h, "/* %d lookups max */\n"
-		    "extern const uni_chrrng_dat_t uni_%s_rng[];\n"
-		    "#define uni_%s_rng_len %d\n"
-		    "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
-		    lg2(parsed_props[i].rng_len | 1),
-		    name, name, parsed_props[i].rng_len, name, name,
-		    parsed_props[i].def);
+    fprintf(gen_h, "extern const uni_chrrng_dat_t uni_%s_rng[];\n"
+		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
+		   "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
+		   name, name, lg2(parsed_props[i].rng_len | 1),
+		   parsed_props[i].rng_len, name, name,
+		   parsed_props[i].def);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "dat(%s, %d);\n", name, parsed_props[i].def);
   }
@@ -4528,12 +4534,11 @@ for(i = 0; i < nparsed; i++) {
 		  j < parsed_props[i].rng_len - 1 ? "," : "");
     fputs("};\n", of);
     fclose(of);
-    fprintf(gen_h, "/* %d lookups max */\n"
-		    "extern const uni_chrrng_num_t uni_%s_rng[];\n"
-		    "#define uni_%s_rng_len %d\n"
-		    "#define uni_%s_val(x, n, d) uni_x_val(x, uni_%s_mtab, n, d)\n",
-		    lg2(parsed_props[i].rng_len + 1),
-		    name, name, parsed_props[i].rng_len, name, name);
+    fprintf(gen_h, "extern const uni_chrrng_num_t uni_%s_rng[];\n"
+		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
+		   "#define uni_%s_val(x, n, d) uni_x_val(x, uni_%s_mtab, n, d)\n",
+		   name, name, lg2(parsed_props[i].rng_len + 1),
+		   parsed_props[i].rng_len, name, name);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "num(%s);\n", name);
   }
@@ -4631,14 +4636,14 @@ raw_cp_str_t,%
 <<Property parsed contents>>=
 raw_cp_str_t *rng_str;
 uint32_t *strs;
-uint32_t num_strs, max_strs;
+uint32_t strs_len, max_strs;
 @
 
 <<UCD parser local functions>>=
 static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *val,
                         uint32_t len)
 {
-  uint32_t off = p->num_strs;
+  uint32_t off = p->strs_len;
   if(!p->max_rng_len) {
     inisize(p->rng_str, (p->max_rng_len = 8));
     inisize(p->strs, (p->max_strs = 32));
@@ -4646,7 +4651,7 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
   while(off + len > p->max_strs)
     resize(p->strs, (p->max_strs *= 2));
   memcpy(p->strs + off, val, len * 4);
-  p->num_strs += len;
+  p->strs_len += len;
   for(; low <= high; low++) {
     if(p->rng_len == p->max_rng_len)
       resize(p->rng_str, (p->max_rng_len *= 2));
@@ -4789,13 +4794,13 @@ for(i = 0; i < dm_prop->rng_len; i++) {
 
   /* add unexpanded decomp */
   add_str_rng(dmf_prop, cp, cp, NULL, 0);
-  if(!dmf_prop->num_strs) { /* deferred until first alloc */
+  if(!dmf_prop->strs_len) { /* deferred until first alloc */
     free(dmf_prop->strs);
     dmf_prop->strs = dm_prop->strs;
     dmf_prop->max_strs = dm_prop->max_strs;
-    dmf_prop->num_strs = dm_prop->num_strs;
+    dmf_prop->strs_len = dm_prop->strs_len;
     dm_prop->strs = NULL;
-    dm_prop->max_strs = dm_prop->num_strs = 0;
+    dm_prop->max_strs = dm_prop->strs_len = 0;
   }
   unex = &dmf_prop->rng_str[dmf_prop->rng_len - 1];
   unex->off = dm_prop->rng_str[i].off;
@@ -4913,9 +4918,9 @@ static void dump_strs(prop_t *p, FILE *gen_h)
     off += len;
   }
   fclose(of);
-  fprintf(gen_h, "/* %d words (%d bytes) (%d words saved) */\n"
-                 "extern const uint32_t uni_%s_strs[];\n",
-		 off, off * 4, saved, p->name);
+  fprintf(gen_h, "extern const uint32_t uni_%s_strs[]; "
+                 "/* %d words (%d bytes) (%d words saved) */\n",
+		 p->name, off, off * 4, saved);
 }
 @
 
@@ -5002,10 +5007,9 @@ for(curent = 0; i < dmf_prop->rng_len; i++, curent++) {
 				    i < dmf_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(cf);
-fprintf(gen_h, "/* %d lookups max */\n"
-               "extern const uni_str_rng_t uni_canon_decomp_rng[];\n"
-	       "#define uni_canon_decomp_rng_len %d\n",
-	       lg2(curent + 1), curent);
+fprintf(gen_h, "extern const uni_str_rng_t uni_canon_decomp_rng[];\n"
+	       "#define uni_canon_decomp_rng_len %d /* %d lookups max */\n",
+	       curent, lg2(curent + 1));
 @
 
 <<Clean up after parsing UCD files>>=
@@ -5089,10 +5093,9 @@ for(i = curent = 0; i < dmf_prop->rng_len; i++, curent++) {
 	      i < dmf_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(kf);
-fprintf(gen_h, "/* %d lookups max */\n"
-               "extern const uni_str_rng_t uni_compat_decomp_rng[];\n"
-	       "#define uni_compat_decomp_rng_len %d\n",
-	       lg2(curent + 1), curent);
+fprintf(gen_h, "extern const uni_str_rng_t uni_compat_decomp_rng[];\n"
+	       "#define uni_compat_decomp_rng_len %d /* %d lookups max */\n",
+	       curent, lg2(curent + 1));
 tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("compat_decomp", tmt, gen_h);
 free(tmt);
@@ -5131,10 +5134,9 @@ for(i = curent = 0; i < dmf_prop->rng_len; i++) {
   curent++;
 }
 fclose(dm);
-fprintf(gen_h, "/* %d lookups max */\n"
-               "extern const uni_str_rng_t uni_dm_rng[];\n"
-	       "#define uni_dm_rng_len %d\n",
-	       lg2(curent + 1), curent);
+fprintf(gen_h, "extern const uni_str_rng_t uni_dm_rng[];\n"
+	       "#define uni_dm_rng_len %d /* %d lookups max */\n",
+	       curent, lg2(curent + 1));
 tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("dm", tmt, gen_h);
 free(tmt);
@@ -5331,15 +5333,15 @@ for(i = cm_prop->rng_len - 1; i > 0; i--) {
     j--;
   if(j == i)
     continue;
-  while(cm_prop->num_strs + 2 * (i - j + 1) > cm_prop->max_strs)
+  while(cm_prop->strs_len + 2 * (i - j + 1) > cm_prop->max_strs)
     resize(cm_prop->strs, (cm_prop->max_strs *= 2));
   for(k = j, off = 0; k <= i; k++) {
-    cm_prop->strs[cm_prop->num_strs + off++] = cm_prop->strs[cm_prop->rng_str[k].off];
-    cm_prop->strs[cm_prop->num_strs + off++] = cm_prop->strs[cm_prop->rng_str[k].off + 1];
+    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->rng_str[k].off];
+    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->rng_str[k].off + 1];
   }
-  cm_prop->rng_str[j].off = cm_prop->num_strs;
+  cm_prop->rng_str[j].off = cm_prop->strs_len;
   cm_prop->rng_str[j].len = 2 * (i - j + 1);
-  cm_prop->num_strs += 2 * (i - j + 1);
+  cm_prop->strs_len += 2 * (i - j + 1);
   /* sort B->C table by B */
   qsort(cm_prop->strs + cm_prop->rng_str[j].off, (i - j) + 1,
         2 * sizeof(*cm_prop->strs), uni_cmp_cp);
@@ -5407,10 +5409,9 @@ for(i = 0; i < cm_prop->rng_len; i++) {
 				    i < cm_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(cm);
-fprintf(gen_h, "/* %d lookups max */\n"
-               "extern const uni_str_rng_t uni_canon_comp_rng[];\n"
-	       "#define uni_canon_comp_rng_len %d\n",
-	       lg2(i + 1), i);
+fprintf(gen_h, "extern const uni_str_rng_t uni_canon_comp_rng[];\n"
+	       "#define uni_canon_comp_rng_len %d /* %d lookups max */\n",
+	       i, lg2(i + 1));
 cm_prop->mt = cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->rng_len, &ml_len);
 print_mtab("canon_comp", cm_prop->mt, gen_h);
 fputs("str(canon_comp);\n", tstf);
@@ -5683,10 +5684,9 @@ static void dump_str_tabs(prop_t *prop, FILE *gen_h, FILE *tstf)
 				     i < prop->rng_len - 1 ? ",\n\t" : "\n};\n");
   }
   fclose(rt);
-  fprintf(gen_h, "/* %d lookups max */\n"
-                 "extern const uni_str_rng_t uni_%s_rng[];\n"
-	         "#define uni_%s_rng_len %d\n",
-	         lg2(i + 1), prop->name, prop->name, i);
+  fprintf(gen_h, "extern const uni_str_rng_t uni_%s_rng[];\n"
+	         "#define uni_%s_rng_len %d /* %d lookups max */\n",
+	         prop->name, prop->name, i, lg2(i + 1));
   uint32_t ml_len, *tmt = cp_val_to_multi((uni_cp_val_t *)short_str, i, &ml_len);
   print_mtab(prop->name, tmt, gen_h);
   free(tmt);
@@ -6598,30 +6598,45 @@ if((f = fopen("xidmodifications.txt", "r")) ||
 
 \subsection{Parsing the UCD - DUCET}
 
-The most complex optional string value is the Default Unicode
-Collation Element Table (\url{http://unicode.org/Public/UCA/}).  It
-associates many strings (which I will call the indices) with explicit
-sort keys.  This includes several multi-character indices and
-multi-entry keys.  Each sort key entry consists of four numbers, plus
-a flag.  The flag does not actually need to be stored, since it is
-always true for non-zero entries in the first number up to a certain
-top.  This top can be stored separately.  While reading, each entry is
-indexed on the first character in the index.  The string value is a
-four-character sequence for every sort key entry, followed by any
-characters that follow the first in the index.  Since no
-multi-character entry has more than four characters, there is no
-problem distinguishing the character groups in the value: the number
-of key entries is the length divided by four, and the number of extra
-characters in the index is the remainder.  Since several
-multi-character indicies start with the same character, multiple
-entries with the same [[cp]] are created, but the raw string table
-storage method does not care.
+The most complex optional string value is derived from the Default
+Unicode Collation Element Table
+(\url{http://unicode.org/Public/UCA/}).  It associates many strings
+(collation elements, which are the index to the table) with explicit
+sort keys (the data).  This includes several multi-character collation
+elements (called contractions) and multi-entry keys (called
+expansions).  Each sort key entry consists of a number for each
+supported sort level, plus a flag.  Currently, the DUCET supports four
+sort levels, although the standard states that more may be added in a
+future version.  The flag indicates so-called variable entries.  The
+flag does not actually need to be stored, since it is always true for
+entries with a non-zero first level up to a certain top.  This top is
+stored separately as a single integer.
 
-In addition to the DUCET itself, the UCA data files include the same
-data adjusted for use with the CLDR; this is to be used for the root
-(default) locale unless the u-co-ducet parameter is given.  This file
-is in the same format.  It is assumed that this has been unzipped under
-the same directory.
+Rather than make this reader as generic as possible, given the
+definitions, it is tailored to the actual data present in the UCA
+versions available at the time of this writing.  That means that
+recoding may be necessary at a future date.  The first constraint is
+that exactly four levels are supported.
+
+While reading, each entry is indexed on the first character of the
+collation element.  The raw string value is a four-word sequence for
+every sort key entry, followed by the remainder of the collation
+element index.  Since no multi-character index has more than four
+characters, there is no problem distinguishing the character groups in
+the value: the number of key entries is the length divided by four,
+and the number of extra characters in the index is the remainder.
+Since several multi-character collation elements start with the same
+character (and in fact the well-formedness rules require this),
+multiple entries with the same [[cp]] are created, but the raw string
+table storage method does not care.
+
+In addition to the DUCET itself, the data files include the same data
+adjusted for use with the CLDR (\texttt{allkeys\_CLDR.txt} in
+\texttt{CollationAuxiliary.zip}).  This file is in the same format. 
+It should be unzipped under the same directory.  All CLDR data is based
+off of this root locale, and it can be explicitly requested using
+\texttt{u-co-standard}.  The CLDR still requires the normal DUCET; it
+can be selected manually using \texttt{u-co-ducet}.
 
 <<Initialize UCD files>>=
 decl_str(DUCET);
@@ -6671,7 +6686,6 @@ static uint32_t parse_ducet(const char *fname, int propn)
     }
     /* 6.2: 120007 words (6212 saved) */
     /* 6.2-CLDR: 120493 words (5724 saved) */
-    <<Process DUCET data while reading>>
     add_str_rng(prop, low, high, str, len);
   }
   fclose(f);
@@ -6680,177 +6694,231 @@ static uint32_t parse_ducet(const char *fname, int propn)
 }
 @
 
-A little space can be saved while storing this by making some strings
-identical when they would normally not be.  Field 4 is usually equal
-to the code point, and is never 1, so that case can be stored as 1 to
-indicate that it is equal to the code point.  This saves about 28k.
+The raw DUCET data is actually of limited use.  Only one optional
+poorly defined pseudo-property depends on it (``DUCET primary values''
+--- even the property name is undefined).  The Unicode Collation
+Algorithm is defined in terms of creating string sort keys from the
+raw data as well, but in order to support modifications due to locale,
+even that use is probably better served by a different representation.
+However, the raw data is provided anyway in case there is a use I have
+yet to envision.
 
-<<Process DUCET data while reading>>=
-for(i = 3; i < len; i += 4)
-  if(str[i] == low)
-    str[i] = 1;
+The raw data in the Unicode 6.2 DUCET comes to 126,219 words, of which
+6,212 can be removed due to redundancy.  This is too much data for the
+16-bit offset used by [[uni_str_rng_t]] type, so some adjustment needs
+to be made.  Before making adjustments, though, the original raw data
+is copied so that it can be converted into a more useful format.
+
+<<Post-process DUCET>>=
+uint32_t *strs;
+raw_cp_str_t *ents;
+inisize(strs, prop->strs_len);
+inisize(ents, prop->rng_len);
+memcpy(strs, prop->strs, prop->strs_len * sizeof(*strs));
+memcpy(ents, prop->rng_str, prop->rng_len * sizeof(*ents));
+@
+
+A little space can be saved while storing this by making some strings
+identical when they would normally not be, thereby increasing the
+removals due to redundancy. Level 4 is usually equal to the code
+point, and is never 1, so that case can be stored as 1 to indicate
+that it is equal to the code point.  This saves an additional 6,972
+words.
+
+<<Post-process DUCET>>=
+<<Prepare for DUCET post-processing>>
+for(i = 0; i < prop->rng_len; i++) {
+  uint32_t len = prop->rng_str[i].len;
+  uint32_t *str = prop->strs + prop->rng_str[i].off;
+  uint32_t cp = prop->rng_str[i].cp;
+  <<Reduce DUCET entry>>
+}
+@
+
+<<Reduce DUCET entry>>=
+for(j = 3; j < len; j += 4)
+  if(str[j] == cp)
+    str[j] = 1;
 /* 6.2: 113035 words (13184 saved) */
 /* 6.2-CLDR: 112169 words (14048 saved) */
 @
 
-To save even more space, any characters which are simply canonically
-decomposed and represented by their decomposition string's sort keys
-have their entries replaced by empty strings.  This is done after the
-entire thing has been read so that individual elements can be
-completely checked, even though the current DUCET has no entries which
-fail the complete check when just the last element matches the
-decomposition characters. This saves an additional 28k.
+One common expansion is for the sort key to be the concatenation of
+the sort keys for each character in the canonical decomposition of the
+collation element.  To save more space, this sort key string is
+indicated by an empty sort key.  For sanity, the entire key is
+checked, even though the current DUCET has no entries which fail the
+complete check when just the last element matches the decomposition
+characters.  This brings the total down to 117,631 words, with 11,800
+removed due to redundancy.  In other words, it saves an additional
+7,204 words.
 
 <<Prepare for reading DUCET>>=
 /* sort dmf for decomp lookup */
 qsort(dmf_prop->rng_str, dmf_prop->rng_len, sizeof(*dmf_prop->rng_str), cmp_cp_flg);
 @
 
-<<Post-process DUCET>>=
+<<Prepare for DUCET post-processing>>=
 prop_t *dmf_prop = &parsed_props[add_prop("dm_full")];
 /* sort ducet for component lookup */
 qsort(prop->rng_str, prop->rng_len, sizeof(*prop->rng_str), uni_cmp_cp);
+@
+
+<<Reduce DUCET entry>>=
 /* if it's decomposed first, then store that case as 0-len string */
-for(i = 0; i < prop->rng_len; i++) {
-  uint32_t len = prop->rng_str[i].len;
-  uint32_t *str = prop->strs + prop->rng_str[i].off;
-  uint32_t cp = prop->rng_str[i].cp;
-  if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
-    raw_cp_str_t *dec = bsearch(&cp, dmf_prop->rng_str,
-                                dmf_prop->rng_len,
-				sizeof(raw_cp_str_t), uni_cmp_cp);
-    if(dec) {
-      while(dec->flags && dec > dmf_prop->rng_str && dec->cp == cp)
-        dec--; /* select canonical full decomp only */
-      if(dec->flags || dec->cp != cp)
-        dec = NULL;
+if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
+  raw_cp_str_t *dec = bsearch(&cp, dmf_prop->rng_str,
+                              dmf_prop->rng_len,
+			      sizeof(raw_cp_str_t), uni_cmp_cp);
+  if(dec) {
+    while(dec->flags && dec > dmf_prop->rng_str && dec->cp == cp)
+      dec--; /* select canonical full decomp only */
+    if(dec->flags || dec->cp != cp)
+      dec = NULL;
+  }
+  if(dec && dec->len * 4 == len) {
+    for(j = 0; j < dec->len; j++) {
+      raw_cp_str_t *cd;
+      uint32_t ocp = str[3 + 4 * j];
+      if(ocp != dmf_prop->strs[dec->off + j])
+        break;
+      cd = bsearch(&ocp, prop->rng_str,
+	           prop->rng_len, sizeof(raw_cp_str_t),
+		   uni_cmp_cp);
+      if(!cd)
+        break;
+      /* scan for single-element entry */
+      /* some may have ocp as 1st char of multi-char entry */
+      while(cd->len != 4 && cd > prop->rng_str && cd[-1].cp == ocp)
+        cd--;
+      while(cd->len != 4 && cd < prop->rng_str + prop->rng_len - 1 &&
+            cd[1].cp == ocp)
+	cd++;
+      if(cd->len != 4 ||
+	 (prop->strs[cd->off + 3] != 1 && prop->strs[cd->off + 3] != ocp) ||
+	 memcmp(prop->strs + cd->off, str + 4 * j, 12))
+	break;
     }
-    if(dec && dec->len * 4 == len) {
-      for(j = 0; j < dec->len; j++) {
-        raw_cp_str_t *cd;
-	uint32_t ocp = str[3 + 4 * j];
-        if(ocp != dmf_prop->strs[dec->off + j])
-	  break;
-	cd = bsearch(&ocp, prop->rng_str,
-	             prop->rng_len, sizeof(raw_cp_str_t),
-	             uni_cmp_cp);
-        if(!cd)
-	  break;
-	/* scan for single-element entry */
-	/* some may have ocp as 1st char of multi-char entry */
-	while(cd->len != 4 && cd > prop->rng_str && cd[-1].cp == ocp)
-	  cd--;
-	while(cd->len != 4 && cd < prop->rng_str + prop->rng_len - 1 &&
-	      cd[1].cp == ocp)
-	  cd++;
-	if(cd->len != 4 ||
-	   prop->strs[cd->off + 3] != 1 ||
-	   memcmp(prop->strs + cd->off, str + 4 * j, 12))
-	  break;
-      }
-      if(j == dec->len)
-	prop->rng_str[i].len = 0;
-    }
+    if(j == dec->len)
+      prop->rng_str[i].len = 0;
   }
 }
 /* 6.2: 105831 words (11800 saved) */
 /* 6.2-CLDR: 104937 words (12688 saved) */
 @
 
-Similarly, some multi-character entries simply encode the NFC
-transformation.  That case is also encoded by a zero-length key, but
-retains the extra characters as its string.  This only saves 1.6k.
+Similarly, some multi-character collation elements are the canonical
+decomposition of a single character, and the sort key is the sort key
+for that character.  That case is also encoded by a zero-length key,
+but retains the extra collation element characters as its string. 
+This brings the total down to 117,297 words, with 11,881 removed due
+to redundancy.  In other words, it saves an additional 415 words.
 
-<<Post-process DUCET>>=
+<<Prepare for DUCET post-processing>>=
 prop_t *cm_prop = &parsed_props[add_prop("canon_comp")];
-for(i = 0; i < prop->rng_len; i++) {
-  uint32_t len = prop->rng_str[i].len;
-  uint32_t *str = prop->strs + prop->rng_str[i].off;
-  uint32_t cp = prop->rng_str[i].cp;
-  if(len < 5 || len > 6) /* support 2 or 3 chars */
-    continue;
+@
+
+<<Reduce DUCET entry>>=
+if(len >=5 && len <= 6) { /* support 2 or 3 chars */
   raw_cp_str_t *btab = bsearch(&cp, cm_prop->rng_str, cm_prop->rng_len,
                                sizeof(*cm_prop->rng_str), uni_cmp_cp);
-  if(!btab)
-    continue;
-  if(!btab->len) /* hangul */
-    continue;
-  cp = uni_lookup_compent(str[4], cm_prop->strs + btab->off, btab->len);
-  if(len == 6) {
-    btab = bsearch(&cp, cm_prop->rng_str, cm_prop->rng_len,
-                   sizeof(*cm_prop->rng_str), uni_cmp_cp);
-    if(!btab)
-      continue;
-    cp = uni_lookup_compent(str[5], cm_prop->strs + btab->off, btab->len);
+  if(btab && btab->len) { /* ignore missing and hangul */
+    cp = uni_lookup_compent(str[4], cm_prop->strs + btab->off, btab->len);
+    if(len == 6) {
+      btab = bsearch(&cp, cm_prop->rng_str, cm_prop->rng_len,
+                     sizeof(*cm_prop->rng_str), uni_cmp_cp);
+      if(btab && btab->len)
+        cp = uni_lookup_compent(str[5], cm_prop->strs + btab->off, btab->len);
+    }
+    if(cp == str[3]) {
+      prop->rng_str[i].len -= 4;
+      prop->rng_str[i].off += 4;
+    }
   }
-  if(cp != str[3])
-    continue;
-  prop->rng_str[i].len = 1;
-  prop->rng_str[i].off += 4;
 }
 /* 6.2: 105416 words (11881 saved) */
 /* 6.2-CLDR: 104937 words (12688 saved) */
 @
 
-Finally, to save more space, the advertised key ranges can be taken
-advantage of.  At the very least, only 16 bits are needed for the
-first three fields, cutting space usage nearly in half.  Rather than
-relying on a single revision's ranges, the ranges are extracted after
-reading.  That way, the transformations above can be accounted for as
-well.
+While there is a pattern to most of the rest of the DUCET, it is
+difficult to encode, and encoding would make lookup much more
+expensive than it probably already is.  The only other features of the
+numbers which can be easily taken advantage of are the ranges.  The
+first three levels are never more than four digits, or 16 bits.  In
+fact, they are quite a bit smaller.  Rather than relying on a single
+revision's ranges, the ranges are extracted in the first pass.  This
+is mainly to provide a sanity check on the only characteristic that is
+likely to change rapidly.
 
-<<Post-process DUCET>>=
+<<Prepare for DUCET post-processing>>=
 uint32_t max_0 = 0, max_1 = 0, max_2 = 0;
+@
 
-for(i = 0; i < prop->rng_len; i++) {
-  uint32_t len = prop->rng_str[i].len;
-  uint32_t *str = prop->strs + prop->rng_str[i].off;
-  for(j = 0; j + 3 < len; j += 4) {
-    if(str[j] > max_0)
-      max_0 = str[j];
-    if(str[j + 1] > max_1)
-      max_1 = str[j + 1];
-    if(str[j + 2] > max_2)
-      max_2 = str[j + 2];
-  }
+<<Reduce DUCET entry>>=
+for(j = 0; j + 3 < len; j += 4) {
+  if(str[j] > max_0)
+    max_0 = str[j];
+  if(str[j + 1] > max_1)
+    max_1 = str[j + 1];
+  if(str[j + 2] > max_2)
+    max_2 = str[j + 2];
 }
 @
 
-If the first three fields' combined length is less than 32 bits, they
-are combined.  In particular, the first must be 16 or fewer, and the
-second 10 or fewer.  Further restricting this to 9 bits for the second
-and 5 bits for the third gives two extra bits for additional
-information.  If these conditions are not met, an error is thrown;
-recoding will be required.
-
-The extra two bits can be used to encode certain common cases,
-possibly eliminating the fourth word altogether:
-
-\begin{itemize}
-\item Key field 4 is 0: 0
-\item Key field 4 is the cp itself (stored above as 1): 1
-\item The next word is key field 4: 2
-\item This word is actually an extra index character: 3
-\end{itemize}
-
-When combining like this, each entry drops in length to 2 or fewer
-words.  This means that if there is more than one character in the
-index string, it can no longer be detected by length alone.  Since
-every character can be encoded in 24 bits, the extra characters are
-simply shifted left two, moved to the front for easier detection and
-use, and get their lower two bits set.  In fact, searching through
-concatenated lists of these can be made considerably faster using
-binary searches by shifting the key field 4 values left 2 bits as
-well, and setting their lower bits to anything but 3.  That way, a
-binary search can locate the nearest index by looking for sequences
-where the lower bits are 3.  The rewriting of keys here reduces the
-size by 300k.
+In practice, the first level can be stored in 16 bits, the second in 9
+bits, and the third in 5 bits.  In other words, all three levels fit
+easily in a single 32-bit word.  While the second and third could be
+stored in more bits to allow for more wiggle room, storing minimally
+leaves two extra bits for other purposes.  Note that in the current
+DUCET, the first level can actually be restricted to 15 bits in case
+an additional bit is ever needed.  The default value algorithm
+requires the full 16 bits, but these are never stored in the table.
+No allowance is made for larger required field sizes; recoding would
+be needed in several places.
 
 <<Post-process DUCET>>=
 if(lg2(max_0) > 16 || lg2(max_1) > 9 || lg2(max_2) > 5) {
   fputs("FIXME: Can't reduce DUCET\n", stderr);
   exit(1);
 }
+@
+
+The extra two bits can be used to encode certain common cases,
+possibly eliminating the need to store a full 32-bit word for the
+fourth level:
+
+\begin{itemize}
+\item 0: Level 4 is 0
+\item 1: Level 4 is the cp itself (stored above as 1)
+\item 2: The next word is level 4
+\end{itemize}
+
+When combining like this, each entry drops in length to 2 or fewer
+words.  This means that if there is more than two characters in the
+index string, it can no longer be detected by length alone.  Since
+every character can be encoded in fewer than 30 bits, the extra index
+characters are simply shifted left two, leaving the lower two bits for
+special encoding as above:
+
+\begin{itemize}
+\item 3: This word is actually part of the collation element (index)
+\end{itemize}
+
+This also means that locating the extra index characters is more
+difficult:  the entire string would need to be scanned rather than
+just computing the length of the key and skipping it.  To prevent the
+need for scanning, the extra index characters are moved to the front
+of the string as well.
+
+For consistency, the explicitly stored level 4 values are also shifted
+left by two.  This way, the only characters in the string with the
+lower two bits set are the index characters.
+
+After collapsing the keys like this, over two thirds of the required
+space is removed.  The result is 33,723 words, with 3,308 words
+removed due to redundancy.  This saves an additional 75,416 words.
+
+<<Post-process DUCET>>=
 for(i = 0; i < prop->rng_len; i++) {
   int k;
   uint32_t len = prop->rng_str[i].len;
@@ -6876,33 +6944,37 @@ for(i = 0; i < prop->rng_len; i++) {
 @
 
 The final problem to deal with is the possibility of multiple sort
-keys with the same starting index character.  With this, the string
-table cannot be convertd to a multi-level table.  After the last
-encoding, though, it is easy to simply concatenate all entries into a
-single string.  Searching for subsequent characters is not too
-efficient, but at least it only needs to be done for relatively few
-entries.  The encoding allows limited binary searching, as well.  The
-only possible conflicts are the zero-length canonical composition and
-decomposition entries.  If all initial characters for an index are
-also present with an index of length one, the zero-length
-decomposition entry is safe: if the first key character is an index
-character, then the key was blank (i.e. decomposition).  Similarly, if
-the very last index has a blank key, it is obvious.  However, blank
-keys in the middle need an extra indicator in order to separate the
-index extensions.  A zero can never be part of an index, so this is
-indicated by an index character of zero.
+keys with the same starting index character.  Because of this, the
+string table cannot be converted to a multi-level table.  After the
+last encoding, though, it is easy to simply concatenate all entries
+into a single string.  Searching for entries after the first is not
+too efficient, but at least it only needs to be done for relatively
+few first index characters.  The encoding allows limited binary
+searching, as well: the nearest index extension can be located by
+checking the lower two bits for 3.
+
+The only possible conflicts are the zero-length canonical composition
+and decomposition entries.  Two adjacent entries with zero-length keys
+look like one long index string extension.  The entry with no index
+extension is always first, so detecting zero-length canonical
+decomposition entries is easy: if the first character is an index
+extension or the end of the string, then the key is blank. Similarly,
+if the very last index extension has a blank key, it is obvious.
+However, blank keys in the middle need an explicit separator between
+the consecutive index extensions.  A zero can never be part of an
+index extension, so a blank key is indicated by adding an index
+character of zero.
 
 <<Post-process DUCET>>=
-ducet_strs = prop->strs; /* for sort */
+ducet_strs = prop->strs; /* for sort & abbrev */
 for(i = prop->rng_len - 1; i > 0; i--) {
   uint32_t cp = prop->rng_str[i].cp;
   for(j = i; j > 0 && prop->rng_str[j - 1].cp == cp; j--);
   if(i == j)
     continue;
-  /* sort by index cp */
+  /* sort by index extension */
   low = j;
-  qsort(prop->rng_str + low, i - low + 1, sizeof(*prop->rng_str),
-        cmp_ducet_idx);
+  qsort(prop->rng_str + low, i - low + 1, sizeof(*prop->rng_str), cmp_ducet_idx);
   if(prop->rng_str[low].len && (ducet_strs[prop->rng_str[low].off] & 3) == 3) {
     fprintf(stderr, "Error: no DUCET entry for %04X\n", (int)cp);
     exit(1);
@@ -6910,26 +6982,28 @@ for(i = prop->rng_len - 1; i > 0; i--) {
   uint32_t len = 0;
   for(j = low; j <= i; j++) {
     len += prop->rng_str[j].len;
-    if(j > low && j < i &&
+    if(j > low && j < i && /* in the middle, */
        /* if last char is index char, key is blank */
        (ducet_strs[prop->rng_str[j].off + prop->rng_str[j].len - 1] & 3) == 3)
       len++; /* so a zero needs to be added */
   }
-  while(prop->max_strs < prop->num_strs + len)
+  while(prop->max_strs < prop->strs_len + len) {
     resize(prop->strs, (prop->max_strs *= 2));
-  memcpy(prop->strs + prop->num_strs,
-         prop->strs + prop->rng_str[low].off,
+    ducet_strs = prop->strs; /* for sort & abbrev */
+  }
+  memcpy(ducet_strs + prop->strs_len,
+         ducet_strs + prop->rng_str[low].off,
 	 prop->rng_str[low].len * 4);
-  prop->rng_str[low].off = prop->num_strs;
-  prop->num_strs += prop->rng_str[low].len;
+  prop->rng_str[low].off = prop->strs_len;
+  prop->strs_len += prop->rng_str[low].len;
   prop->rng_str[low].len = len;
   for(j = low + 1; j <= i; j++) {
-    uint32_t *str = prop->strs + prop->rng_str[j].off;
+    uint32_t *str = ducet_strs + prop->rng_str[j].off;
     len = prop->rng_str[j].len;
-    memcpy(prop->strs + prop->num_strs, str, len * 4);
-    prop->num_strs += len;
+    memcpy(ducet_strs + prop->strs_len, str, len * 4);
+    prop->strs_len += len;
     if(j < i && (str[len - 1] & 3) == 3)
-      prop->strs[prop->num_strs++] = 3;
+      ducet_strs[prop->strs_len++] = 3; /* zero index ext. separator */
   }
   memmove(prop->rng_str + low + 1, prop->rng_str + i + 1,
           (prop->rng_len - i - 1) * sizeof(*prop->rng_str));
@@ -6937,7 +7011,7 @@ for(i = prop->rng_len - 1; i > 0; i--) {
   if(!(i = low))
     break;
 }
-/* 6.2: 30501 words (3250 saved) */
+/* 6.2: 30498 words (3250 saved) */
 /* 6.2-CLDR: 29491 words (3155 saved) */
 @
 
@@ -6967,14 +7041,14 @@ static int cmp_ducet_idx(const void *a, const void *b)
 @
 
 Unsurprisingly, adding a few zeroes here and there increases the size
-a bit, but not much (112 bytes).  Thus the original 126,219 words are
-reduced to 33,751 words, of which a further 3,250 words are removed due
-to redundancy.  This allows use of 16-bit offsets, as supported by the
-[[uni_str_rng_val_t]] type.  Of course that does not include the
-overhead for the initial index lookup, which is about 200k for the
-code point table and 100k for the multi-level table.  Finally, the
-DUCET is ready to be dumped.  The collected default variable top is
-dumped to the header as well.
+a bit, but not much (25 words).  Combining entires also reduces
+redundancy a bit (gaining 58 words).  Thus the original 126,219 words
+are reduced to 30,498 words.  This allows use of 16-bit offsets, as
+supported by the [[uni_str_rng_t]] type.  Note that this is just the
+string table; the lookup tables add additional overhead (about 200kb
+for the code point table and 100kb for the multi-level table).
+Finally, the raw DUCET is ready to be dumped.  The collected default
+variable top is dumped to the header as well.
 
 <<Dump character information as C code>>=
 fprintf(gen_h, "#define uni_DUCET_var_top %d\n", (int)ducet_vartop);
@@ -6984,61 +7058,1204 @@ dump_str_tabs(&parsed_props[prop_DUCET_CLDR], gen_h, tstf);
 @
 
 In order to compensate for some of the compression above, a special
-lookup function is provided.  It returns two 32-bit words for every
-element of the key, encoded like above but with the fourth key element
-expanded and the composition and decomposition compressions removed.
-The integer return value is the length of the result.  A negative
-return value indicates that providing more characters may produce a
-different result.
+lookup function is provided.  It is intended for piece-wise lookup of
+a full string's key sequence.  This is \emph{not} a key string as
+defined by the UCA.  However, it is the set of keys to be considered,
+in the order that they are to be considered.  The only work needed to
+convert this to a UCA key string is to apply the variable key rule and
+split the keys by level.  The returned format is exactly the same as
+is stored, except that no blank key strings are returned, and level
+four is always present.
 
-<<Unicode property exports>>=
-int uni_DUCET_lookup(uint32_t *buf, uint32_t blen, uint32_t **res,
-                     uint32_t *max_res, const uint32_t *alt_tab,
-		     const uint32_t *alt_strs);
+Since this function directly references some large property tables, it
+is stored in a separate object file.
+
+<<Library [[uni]] Members>>=
+ducet_lookup.o
 @
 
-<<Unicode property functions>>=
-int uni_DUCET_lookup(uint32_t *buf, uint32_t blen, uint32_t **res,
-                     uint32_t *max_res, const uint32_t *alt_tab,
-		     const uint32_t *alt_strs)
+<<ducet_lookup.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+// static_proto
+
+<<DUCET lookup functions>>
+@
+
+<<uni_DUCET_lookup parameters>>=
+/* special c parameter */
+#define UNI_DUCET_LOOKUP_END 0xffffffff
+/* lev123 return value */
+#define UNI_DUCET_LEV1_MASK  0xffff0000
+#define UNI_DUCET_LEV1_SHIFT 16
+#define UNI_DUCET_LEV2_MASK  0x0000ff80
+#define UNI_DUCET_LEV2_SHIFT 7
+#define UNI_DUCET_LEV3_MASK  0x0000007c
+#define UNI_DUCET_LEV3_SHIFT 2
+/* low 2 bits are always 0 */
+/* function return value */
+/* lev123 and lev4 are valid; give me next char */
+/* unless char was END, in which case lev123 and lev4 are last return */
+#define UNI_DUCET_LOOKUP_OK    0
+/* lev123 and lev4 are valid, but don't give me a char next time */
+/* in other words, next time c will be ignored */
+#define UNI_DUCET_LOOKUP_AGAIN 1
+/* lev123 and lev4 are invalid; give me next char */
+/* unless char was END, in which case no more lev123 or lev4 */
+#define UNI_DUCET_LOOKUP_NONE -1
+/* pass in NULL first time to allocate */
+/* will be freed by function when done */
+typedef struct uni_ducet_lookup_state_t uni_ducet_lookup_state_t;
+@
+
+<<Known Data Types>>=
+uni_ducet_lookup_state_t,%
+@
+
+<<Unicode property exports>>=
+<<uni_DUCET_lookup parameters>>
+int uni_DUCET_lookup(uint32_t c, uint32_t *lev123, uint32_t *lev4,
+                     uni_ducet_lookup_state_t **state);
+@
+                     
+<<DUCET lookup functions>>=
+<<Private DUCET lookup definitions>>
+struct uni_ducet_lookup_state_t {
+  <<DUCET lookup state members>>
+};
+<<Private DUCET lookup globals>>
+int uni_DUCET_lookup(uint32_t c, uint32_t *lev123, uint32_t *lev4,
+                     uni_ducet_lookup_state_t **state)
 {
-  uni_str_rng_val_t *v;
-  uint32_t rlen = 0;
-  uint32_t off, len;
-  if(!alt_tab) {
-    alt_tab = uni_DUCET_mtab;
-    alt_strs = uni_DUCET_strs;
+  <<Look up and return a single key element from DUCET>>
+}
+@
+
+First of all, there are two DUCET tables that could be used for
+lookup.  One way to implement locales would be to load tables from
+files, or to construct tables on the fly, so other tables may be used
+as well.  The default table to use is the plain DUCET, but other
+tables may be specified.  Rather than complicating the lookup function
+with a parameter that should only be specified on the first call, a
+separate function is provided to set the tables in the state
+parameter.
+
+<<DUCET lookup state members>>=
+const uint32_t *tab, *strs;
+@
+
+<<Unicode property exports>>=
+/* set table for DUCET lookups; call before lookup() */
+void uni_DUCET_lookup_tab(uni_ducet_lookup_state_t **state,
+                          const uint32_t *tab, const uint32_t *strs);
+@
+
+<<DUCET lookup functions>>=
+void uni_DUCET_lookup_tab(uni_ducet_lookup_state_t **state,
+                          const uint32_t *tab, const uint32_t *strs)
+{
+  if(!*state) {
+    inisize(*state, 1);
+    clearbuf(*state, 1);
   }
-  /* FIXME: implement */
-  while(blen > 0) {
-    multi_tab_lookup(alt_tab, *buf * 4, (const uint8_t **)&v, 0);
-    if(!v) /* should never happen, actually */
-      off = len = 0;
+  (*state)->tab = tab;
+  (*state)->strs = strs;
+}
+@
+
+<<Look up and return a single key element from DUCET>>=
+/* if(!state) exit(1); */
+if(!*state) {
+  inisize(*state, 1);
+  clearbuf(*state, 1);
+}
+uni_ducet_lookup_state_t *st = *state;
+if(!st->tab) {
+  st->tab = uni_DUCET_mtab;
+  st->strs = uni_DUCET_strs;
+}
+@
+
+Some operations, such as looking up multi-character collation
+elements, requires at least one character of lookahead.  In fact, the
+reordering requirement requires arbitrary lookahead.  To support this,
+a buffer may be filled with lookahead characters.  Any time a NONE
+return would happen, if there are buffer characters, the routine
+should instead restart itself.  Any time an OK return would happen, an
+AGAIN should be returned instead.
+
+<<DUCET lookup state members>>=
+uint32_t *bt;
+int32_t btp, num_bt, max_bt;
+@
+
+<<Look up and return a single key element from DUCET>>=
+restart:
+  if(st->num_bt) {
+    if(st->btp >= 0)
+      c = st->bt[st->btp++];
+    else
+      st->btp++;
+    if(st->btp == st->num_bt)
+      st->btp = st->num_bt = 0;
+  }
+@
+
+<<Free DUCET lookup state members>>=
+if(st->bt)
+  free(st->bt);
+@
+
+<<Private DUCET lookup globals>>=
+static void add_bt(uint32_t c, uni_ducet_lookup_state_t *st)
+{
+  if(!st->bt)
+    inisize(st->bt, (st->max_bt = 5));
+  if(st->num_bt == st->max_bt)
+    resize(st->bt, (st->max_bt *= 2));
+  st->bt[st->num_bt++] = c;
+}
+
+static void add_bt_buf(const uint32_t *buf, uint32_t len,
+                       uni_ducet_lookup_state_t *st)
+{
+  if(!st->bt)
+    inisize(st->bt, (st->max_bt = 5));
+  while(st->num_bt + len > st->max_bt)
+    resize(st->bt, (st->max_bt *= 2));
+  memcpy(st->bt + st->num_bt, buf, len * sizeof(*st->bt));
+  st->num_bt += len;
+}
+@
+
+<<Return no DUCET values>>=
+if(st->num_bt)
+  goto restart;
+else
+  return UNI_DUCET_LOOKUP_NONE;
+@
+
+<<Return one DUCET value>>=
+if(st->num_bt)
+  return UNI_DUCET_LOOKUP_AGAIN;
+else
+  return UNI_DUCET_LOOKUP_OK;
+@
+
+<<Return more than one DUCET value>>=
+if(st->num_bt)
+  st->btp--;
+return UNI_DUCET_LOOKUP_AGAIN;
+@
+
+A private enumeration type is used to represet the current lookup
+progress.
+
+<<Private DUCET lookup definitions>>=
+typedef enum {
+  DUCET_lookup_start
+  <<DUCET lookup states>>
+} ducet_lookup_state_t;
+@
+
+<<Known Data Types>>=
+ducet_lookup_state_t,%
+@
+
+<<DUCET lookup state members>>=
+ducet_lookup_state_t state;
+@
+
+<<Look up and return a single key element from DUCET>>=
+switch(st->state) {
+  case DUCET_lookup_start:
+    <<Look up in DUCET given no state>>
+  <<Look up in DUCET given state>>
+}
+@
+
+The first thing to do is check for end-of-string.  At end-of string,
+the state is freed, and nothing is returned.
+
+<<Look up in DUCET given no state>>=
+if(c == UNI_DUCET_LOOKUP_END) {
+  <<Free DUCET lookup state members>>
+  free(st);
+  *state = NULL;
+  return UNI_DUCET_LOOKUP_NONE; /* can't have any more bt */
+}
+@
+
+Otherwise, a lookup is performed in the table.  If the lookup fails, a
+key is synthesized.  Note that synthesis requires the UIdeo and blk
+properties as specified, although this could be modified to use
+explicit range checks instead.  The UIdeo property is complicated
+enough and yet small enough (12 ranges/300 bytes) that conversion
+would not save much, but the blk checks are just single ranges each
+(and the blk table is much larger, at 220 ranges/8032 bytes).  This
+assumes that the ranges will never change in the future, which is
+actually a pretty safe bet.
+
+<<DUCET lookup state members>>=
+uni_str_rng_val_t v;
+uint32_t c;
+@
+
+<<Look up in DUCET given no state>>=
+const uni_str_rng_val_t *v;
+multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+if(v && (v->off || v->len)) {
+  st->v = *v;
+  <<Process DUCET initial lookup>>
+} else {
+  st->c = c;
+  st->state = DUCET_lookup_synth;
+  *lev123 = ((c >> 15) << 16) + (0x0020 << 7) + (0x0002 << 2);
+  if(is_uni_UIdeo(c)) {
+#if 0
+    uni_blk_t blk = uni_blk_of(c);
+    if(blk == u_blk_CJK || blk == u_blk_CJK_Compat)
+#else
+    if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3300 && c <= 0x33FF))
+#endif
+      *lev123 += 0xFB40 << 16;
+    else
+      *lev123 += 0xFB80 << 16;
+  } else
+    *lev123 += 0xFBC0 << 16;
+  *lev4 = c;
+  <<Return more than one DUCET value>>
+}
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_synth
+@
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_synth:
+  *lev123 = ((st->c & 0x7fff) << 16) | 0x80000000;
+  *lev4 = st->c;
+  st->state = 0;
+  <<Return one DUCET value>>
+@
+
+For a successful lookup, the response for a single-character index is
+extracted.  If multi-character indices are available as well, more
+characters are requested after saving the work done so far in the
+state.  Otherwise, the single-character reponse is returned.
+
+<<DUCET lookup state members>>=
+uint32_t curoff;
+@
+
+<<Process DUCET initial lookup>>=
+const uint32_t *str = st->strs + st->v.off;
+uint32_t len = st->v.len, len1;
+for(len1 = 0; len1 < len; len1++)
+  if((str[len1] & 3) == 3) {
+    <<Accumulate and check more collation element characters>>
+    <<Return no DUCET values>>
+  }
+<<Return DUCET entry for single-character index>>
+@
+
+<<Accumulate and check more collation element characters>>=
+st->state = DUCET_lookup_gotfirst;
+st->curoff = len1;
+st->c = c;
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_gotfirst
+@
+
+If the next character is end-of-string, the match so far is returned.
+Otherwise, it is searched for in the subindex strings.   A match
+increases the total [[matchlen]], which can be skipped.  Only exact
+matches (i.e. only one character after [[matchlen]], and it must match
+[[c]]) are considered successful.
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_gotfirst:
+  if(c == UNI_DUCET_LOOKUP_END) {
+    <<Return DUCET entry for single or multi-character index>>
+  } else {
+    int32_t l, h, m;
+    const uint32_t *str = st->strs + st->v.off;
+    m = ducet_lookup_subindex(c, &l, &h, st);
+    <<Process index extension search results>>
+  }
+@
+
+<<DUCET lookup state members>>=
+uint32_t matchlen;
+@
+
+<<Accumulate and check more collation element characters>>=
+st->matchlen = 0;
+@
+
+<<Private DUCET lookup globals>>=
+static int ducet_lookup_subindex(uint32_t c, int32_t *_l, int32_t *_h,
+                                 const uni_ducet_lookup_state_t *st)
+{
+  uint32_t l = st->curoff, h = st->v.len, m;
+  const uint32_t *str = st->strs + st->v.off;
+  while(l <= h) {
+    <<Find start of middle index extension>>
+    m += st->matchlen;
+    uint32_t mc = str[m] >> 2;
+    if(mc < c) {
+      l = m + 1;
+      <<Skip to next index extension>>
+    } else if(mc > c ||
+              /* also greater if longer than one char */
+	      (h > m && mc == c &&
+	      (str[m + 1] & 3) == 3 && str[m + 1] != 3)) {
+      h = m - st->matchlen - 1;
+    } else {
+      *_l = l;
+      *_h = h;
+      return m - st->matchlen;
+    }
+  }
+  *_l = l;
+  *_h = h;
+  return 0;
+}
+@
+
+<<Find start of middle index extension>>=
+m = (l + h) / 2;
+while(m > l && ((str[m] & 3) != 3 || str[m] == 3))
+  m--;
+while(m > l && ((str[m - 1] & 3) == 3 && str[m - 1] != 3))
+  m--;
+@
+
+<<Skip to next index extension>>=
+while(l <= h && (str[l] & 3) == 3 && str[l] != 3)
+  l++;
+if(l <= h && str[l] == 3)
+  l++;
+else
+  while(l <= h && (str[l] & 3) != 3)
+    l++;
+@
+
+A successful match is returned if there can be no further extension of
+the index.  Otherwise, the search results are narrowed to the
+possibilities collected so far, and more input is requested.
+
+<<Process index extension search results>>=
+if(l <= h) {
+  /* advance search result to match */
+  st->v.off += m;
+  st->v.len -= m;
+  str += m;
+  /* find end of match entry */
+  l = 1;
+  h = st->v.len - 1;
+  <<Skip to next index extension>>
+  ducet_adjust_search(c, l, st);
+  if(st->curoff == st->v.len) {
+    /* there are no more possible matches, so just return */
+    st->state = DUCET_lookup_start;
+    <<Return DUCET entry for multi-character index>>
+  } else {
+    st->matchlen++;
+    <<Return no DUCET values>>
+  }
+}
+@
+
+<<Private DUCET lookup globals>>=
+static void ducet_adjust_search(uint32_t c, int32_t l,
+                                uni_ducet_lookup_state_t *st)
+{
+  int32_t h = st->v.len - 1, m;
+  const uint32_t *str = st->strs + st->v.off;
+  st->curoff = l;
+  while(l <= h) {
+    <<Find start of middle index extension>>
+    if((str[m + st->matchlen] >> 2) != c)
+      h = m - 1;
     else {
-      /* find start of next index */
-      off = v->off;
-      for(len = 0; len < v->len; len++) {
-        uint8_t t = alt_strs[off + len] & 3;
-	if(t == 3)
-	  break;
-        if(t == 2)
-	  len++;
+      l = m + 1;
+      <<Skip to next index extension>>
+    }
+  }
+  st->v.len = h + 1;
+}
+@
+
+When mismatch occurs, however, it is not guaranteed that this will
+never match.  There are two cases where a future character might still
+cause a match.  If a longer string is required for a match due to a
+DUCET which does not have entries for all intervening-length strings
+(the standard DUCET does not), [[h]] always points just below at least
+one such string.  If more data is required because a reordering might
+cause a match, the ccc of c and any future characters must be non-zero
+and not match the ccc of any potential candidates for reordering.
+
+<<Process index extension search results>>=
+else {
+  uint32_t ccc;
+  /* if c in str, but not only member of str, ill-formed DUCET */
+  /* h always points just below longer index */
+  h += st->matchlen + 1;
+  if(h < st->v.len && str[h] == (c << 2) + 3) {
+    <<Enable possible longer lookup>>
+  /* check if possible match due to reordering rule */
+  } else if((ccc = uni_ccc_of(c))) {
+    <<Enable reordering extension>>
+  } else {
+    /* no possible longer matches, so go ahead and return */
+    add_bt(c, st);
+    <<Return DUCET entry for single or multi-character index>>
+  }
+}
+@
+
+The first case is easy to detect and manage.  At most one intermediate
+is allowed to be missing, so the next character determines if a match
+is made.  if so, processing continues just as above.  Otherwise, the
+two characters that were not processed are stored, and special states
+are entered to feed these back, one at a time.  They will never
+collide with each other, because the second character is the first one
+which could cause the extension state to reappear, and by then, the
+stored characters are done being processed.
+
+Rather than modify the code to loop and retrieve characters from
+buffers, a recursive call is used.  Again, this should happen rarely,
+and does not affect performance much.
+
+<<DUCET lookup state members>>=
+uint32_t long_off;
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_longer
+@
+
+<<Enable possible longer lookup>>=
+st->state = DUCET_lookup_longer;
+st->long_off = st->curoff;
+st->c = c;
+ducet_adjust_search(c, l, st);
+<<Return no DUCET values>>
+@
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_longer:
+  {
+    int32_t m, l, h;
+    const uint32_t *str = st->strs + st->v.off;
+    st->matchlen++;
+    m = ducet_lookup_subindex(c, &l, &h, st);
+    if(l > h) { /* assume no even longer matches possible.. */
+      add_bt(st->c, st);
+      add_bt(c, st);
+      st->curoff = st->long_off;
+      st->state = DUCET_lookup_start;
+      <<Return DUCET entry for single or multi-character index>>
+    } else {
+      st->v.off += m;
+      st->v.len -= m;
+      l = 1;
+      h = st->v.len - 1;
+      <<Skip to next index extension>>
+      st->curoff = l;
+      <<Return DUCET entry for multi-character index>>
+    }
+  }
+@
+
+The second case requires checking the ccc of all subsequent
+characters; if a zero is detected, no further reordering is possible.
+Otherwise, as long as a character does not match the ccc of one of the
+previously accumulated characters, it is looked up and if it matches,
+a reordering can take place.
+
+By the time the decision is made, at least one character, and possibly
+more, have been accumulated.  A buffer (separate from [[bt]]) needs to
+be used to accumulate these and eventually transfer them into [[bt]]. 
+
+<<DUCET lookup state members>>=
+uint32_t *buf, buflen, maxbuf;
+uint32_t *ccc_buf;
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_reorder
+@
+
+<<Enable reordering extension>>=
+if(!st->buf) {
+  inisize(st->buf, (st->maxbuf = 10));
+  inisize(st->ccc_buf, st->maxbuf);
+}
+st->buf[0] = c;
+st->ccc_buf[0] = ccc;
+st->buflen = 1;
+st->state = DUCET_lookup_reorder;
+<<Return no DUCET values>>
+@
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_reorder:
+  {
+    uint32_t ccc = c == UNI_DUCET_LOOKUP_END ? 0 : uni_ccc_of(c);
+    uint32_t i;
+    if(st->maxbuf == st->buflen) {
+      resize(st->buf, st->maxbuf *= 2);
+      resize(st->ccc_buf, st->maxbuf);
+    }
+    st->buf[st->buflen] = c;
+    st->ccc_buf[st->buflen++] = ccc;
+    if(!ccc) {
+      st->state = DUCET_lookup_start;
+      add_bt_buf(st->buf, st->buflen, st);
+      <<Return DUCET entry for single or multi-character index>>
+    }
+    for(i = 0; i < st->buflen - 1; i++)
+      if(st->ccc_buf[i] == ccc) {
+        <<Return no DUCET values>>
       }
-      /* was there one? if so, try to look it up */
-      if(len < v->len) {
-        if(blen > 1) {
-          /* binary search for buf[1] in len .. v->len region */
-	  /* and continue narrowing search if blen > 2 ... */
-	}
+    int32_t l, h, m;
+    m = ducet_lookup_subindex(c, &l, &h, st);
+    if(l <= h) {
+      /* advance search result to match */
+      st->v.off += m;
+      st->v.len -= m;
+      /* copy rest of characters accumulated to bt */
+      add_bt_buf(st->buf, st->buflen - 1, st);
+      /* find end of match entry */
+      l = 1;
+      h = st->v.len - 1;
+      const uint32_t *str = st->strs + st->v.off;
+      <<Skip to next index extension>>
+      if(l > h) {
+        /* there are no more possible matches, so just return */
+	st->state = DUCET_lookup_start;
+	<<Return DUCET entry for multi-character index>>
+      } else {
+        st->state = DUCET_lookup_gotfirst;
+	ducet_adjust_search(c, l, st);
+	st->matchlen++;
+	<<Return no DUCET values>>
+      }
+    } else {
+      <<Return no DUCET values>>
+    }
+  }
+@
+
+<<Free DUCET lookup state members>>=
+if(st->buf)
+  free(st->buf);
+@
+
+Rather than reproduce the code for returning the results everywhere,
+it is placed after the switch.  Thus a [[break]] indicates that a
+result should be returned.  The only difference between them is that
+[[c]] needs to be retrieved from the state for multi-character indices.
+Also, [[curoff]] is assumed to be the end of the entry to return, but
+it is never assigned for the single-character index case.
+
+<<Return DUCET entry for single or multi-character index>>=
+c = st->c;
+break;
+@
+
+<<Return DUCET entry for multi-character index>>=
+c = st->c;
+break;
+@
+
+<<Return DUCET entry for single-character index>>=
+st->curoff = v->len;
+break;
+@
+
+Due to advancing the pointers above, [[v]] points to the desired result
+to return.  The only difficulty is distinguishing between
+multi-character index results and blank single-character index
+results; this can be done by checking [[curoff]], which points to the
+first character after the key.  If this is zero, then it is a blank
+single-character index result.
+
+<<Look up and return a single key element from DUCET>>=
+if(!st->curoff) {
+  <<Return blank single-character index DUCET result>>
+}
+int i;
+const uint32_t *str = st->strs + st->v.off;
+for(i = 0; i < st->curoff; i++)
+  if((str[i] & 3) != 3)
+    break;
+if(i == st->curoff) {
+  <<Return blank multi-character index DUCET result>>
+}
+<<Return non-blank DUCET result>>
+@
+
+The single-character index entries with blank keys denote canonical
+decomposition.  This may require more than one result.  All decomposed
+characters are guaranteed to have a real key of length one for the
+single-character index.
+
+<<DUCET lookup state members>>=
+const uint32_t *multi_ret;
+uint32_t multi_ret_len;
+@
+
+<<Return blank single-character index DUCET result>>=
+const uni_str_rng_val_t *v;
+multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
+st->multi_ret = uni_dm_full_strs + v->off;
+st->multi_ret_len = v->len;
+<<Return DUCET entry for next decomp character>>
+@
+
+<<Return DUCET entry for next decomp character>>=
+const uint32_t *str;
+c = *st->multi_ret++;
+st->multi_ret_len--;
+<<Look up and return DUCET value for [[c]]>>
+if(st->multi_ret_len) {
+  st->state = DUCET_lookup_compret;
+  <<Return more than one DUCET value>>
+} else {
+  st->state = DUCET_lookup_start;
+  <<Return one DUCET value>>
+}
+@
+
+<<Look up and return DUCET value for [[c]]>>=
+multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+str = st->strs + v->off;
+<<Return DUCET value for [[str]]/[[c]]>>
+@
+
+<<Return DUCET value for [[str]]/[[c]]>>=
+*lev123 = *str & ~3;
+switch(*str & 3) {
+  case 0:
+    *lev4 = 0;
+    break;
+  case 1:
+    *lev4 = c;
+    break;
+  default:
+    *lev4 = *++str >> 2;
+    break;
+}
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_compret
+@
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_compret:
+  {
+    <<Return DUCET entry for next decomp character>>
+  }
+@
+
+The multi-character index entries with blank keys denote canonical
+composition.  This may require more than one composition lookup.  It
+always returns exactly one value.
+
+<<Return blank multi-character index DUCET result>>=
+int16_t coff;
+uint8_t clen;
+uni_find_canon_comp(c, &coff, &clen);
+c = uni_lookup_compent(*str >> 2, uni_canon_comp_strs + coff, clen);
+if(st->curoff > 1 && str[1] != 3 && (str[1] & 3) == 3) {
+  uni_find_canon_comp(c, &coff, &clen);
+  c = uni_lookup_compent(str[1] >> 2, uni_canon_comp_strs + coff, clen);
+}
+const uni_str_rng_val_t *v;
+<<Look up and return DUCET value for [[c]]>>
+st->state = DUCET_lookup_start;
+<<Return one DUCET value>>
+@
+
+The non-blank result only requires work if there is more than one key
+entry.  If so, it is returned later.
+
+<<Return non-blank DUCET result>>=
+str += i;
+st->multi_ret = str;
+st->curoff -= i;
+<<Return DUCET value for [[str]]/[[c]]>>
+str++;
+st->multi_ret_len = st->curoff - (int)(str - st->multi_ret);
+if(!st->multi_ret_len) {
+  st->state = DUCET_lookup_start;
+  <<Return one DUCET value>>
+}
+st->multi_ret = str;
+st->state = DUCET_lookup_multikey;
+<<Return more than one DUCET value>>
+@
+
+<<DUCET lookup states>>=
+,DUCET_lookup_multikey
+@
+
+<<Look up in DUCET given state>>=
+case DUCET_lookup_multikey:
+  {
+    const uint32_t *str = st->multi_ret;
+    c = st->c;
+    <<Return DUCET value for [[str]]/[[c]]>>
+    str++;
+    st->multi_ret_len -= str - st->multi_ret;
+    if(st->multi_ret_len) {
+      st->multi_ret = str;
+      <<Return more than one DUCET value>>
+    } else {
+      st->state = DUCET_lookup_start;
+      <<Return one DUCET value>>
+    }
+  }
+@
+
+Given the lookup function, it is possible to create simple UCA
+wrappers:  one for string comparison, and one for key creation.
+
+Note that the multi-level comparison algorithm requires that more than
+one pass be made over the keys, unless the strings being compared
+happen to generate keys of the same ignorable level.  This can be done
+by either calling [[uni_DUCET_lookup]] as many times as there are
+levels for each character, or by storing the results of the lookup in
+dynamic arrays, to be processed in later passes.  The only entries
+which do not need to be stored are all-zero entries.
+
+<<uni_uca_opts_t>>=
+typedef struct {
+  <<Unicode UCA funtion options>>
+} uni_uca_opts_t;
+@
+
+<<Unicode property exports>>=
+<<uni_uca_opts_t>>
+uint32_t *uni_str_uca_key(const uint32_t *str, uint32_t slen,
+                          const uni_uca_opts_t *opts);
+@
+
+<<DUCET lookup functions>>=
+uint32_t *uni_str_uca_key(const uint32_t *str, uint32_t slen,
+                          const uni_uca_opts_t *opts)
+{
+  uint32_t *res, res_max, nres = 0;
+  uni_ducet_lookup_state_t *st = NULL;
+  uni_uca_opts_t opt;
+  uint32_t mask123;
+  int in_var = 0;
+  const uint32_t *l5 = str;
+  int len[4], off[4];
+
+  inisize(res, (res_max = 10));
+  if(!str || !slen) {
+    res[0] = 0;
+    return res;
+  }
+  if(opts)
+    opt = *opts;
+  else
+    clearbuf(&opt, 1);
+  int shifted = opt.var_weight > 2, blanked = opt.var_weight == 2;
+  if(opt.tab && opt.strs)
+    uni_DUCET_lookup_tab(&st, opt.tab, opt.strs);
+  if(!opt.vartop)
+    opt.vartop = uni_DUCET_var_top;
+  if(!opt.level)
+    opt.level = 3;
+  if(opt.level > 4)
+    opt.level = 5;
+  mask123 = UNI_DUCET_LEV1_MASK;
+  if(opt.level > 1)
+    mask123 |= UNI_DUCET_LEV2_MASK;
+  if(opt.level > 2)
+    mask123 |= UNI_DUCET_LEV3_MASK;
+  opt.vartop <<= 16;
+  len[0] = len[1] = len[2] = len[3] = 0;
+  while(1) {
+    uint32_t lev123, lev4;
+    int ret = uni_DUCET_lookup(slen ? *str : UNI_DUCET_LOOKUP_END,
+                               &lev123, &lev4, &st);
+    if(ret == UNI_DUCET_LOOKUP_NONE) {
+      if(slen) {
+        str++;
+	slen--;
+        continue;
+      } else
+        break;
+    }
+    if(shifted) {
+      if(!lev123)
+        lev4 = 0;
+      else if(!(lev123 & UNI_DUCET_LEV1_MASK)) {
+        if(in_var)
+	  lev4 = lev123 = 0;
+        else
+	  lev4 = 0xffff;
+      } else {
+        in_var = 0;
+	lev4 = 0xffff;
+      }
+    } else if(blanked && in_var) {
+      if(!(lev123 & UNI_DUCET_LEV1_MASK))
+        lev123 = lev4 = 0;
+      else
+        in_var = 0;
+    }
+    if(lev123 <= opt.vartop) {
+      in_var = 1;
+      switch(opt.var_weight) {
+        case UNI_DUCET_VAR_WEIGHT_BLANKED:
+	  lev123 = lev4 = 0;
+	  break;
+	case UNI_DUCET_VAR_WEIGHT_SHIFTED:
+	  lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
+	  lev123 = 0;
+	  break;
+	case UNI_DUCET_VAR_WEIGHT_IGNORE_SP:
+	  if((uni_gc_trans[U_gc_P] & (1 << uni_gc_of(*str))) ||
+	     is_uni_WSpace(*str)) {
+	    lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
+	    lev123 = 0;
+	  } else
+	    in_var = 0;
+	  break;
+	case UNI_DUCET_VAR_WEIGHT_SHIFT_TRIMMED:
+	  lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
+	  lev123 = 0;
+	  /* FIXME: trim trailing ffff from sort key */
+	  /* requires delaying 0xffff until known wheter trailing or not */
+	  break;
+      }
+    }
+    lev123 &= mask123;
+    if(opt.level < 4)
+      lev4 = 0;
+    if(lev123 || lev4) {
+      if(nres == res_max)
+        resize(res, (res_max *= 2));
+      res[nres++] = lev123;
+      if(opt.level >= 4)
+        res[nres++] = lev4;
+      if(lev123 & UNI_DUCET_LEV1_MASK)
+        len[0]++;
+      if(lev123 & UNI_DUCET_LEV2_MASK)
+        len[1]++;
+      if(lev123 & UNI_DUCET_LEV3_MASK)
+        len[2]++;
+      if(lev4)
+        len[3]++;
+    }
+    if(ret == UNI_DUCET_LOOKUP_OK) {
+      if(!slen--)
+        break;
+      str++;
+    }
+  }
+  /* OK, now that raw codes have been looked up, create actual result string */
+  {
+    uint32_t *key, keylen, i;
+    int i1, i2, i3, i4;
+    /* 0 == 16 bits, 1 == 9 bits, 2 == 5 bits */
+    /*  -> 2 per word, 3 per word, 6 per word */
+    keylen = len[0] / 2 + 1;
+    if(opt.level > 1)
+      keylen += len[1] / 3 + 1;
+    if(opt.level > 2)
+      keylen += len[2] / 6 + 1;
+    if(opt.level > 3)
+      keylen += len[3] + 1;
+    if(opt.level > 4)
+      keylen += (int)(str - l5) + 1;
+    inisize(key, keylen + 1);
+    off[0] = len[0] / 2 + 1;
+    key[off[0] - 1] = opt.level > 1;
+    if(opt.level > 1) {
+      off[1] = off[0] + len[1] / 3 + 1;
+      key[off[1] - 1] = opt.level > 2;
+    } else
+      key[off[0]] = 0;
+    if(opt.level > 2) {
+      off[2] = off[1] + len[2] / 6 + 1;
+      key[off[2] - 1] = opt.level > 3;
+    } else
+      key[off[1]] = 0;
+    if(opt.level > 3) {
+      off[3] = off[2] + len[3] + 1;
+      key[off[3] - 1] = opt.level > 4;
+    } else
+      key[off[2]] = 0;
+    if(opt.level > 4)
+      key[(int)(str - l5) + off[3]] = 0;
+    for(i = i1 = i2 = i3 = i4 = 0; i < nres; i++) {
+      if(res[i] & UNI_DUCET_LEV1_MASK) {
+        if(i1 % 2)
+	  key[i1 / 2] |= res[i] >> UNI_DUCET_LEV1_SHIFT;
+	else
+	  key[i1 / 2] = res[i] & UNI_DUCET_LEV1_MASK;
+        i1++;
+      }
+      if(res[i] & UNI_DUCET_LEV2_MASK) {
+        uint32_t l2 = (res[i] & UNI_DUCET_LEV2_MASK) >> UNI_DUCET_LEV2_SHIFT;
+	if(i2 % 3)
+	  key[off[0] + i2 / 3] |= l2 << 9 * (2 - i2 % 3);
+	else
+	  key[off[0] + i2 / 3] = l2 << 18;
+        i2++;
+      }
+      if(res[i] & UNI_DUCET_LEV3_MASK) {
+        uint32_t l3 = (res[i] & UNI_DUCET_LEV3_MASK) >> UNI_DUCET_LEV3_SHIFT;
+	if(i3 % 6)
+	  key[off[1] + i3 / 6] |= l3 << 5 * (5 - i3 % 6);
+	else
+	  key[off[1] + i3 / 6] = l3 << 25;
+        i3++;
+      }
+      if(opt.level > 3 && res[++i]) {
+        key[off[2] + i4] = res[i];
+        i4++;
+      }
+    }
+    free(res);
+    if(opt.level > 4)
+      memcpy(key + off[3], l5, (int)(str - l5) * 4);
+    return key;
+  }
+}
+@
+
+<<Unicode UCA funtion options>>=
+const uint32_t *tab, *strs;
+uint32_t vartop;
+uint32_t level;
+int var_weight;
+@
+
+<<Unicode property exports>>=
+#define UNI_DUCET_VAR_WEIGHT_NON_IGNORABLE 1
+#define UNI_DUCET_VAR_WEIGHT_BLANKED       2
+#define UNI_DUCET_VAR_WEIGHT_SHIFTED       3
+#define UNI_DUCET_VAR_WEIGHT_IGNORE_SP     4
+#define UNI_DUCET_VAR_WEIGHT_SHIFT_TRIMMED 5
+@
+
+To test this, the CollationTest files are used.  As with the
+normalization tests, the files are simply fed into standard input.
+There are four separate files, and each requires a different
+configuration.  These are selected using command-line arguments.  The
+options are DUCET vs. CLDR DUCET, and variable mode non-ignorable vs.
+variable mode shifted.
+
+\lstset{language=make}
+<<C Test Support Executables>>=
+tstuca \
+@
+
+<<Additional Tests>>=
+./tstuca <$(UCD_LOC)/CollationTest/CollationTest_NON_IGNORABLE.txt
+./tstuca -s <$(UCD_LOC)/CollationTest/CollationTest_SHIFTED.txt
+./tstuca -c <$(UCD_LOC)/CollationAuxiliary/CollationTest_CLDR_NON_IGNORABLE.txt
+./tstuca -cs <$(UCD_LOC)/CollationAuxiliary/CollationTest_CLDR_SHIFTED.txt
+@
+
+\lstset{language=C}
+<<tstuca.c>>=
+<<Common C Header>>
+#include "uni_all.h"
+#include "mfgets.h"
+#include "mallocdef.h"
+
+int main(int argc, const char **argv)
+{
+  int do_cldr = 0, do_shift = 0;
+  while(argc-- > 1) {
+    if(**++argv == '-') {
+      const char *s = *argv;
+      while(*++s) {
+        if(*s == 'c')
+	  do_cldr = 1;
+	else if(*s == 's')
+	  do_shift = 1;
       }
     }
   }
-  return rlen;
+  <<Read and process CollationTest.txt>>
+  return 0;
 }
+@
+
+<<Read and process CollationTest.txt>>=
+uni_uca_opts_t opts;
+clearbuf(&opts, 1);
+if(do_cldr) {
+  opts.tab = uni_DUCET_CLDR_mtab;
+  opts.strs = uni_DUCET_CLDR_strs;
+  opts.vartop = uni_DUCET_CLDR_var_top;
+}
+if(do_shift)
+  opts.var_weight = UNI_DUCET_VAR_WEIGHT_SHIFTED;
+else
+  opts.var_weight = UNI_DUCET_VAR_WEIGHT_NON_IGNORABLE;
+opts.level = 5;
+char *lbuf = NULL, *s;
+uint32_t *prev_key = NULL;
+unsigned int lbuflen, llen;
+uint32_t *buf, buf_len, max_buf, *key;
+inisize(buf, (max_buf = 10));
+#if 1
+char *kbuf;
+unsigned int kbuflen;
+inisize(kbuf, (kbuflen = 800)); /* just make it big enough rather than resizing */
+#endif
+while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
+  if(!isxdigit(lbuf[0]))
+    continue;
+  buf[0] = strtol(lbuf, &s, 16);
+  buf_len = 1;
+  while(1) {
+    while(isspace(*s))
+      s++;
+    if(!isxdigit(*s))
+      break;
+    if(buf_len == max_buf)
+      resize(buf, (max_buf *= 2));
+    buf[buf_len++] = strtol(s, &s, 16);
+  }
+  while(buf_len * 18 > max_buf)
+    resize(buf, (max_buf *= 2));
+  buf_len = uni_NFD(buf, buf_len);
+  key = uni_str_uca_key(buf, buf_len, &opts);
+#if 1
+  s = kbuf;
+  uint32_t *kp = key;
+  *s++ = '[';
+  /* lev 1 */
+  while(*kp & 0xffff0000) {
+    s += sprintf(s, "%04X ", (int)(*kp >> 16));
+    if(!(*kp & 0xffff))
+      break;
+    s += sprintf(s, "%04X ", (int)(*kp & 0xffff));
+    kp++;
+  }
+  kp++;
+  *s++ = '|';
+  *s++ = ' ';
+  while(*kp & 0x7FC0000) {
+    s += sprintf(s, "%04X ", (int)(*kp >> 18));
+    if(!(*kp & 0x3FE00))
+      break;
+    s += sprintf(s, "%04X ", (int)((*kp >> 9) & 0x1ff));
+    if(!(*kp & 0x1ff))
+      break;
+    s += sprintf(s, "%04X ", (int)(*kp & 0x1ff));
+    kp++;
+  }
+  kp++;
+  *s++ = '|';
+  *s++ = ' ';
+  while(*kp & (0x1f << 25)) {
+    int i;
+    for(i = 5; i >= 0; i--) {
+      uint32_t v = (*kp >> 5 * i) & 0x1f;
+      if(!v)
+        break;
+      s += sprintf(s, "%04X ", (int)v);
+    }
+    if(i >= 0)
+      break;
+    kp++;
+  }
+  kp++;
+  fputs(kbuf, stdout);
+  fputs("| ", stdout);
+  while(*kp && *kp != 1)
+    printf("%04X ", (int)*kp++);
+  kp++;
+  fputs("| ", stdout);
+  while(*kp && *kp != 1)
+    printf("%04X ", (int)*kp++);
+  puts("|]");
+  strcpy(s, "|]");
+#if 0
+  {
+    uint32_t i;
+    s = strrchr(lbuf, '[');
+    strrchr(s, ']')[1] = 0;
+    if(strcmp(s, kbuf)) {
+      for(i = 0; key[i]; i++)
+        printf("%08X ", key[i]);
+      printf("%s %s\n%s", kbuf, s, lbuf);
+      exit(1);
+    }
+  }
+#endif
+#endif
+  if(prev_key) {
+    uint32_t i;
+    for(i = 0; prev_key[i] && key[i]; i++)
+      if(prev_key[i] != key[i])
+        break;
+    if(prev_key[i] > key[i]) {
+      fflush(stdout);
+      fprintf(stderr, "keys are out of order at %s\n", lbuf);
+      exit(1);
+    }
+    free(prev_key);
+  }
+  prev_key = key;
+}
+@
+
+While implementation of the UCA algorithm with the raw tables is
+possible, there are a few desirable functions which cannot be
+accomplished with this data format:%
+\footnote{In fact, the first two are the very reason this library
+exists.  All of the prior information can be obtained from other
+libraries, and in fact the sort keys can be obtained with Single UNIX
+Specification functions.  However, no library to my knowledge gives
+collation classes or a list of collation elements.  The lack of
+locale-specific character classes is less important, since they can at
+least be simulated using regular expressions.}
+
+\begin{itemize}
+\item Given a collation element, list all collation elements which
+have the same key (i.e., determine its collation equivalence class).
+This is required for regular expressions.
+\item Given two collation elements, list all collation elements which
+lie between them.  This is required for regular expressions.
+\item Reorder elements.  This is required for static CLDR support.
+\item Reorder element blocks.  This is required for static and dynamic
+CLDR support.
+\end{itemize}
+
+At the minimum, these functions all require a lookup table ordered by
+sort key rather than collation element.
+
+<<Post-process DUCET>>=
+free(strs);
+free(ents);
 @
 
 <<FIXME>>=
 DUCET needs more support
+  default (derived value):
+    Ill-formed: replace all ill-formed sequences with U+FFFD (or assume unassigned)
+    Hangul: "simple":
+      make all Vs and Ts 1-ignorable
+      make L weight same as 1st LVT w/ that L
   tests?
     CollationTest/CollationTest_NON_IGNORABLE.txt
     CollationTest/CollationTest_SHIFTED.txt
@@ -7049,6 +8266,25 @@ DUCET needs more support
   CollationAuxiliary/UCA_Rules.txt?
     just an alternate format, using relative comparisons instead of numbers
   full UCA implementation?
+    - normalize to NFD
+    - detect longest index substrings in DUCET
+      - if a non-0 ccc follows and does not have intervening same ccc,
+        it might be reordered to extend length of index
+    - process variable weighting
+      non-ignorable: use given weights
+      blanked: self and any following l1-ignorables become l4-ignorable
+      shifted: same as blanked except for self, which gets l4 non-0:
+         complex rule; see section 3.6.2; depends on preceeding char
+      ingoresp: shifted whitespace/punc, non-ign rest
+      shift-trimmed: shift, but remove trailing ffff?
+      
+    - form search key by appending non-0 key fields in field # order
+      first (i.e, sort by field 1, ignoring 0s, then 2, etc.)
+      - actual sort key uses 0 to separate levels to ensure they are
+	sorted correctly
+      - some levels may be sorted in reverse order, meaning that the
+        keys themselves are reversed, not the ordering
+      - for stable sort, append NFD string (aka identical level)
   given x and y, give all characters in range x-y (needed for regex)
     inverse table:
       keyx = DUCET[x]
@@ -7062,6 +8298,8 @@ for regex, only explicitly exported string prop is Collation_Primary
   for multi-element keys, only 1st element?
   _Secondary, _Tertiary, _Quaternary?
   what would this even be used for?
+CLDR options
+  reorder = space, punct, symbol, currency, digit, script_id
 @
 
 \chapter{Character Names}
@@ -9594,6 +10832,12 @@ chdir(CLDR_LOC);
 <<Parse CLDR files>>
 @
 
+The CLDR is, like most XML data, insanely complex and at times poorly
+documented, and much of its functionality has dubious value for
+general projects.  Part of the purpose of this project was to provide
+information not obtainable from the POSIX locale functions.  As such,
+everything will be ignored except for collation data.
+
 Since the CLDR deals with locale data, the first thing to do is
 determine what locale is being used.  The locale name consists of a
 language identifier, followed by optional extensions.  The language
@@ -9697,6 +10941,34 @@ Similarly, script, territory, and variants have aliases as well.
 else if(xml_isname(n, "alias")) {
   
 }
+@
+
+<<FIXME>>=
+"unknown" codes:
+  $language - und
+  $script - Zzzz
+  $region - ZZ
+  $currency - XXX
+  $tzid - unk
+translated region (territory?) codes:
+  AA -> 958 -> AAA
+  QM..QZ -> 959..972 -> QMM..QZZ
+  XA..XZ -> 973..998 -> XAA..XZZ
+  ZZ -> 999 -> ZZZ
+translated script codes:
+  Qaaa..Qabx -> 900..949
+canonical form of parms (does it really matter?):
+  -t- before -u-
+  -u-: all attrs in alpha, followed by all keywords in alpha, all lower
+       all names are canonical name
+  -t-: same canon really
+variant translations:
+  AALAND -> sv_AX
+  BOKMAL -> -nb
+  NYNORSK -> -nn
+  POSIX -> -u-va-posix
+  POLYTONI -> -polyton
+  SAAHO -> -ssy
 @
 
 The extensions supported by the CLDR are listed in the common/bcp47
@@ -9807,6 +11079,12 @@ chdir(cwd);
 chdir(CLDR_LOC);
 @
 
+The main lldml files contain the actual locale data.  Every lldml file
+at least identifies itself.  All lldml files with the same identity
+are effectively merged into a single tree.  For alias lookups and data
+merging, all available xml files are read in and keyed by their
+primary identity.
+
 <<UCD parser local functions>>=
 static void parse_ldml(const char *name)
 {
@@ -9875,6 +11153,9 @@ else if(xml_isname(n, "identity")) {
 }
 @
 
+The casing subdirectory contains internal-use-only casing rules for
+user interfaces.
+
 <<Parse CLDR files>>=
 /* casing: special casing rules */
 /* need to convert this to a binary file format */
@@ -9925,6 +11206,9 @@ else if(xml_isname(n, "metadata")) {
     }
 }
 @
+
+The collations subdirectory contains locale-specific collation order
+changes.
 
 <<Parse CLDR files>>=
 /* collation: locale-specific collation rules */
@@ -10067,6 +11351,9 @@ else if(xml_isname(n, "collations")) {
 }
 @
 
+The main subdirectory contains common locale parameters such as
+calendar, money, and numeric format changes.
+
 <<Parse CLDR files>>=
 /* main: "other" rules */
 d = opendir("common/main");
@@ -10194,6 +11481,12 @@ else if(xml_isname(n, "references")) {
 <<FIXME>>=
 implement
 
+inheritance rules (what a pain)
+  bundle:
+    strip region, then script, then go to "default" & do same, then root
+  item:
+    strip region, then script, then go to "root alias" & do same, then root
+
 rbnf -> rbnf for generating number names from numbers
   doctype = ldml
 segments -> patterns for text segmentation
@@ -10201,6 +11494,42 @@ segments -> patterns for text segmentation
 supplemental -> various
   doctype = ldmlSupplemental
 transforms -> mappings (no real single name for each, though)
+
+crappy "set" notation must be implemented for reading LDML files:
+ claims UTS18-L1+RL2.5 "with recommended syntax", but then goes on
+ to describe a different syntax..  in particular, set ops are different
+   "A multi-character string can be in a Unicode set.. uses curly  braces"
+     wtf does that mean?  \u{XXXX XXXX}? {c1 c2 c3}?
+  literal chars & ranges
+  ignore whitespace
+  \uXXXX
+  \UXXXXXXXX
+  \xXX
+  \OOO
+  \a \b \t \n \v \f \r \\
+  \u{X...}
+  \u{X.... X...}
+  \N{<name>}
+  \p{<prop>} [:<prop>:]
+  \P{<prop>} [:&<prop>:]
+   <prop> is binary or prop-name[: = != =/=]val or script or cat
+   script or cat can be ored using |
+   val can be ored using |
+     General_Category Script Alphabetic Uppercase Lowercase
+     White_Space Noncharacter_Code_Point Default_Ignorable_Code_Point
+     ANY (0-10FFFF)
+     ASCII (0-7F)
+     ASSIGNED (!Cn)
+     na/name Name_Alias
+       only non-binary props are name cat script
+       name props must match loosely
+  [ ] for grouping (creates a subset)
+    adjacent for union
+    & for intersection
+    - for set difference
+      all 3 ops are l-r and same precendence level
+      & and - only operate on sets
+  [^ ] for inversion
 @
 
 <<FIXME>>=
