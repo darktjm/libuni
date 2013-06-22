@@ -174,6 +174,937 @@ heavy wrapper code and additional utilities that the other libraries
 include.
 % End-doc Introduction
 
+\chapter{File Input}
+
+% Begin-doc unitypes
+The supported character types (encoding forms) are UTF-8, UTF-16, and
+UTF-32.  Technically, a UTF-32 character can be stored in 21 bits.
+The other two require an unsigned storage type of the given width.
+Instead of providing aliases for standard types, the standard sized C
+types from \texttt{stdint.h} are used: [[uint8_t]], [[uint16_t]], and
+[[uint32_t]], respectively.  All functions which take or return a
+single character use the UTF-32 type.  If an error could be returned
+for UTF-32 returning functions, a signed integer ([[int32_t]]) may be
+used instead.
+
+The stream encodings (encoding schemes) for these types are named
+similarly.  The 8-bit encoding is UTF-8.  The 16-bit big-endian
+encoding is UTF-16BE, and the little-endian encoding is UTF-16LE.  The
+32-bit big-endian encoding is UTF-32BE, and the 32-bit little-endian
+encoding is UTF-32LE.  UTF-16 and UTF-32 character streams must either
+agree on a byte order ahead of time, or begin the stream with a Byte
+Order Mark (U+FEFF).
+
+Basic I/O support is provided in the form of UTF decoders and
+encoders.  More advanced I/O is provided in the form of arbitrary
+encoding input.
+% End-doc unitypes
+
+<<Library [[uni]] Members>>=
+uni_io.o
+@
+
+\lstset{language=C}
+<<uni_io.c>>=
+<<Common C Header>>
+#include "uni_io.h"
+
+<<Unicode I/O local definitions>>
+
+<<Unicode I/O functions>>
+@
+
+<<Library [[uni]] headers>>=
+#include "uni_io.h"
+@
+
+<<uni_io.h>>=
+<<Common C Warning>>
+#ifndef UNI_IO_H
+#define UNI_IO_H
+
+#include "uni_prop.h"
+<<Unicode I/O Exports>>
+#endif
+@
+
+\section{Basic Unicode I/O}
+
+Unicode defines several file formats:  UTF-8, UTF-16, and UTF-32.  No
+special conversion needs to be made from UTF-32 to integer code
+points, other than to filter out invalid values and possibly byte-swap
+the code point.
+
+<<Common C Includes>>=
+#include <stdint.h>
+/* FIXME: this is glibc-specific */
+/* BSD apparently uses <sys/endian.h> */
+/* OpenBSD additionally uses different fn names */
+/* others may not even have any equivalent functions */
+/* at least non-glibc users should get compilation errors that point here */
+#include <endian.h>
+@
+
+\lstset{language=make}
+<<makefile.vars>>=
+# for endian
+EXTRA_CFLAGS += -D_BSD_SOURCE
+@
+
+\lstset{language=C}
+<<Unicode I/O Exports>>=
+int uni_utf32_encode(uint32_t *buf, uint32_t cp, int bige);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf32_encode(uint32_t *buf, uint32_t cp, int bige)
+{
+  if(cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000))
+    return 0;
+  *buf = bige ? htobe32(cp) : htole32(cp);
+  return 1;
+}
+@
+
+<<Unicode I/O Exports>>=
+int32_t uni_utf32_decode(const uint32_t *s, int bige);
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf32_decode(const uint32_t *s, int bige)
+{
+  uint32_t c = bige ? be32toh(*s) : le32toh(*s);
+  if(c > 0x10ffff || (c >= 0xd800 && c < 0xe000))
+    return -1;
+  return c;
+}
+@
+
+<<Unicode I/O Exports>>=
+int uni_utf32_putc(uint32_t c, FILE *f, int bige);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf32_putc(uint32_t c, FILE *f, int bige)
+{
+  uint32_t w;
+
+  if(!uni_utf32_encode(&w, c, bige))
+    return 0;
+  return fwrite(&w, 4, 1, f);
+}
+@
+
+<<Unicode I/O Exports>>=
+int32_t uni_utf32_getc(FILE *f, int bige); /* always reads 4 bytes */
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf32_getc(FILE *f, int bige)
+{
+  uint32_t w;
+  int32_t ret;
+
+  if((ret = fread(&w, 1, 4, f)) != 4)
+    return ret ? -2 : -1;
+  ret = uni_utf32_decode(&w, bige);
+  return ret < 0 ? -3 : ret;
+}
+@
+
+For UTF-16, a slightly more complex scheme is used, involving the
+surrogate code points (D800 through DFFF) in pairs.  The first half of
+the surrogate code points (D800 through DBFF) is always used for the
+first member of the pair, and the second half is used for the other.
+Each member gives 10 bits.  The maximum code point is 10FFFF,
+requiring 21 bits, but since the extensions start at 10000, the
+maximum etension is 10FFFF$-$10000 = FFFFF, requiring 20 bits.
+
+<<Unicode I/O Exports>>=
+/* make sure at least 2 words avail in buf */
+/* returns # of words written */
+int uni_utf16_encode(uint16_t *buf, uint32_t cp, int bige);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf16_encode(uint16_t *buf, uint32_t cp, int bige)
+{
+  if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
+    return 0;
+  if(cp < 0x10000) {
+    *buf = bige ? htobe16(cp) : htole16(cp);
+    return 1;
+  }
+  int u = (cp & 0x1f0000) >> 16;
+  cp &= 0xffff;
+  uint16_t w;
+  w = 0xd800 + ((u - 1) @<< 10) + (cp @>> 10);
+  *buf++ = bige ? htobe16(w) : htole16(w);
+  w = 0xdc00 + (cp > 0x3fff);
+  *buf = bige ? htobe16(w) : htole16(w);
+  return 2;
+}
+@
+
+<<Unicode I/O Exports>>=
+/* this function returns -1 on errors */
+/* if the buffer may be invalid, ensure at least 2 words available */
+int32_t uni_utf16_decode(const uint16_t *s, int *nread, int bige);
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf16_decode(const uint16_t *s, int *nread, int bige)
+{
+  uint16_t w = bige ? be16toh(*s) : le16toh(*s);
+  if(nread)
+    *nread = 1;
+  if(w < 0xd800 || w >= 0xe000)
+    return w;
+  if(w >= 0xdc00)
+    return -1;
+  uint16_t w2 = bige ? be16toh(s[1]) : le16toh(s[1]);
+  if(w2 >= 0xe000 || w2 < 0xdc00)
+    return -1;
+  if(nread)
+    *nread = 2;
+  int c = w2 & 0x3ff;
+  c += (w & 0x3f) << 10;
+  w = (w >> 10) & 0xf;
+  c += (w + 1) << 16;
+  return c;
+}
+@
+
+<<Unicode I/O Exports>>=
+int uni_utf16_putc(uint32_t c, FILE *f, int bige);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf16_putc(uint32_t c, FILE *f, int bige)
+{
+  unsigned char buf[4];
+  uint16_t enc[2], encl;
+  int wlen;
+  
+  encl = uni_utf16_encode(enc, c, bige);
+  if(!encl)
+    return 0;
+  if(bige) {
+    buf[0] = enc[0] >> 8;
+    buf[1] = enc[0];
+    if(encl > 1) {
+      buf[2] = enc[1] >> 8;
+      buf[3] = enc[1];
+    }
+  } else {
+    buf[1] = enc[0] >> 8;
+    buf[0] = enc[0];
+    if(encl > 1) {
+      buf[3] = enc[1] >> 8;
+      buf[2] = enc[1];
+    }
+  }
+  wlen = fwrite(buf, 2, encl, f);
+  return wlen == encl ? wlen : -wlen;
+}
+@
+
+The input function needs to read ahead to get the second member of a
+pair.  If that character is not what was expected, the correct
+behavior is to undo the readahead and return the current code point as
+an error.  However, it is not possible in C standard I/O to push more
+than one character back into the stream.  For now, this is going to
+have to be erroneous behavior.
+
+<<Unicode I/O Exports>>=
+int32_t uni_utf16_getc(FILE *f, int bige, int *nread);  /* nread == # of bytes read */
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf16_getc(FILE *f, int bige, int *nread)
+{
+  int c = fgetc(f), c2;
+  if(c == EOF) {
+    if(nread)
+      *nread = 0;
+    return -1;
+  }
+  c2 = fgetc(f);
+  if(c == EOF) {
+    if(nread)
+      *nread = 1;
+    return -2;
+  }
+  if(bige)
+    c = c2 + (c << 8);
+  else
+    c += c2 << 8;
+  if(c < 0xd800 || c >= 0xE000) {
+    if(nread)
+      *nread = 1;
+    return c;
+  }
+  if(c >= 0xdc00) {
+    if(nread)
+      *nread = 2;
+    return -3;
+  }
+  int res = (c & 0x3f) << 10;
+  int w = (c >> 10) & 0xf;
+  res += (w + 1) << 16;
+  if((c = fgetc(f)) == EOF) {
+    if(nread)
+      *nread = 2;
+    return -2;
+  }
+  if((c2 = fgetc(f)) == EOF) {
+    if(nread)
+      *nread = 3;
+    return -2;
+  }
+  if(bige)
+    c = c2 + (c << 8);
+  else
+    c += c2 << 8;
+  if(c < 0xdc00 || c >= 0xe000) {
+#if 0 /* FIXME: this does not work; ungetc() can't be called twice */
+    ungetc(c2, f);
+    ungetc(bige ? c >> 8 : c & 0xff, f);
+    if(nread)
+      *nread = 2;
+#else
+    if(nread)
+      *nread = 4;
+#endif
+    return -3;
+  }
+  if(nread)
+    *nread = 4;
+  res += c & 0x3ff;
+  return res + (c & 0x3ff);
+}
+@
+
+For UTF-8, an even more complex encoding scheme is used.  Again, a
+standalone memory codec is provided.  All code points over 007F are
+encoded using a multi-byte sequence.  All characters in a multi-byte
+sequence have their high bit set; the first non-zero bit determines
+the byte's role.  All but the first byte have only one high bit set,
+and encode 6 bits.  The first byte determines how many trailing bytes
+there are, and also encode 3--5 bits.  The number of high bits set in
+the first byte is the total number of bytes in the sequence.
+
+<<Unicode I/O Exports>>=
+/* make sure at least 4 bytes avail in buf */
+/* returns # of bytes written */
+int uni_utf8_encode(uint8_t *buf, uint32_t cp);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf8_encode(uint8_t *buf, uint32_t cp)
+{
+    if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
+        return 0;
+    if(cp < 128) {
+        *buf = cp;
+        return 1;
+    } else if(cp < 0x800) {
+        *buf = 0xc0 + (cp >> 6);
+        buf[1] = 0x80 + (cp & 0x3f);
+        return 2;
+    } else if(cp < 0x10000) {
+        *buf = 0xe0 + (cp >> 12);
+        buf[1] = 0x80 + ((cp >> 6) & 0x3f);
+        buf[2] = 0x80 + (cp & 0x3f);
+        return 3;
+    } else {
+        *buf = 0xf0 + (cp >> 18);
+        buf[1] = 0x80 + ((cp >> 12) & 0x3f);
+        buf[2] = 0x80 + ((cp >> 6) & 0x3f);
+        buf[3] = 0x80 + (cp & 0x3f);
+        return 4;
+    }
+}
+@
+
+<<Unicode I/O Exports>>=
+/* this function returns -1 on errors */
+/* if the buffer may be invalid, ensure at least 4 chars available */
+int32_t uni_utf8_decode(const char *s, int *nread);
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf8_decode(const uint8_t *s, int *nread)
+{
+    if(*s < 0x7f) {
+        *nread = 1;
+        return *s;
+    }
+    int c = *s++, ec;
+    if((c & 0xf8) == 0xf0) {
+        c &= 0x07;
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 2;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 3;
+            return -1;
+        }
+        *nread = 4;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x10000 || c > 0x10FFFF)
+            return -1;
+        return c;
+    }
+    if((c & 0xf0) == 0xe0) {
+        c &= 0x0f;
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        c = (c << 6) + (ec & 0x3f);
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 2;
+            return -1;
+        }
+        *nread = 3;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
+            return -1;
+        return c;
+    }
+    if((c & 0xe0) == 0xc0) {
+        c &= 0x1f;
+        ec = *s++;
+        if((ec & 0xc0) != 0x80) {
+            *nread = 1;
+            return -1;
+        }
+        *nread = 2;
+        c = (c << 6) + (ec & 0x3f);
+        if(c < 0x80)
+            return -1;
+        return c;
+    }
+    *nread = 1;
+    return -1;
+}
+@
+
+<<Unicode I/O Exports>>=
+int uni_utf8_putc(uint32_t c, FILE *f);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf8_putc(uint32_t c, FILE *f)
+{
+    uint8_t obuf[4];
+    int nout = uni_utf8_encode(obuf, c);
+    int nwr = fwrite(obuf, 1, nout, f);
+    return nout == nwr ? nwr : -nwr;
+}
+@
+
+UTF-8 output is common enough to warrant a string version of the
+output function as well.
+
+<<Unicode I/O Exports>>=
+int uni_utf8_fputs(uint32_t *buf, int len, FILE *f);
+@
+
+<<Unicode I/O functions>>=
+int uni_utf8_fputs(uint32_t *buf, int len, FILE *f)
+{
+  int ret = 0;
+
+  while(len-- > 0) {
+    int ret1 = uni_utf8_putc(*buf++, f);
+    if(ret1 <= 0)
+      return -ret + ret1;
+    ret += ret1;
+  }
+  return ret;
+}
+@
+
+Like UTF-16 input, UTF-8 input requires some readahead.  For anything
+more than one character, C once again disallows returning the
+characters to the stream.  However, it is relatively easy to abort
+input as soon as an invalid character occurs, so as long as the
+inefficiency of not reading multi-character codes ``in bulk'' is
+ignored, there is no problem backtracking.
+
+<<Unicode I/O Exports>>=
+int32_t uni_utf8_getc(FILE *f, int *nread);  /* nread == # of bytes read */
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_utf8_getc(FILE *f, int *nread)
+{
+  int c;
+  int chrread = 1;
+
+  if((c = getc(f)) == EOF) {
+    c = -1;
+    chrread = 0;
+  } else if(c >= 0x80) {
+    int ec;
+    chrread = 1;
+    if((c & 0xf8) == 0xf0) {
+      <<Read 4-char utf-8>>
+      if(c < 0x10000 || c > 0x10ffff)
+        c = -3;
+    } else if((c & 0xf0) == 0xe0) {
+      <<Read 3-char utf-8>>
+      if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
+        c = -3;
+    } else if((c & 0xe0) == 0xc0) {
+      <<Read 2-char utf-8>>
+      if(c < 0x80)
+        c = -3;
+    } else
+      c = -3;
+  }
+  if(nread)
+    *nread = chrread;
+  return c;
+}
+@
+
+<<Read 4-char utf-8>>=
+c &= 0x07;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+  if((ec = getc(f)) == EOF)
+    c = -2;
+  else if((ec & 0xc0) != 0x80) {
+    ungetc(ec, f);
+    c = -3;
+  } else {
+    chrread = 3;
+    c = (c << 6) + (ec & 0x3f);
+    if((ec = getc(f)) == EOF)
+      c = -2;
+    else if((ec & 0xc0) != 0x80) {
+      ungetc(ec, f);
+      c = -3;
+    } else {
+      chrread = 4;
+      c = (c << 6) + (ec & 0x3f);
+    }
+  }
+}
+@
+
+<<Read 3-char utf-8>>=
+c &= 0x0f;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+  if((ec = getc(f)) == EOF)
+    c = -2;
+  else if((ec & 0xc0) != 0x80) {
+    ungetc(ec, f);
+    c = -3;
+  } else {
+    chrread = 3;
+    c = (c << 6) + (ec & 0x3f);
+  }
+}
+@
+
+<<Read 2-char utf-8>>=
+c &= 0x1f;
+if((ec = getc(f)) == EOF)
+  c = -2;
+else if((ec & 0xc0) != 0x80) {
+  ungetc(ec, f);
+  c = -3;
+} else {
+  chrread = 2;
+  c = (c << 6) + (ec & 0x3f);
+}
+@
+
+\section{General File Input}
+
+A more general UTF reader would have to scan for a byte order mark and
+remember what it said.  This requires retaining state.
+
+<<Unicode I/O Exports>>=
+typedef struct uni_file_t uni_file_t;
+@
+
+<<Unicode I/O local definitions>>=
+struct uni_file_t {
+  FILE *f;
+  char *name;
+  <<Unicode file buffer state>>
+};
+@
+
+<<Known Data Types>>=
+uni_file_t,%
+@
+
+Rather than automatically attaching state to a file on first access
+and never really knowing when to free it, explicit routines are
+provided to create and remove the state.   
+
+<<Unicode I/O Exports>>=
+/* encoding = NULL for automatic detection */
+/* automatically detects utf16/utf32 if encoding == UTF-8 */
+uni_file_t *uni_fopen(const char *name, const char *encoding);
+void uni_fclose(uni_file_t *uf);
+@
+
+<<Unicode I/O functions>>=
+uni_file_t *uni_fopen(const char *name, const char *encoding)
+{
+  uni_file_t *uf;
+
+  inisize(uf, 1);
+  clearbuf(uf, 1);
+  uf->name = strdup(name);
+  if(!uf->name) {
+    free(uf);
+    return NULL;
+  }
+  uf->f = fopen(name, "rb");
+  if(!uf->f) {
+    free(uf->name);
+    free(uf);
+    return NULL;
+  }
+  <<Initialize unicode file buffer state>>
+  return uf;
+}
+@
+
+<<Unicode I/O functions>>=
+void uni_fclose(uni_file_t *uf)
+{
+  free(uf->name);
+  fclose(uf->f);
+  <<Free unicode file buffer state>>
+  free(uf);
+}
+@
+
+One limitation of standard I/O is that only one character may be
+pushed back into the stream.  To correct this, a 4-byte buffer is
+kept, along with a count.  In order to avoid reading from the file
+after the buffered characters have been removed, an end-of-file flag
+is kept as well.  In order to allow error messages to display the
+correct file offset, that is also kept.
+
+<<Unicode file buffer state>>=
+size_t fpos;
+char readahead[4];
+unsigned char raptr;
+unsigned char eof;
+@
+
+The first thing to do is to decide the file's encoding.  ASCII and
+ISO-Latin-1 can be read raw, since they map directly to Unicode.
+UTF-8 is taken to mean automatic Unicode detection, with UTF-8 as a
+default.  For all other input types, the [[iconv]] function should be
+used.%
+\footnote{The C99 library provides something similar in the
+[[mbstowcs]] function, but the POSIX [[iconv]] function is commonly
+available (perhaps even as a third party library), and could be
+provided as wrapper around [[mbstowcs]] if all else fails.  Unlike
+[[mbstowcs]], the type of the output can always be set to Unicode
+encodings, and the input type can be controlled more easily as well.}
+This function should be in the standard C library, but may be provided
+externally as well.  If so, [[CFLAGS]] and [[LDFLAGS]] may need to be
+modified appropriately.  In order to accomodate the case where a
+minimal C library has no working [[iconv]], or to otherwise avoid code
+bloat, this can be disabled with a configuration variable.
+
+\lstset{language=make}
+<<makefile.config>>=
+# Set to non-empty to enable iconv input support
+#USE_ICONV=y
+@
+
+<<makefile.vars>>=
+ifneq ($USE_ICONV,)
+EXTRA_CFLAGS += -DUNI_USE_ICONV
+endif
+@
+
+<<Unicode I/O local definitions>>=
+#ifdef UNI_USE_ICONV
+#include <langinfo.h>
+#include <locale.h>
+#include <iconv.h>
+#endif
+@
+
+
+<<Unicode file buffer state>>=
+unsigned char enctype;
+/*
+ * 0 = ASCII/Latin-1
+ * 1 = iconv (if UNI_USE_ICONV)
+ * 8/16/32 = utf-8/16/32
+ */
+#ifdef UNI_USE_ICONV
+void *enchelp;
+#endif
+@
+
+<<Unicode I/O local definitions>>=
+#ifdef UNI_USE_ICONV
+#define ICBUF_SIZE 1024
+typedef struct {
+  iconv_t ic;
+  char ibuf[ICBUF_SIZE];
+  int ilen;
+  uint32_t obuf[ICBUF_SIZE];
+  int optr, olen;
+} iconv_supt_t;
+#endif
+@
+
+<<Known Data Types>>=
+iconv_supt_t,%
+@
+
+<<Initialize unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+if(!encoding) {
+  setlocale(LC_CTYPE, "");
+  encoding = nl_langinfo(CODESET);
+}
+#endif
+if(!encoding)
+  encoding = "UTF-8";
+if(encoding && (!strcmp(encoding, "ISO-8859-1") ||
+                !strcmp(encoding, "ANSI_X3.4-1968"))) /* ASCII */
+  return uf; /* enctype == 0 */
+#ifdef UNI_USE_ICONV
+else if(encoding && strcmp(encoding, "UTF-8")) {
+  iconv_supt_t *ics;
+  inisize(ics, 1);
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define bo "LE"
+#else
+#define bo "BE"
+#endif
+  ics->ic = iconv_open("UTF-32" bo, encoding);
+  if(ics->ic == (iconv_t)-1) {
+    perror(encoding);
+    exit(1);
+  }
+  uf->enchelp = ics;
+  uf->enctype = 1;
+  return uf;
+}
+#endif
+/* otherwise it's Unicode */
+@
+
+<<Free unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+if(uf->enctype == 1 && uf->enchelp) {
+  iconv_supt_t *ics = uf->enchelp;
+  iconv_close(ics->ic);
+  free(ics);
+}
+#endif
+@
+
+The first thing to do on opening a new Unicode file is to check for
+the byte order mark (U+FEFF).  Flags are kept to indicate what was
+found.  Note that the byte order mark is still returned as the first
+character, so all read characters must be backed out.
+
+<<Unicode file buffer state>>=
+unsigned char bige;
+@
+
+<<Initialize unicode file buffer state>>=
+uf->enctype = 8; /* default is UTF-8 */
+/* Read and process BOM (FEFF) */
+int c;
+<<Read and store a char from [[uf]]>>
+if(c == 0xfe) {
+  <<Read and store a char from [[uf]]>>
+  if(c == 0xff) { /* FEFF UTF-16BE */
+    uf->bige = 1;
+    uf->enctype = 16;
+  }
+} else if(c == 0xff) {
+  <<Read and store a char from [[uf]]>>
+  if(c == 0xfe) {
+    <<Read and store a char from [[uf]]>>
+    if(!c) {
+      <<Read and store a char from [[uf]]>>
+      if(!c) /* FFFE0000 UTF-32LE */
+        uf->enctype = 32;
+      else /* FFFE */
+        uf->enctype = 16;
+    } else /* FEFF UTF-16LE */
+      uf->enctype = 16;
+  }
+} else if(!c) {
+  <<Read and store a char from [[uf]]>>
+  if(!c) {
+    <<Read and store a char from [[uf]]>>
+    if(c == 0xfe) {
+      <<Read and store a char from [[uf]]>>
+      if(c == 0xff) { /* 0000FEFF UTF-32BE */
+        uf->enctype = 32;
+	uf->bige = 1;
+      }
+    }
+  }
+}
+@
+
+<<Read and store a char from [[uf]]>>=
+c = getc(uf->f);
+if(c == EOF)
+  uf->eof = 1;
+else
+  uf->readahead[uf->raptr++] = c;
+@
+
+The reader then uses the appropriate method to read a character based
+on the [[enctype]].
+
+<<Unicode I/O Exports>>=
+int32_t uni_fgetc(uni_file_t *uf);
+@
+
+<<Unicode I/O functions>>=
+int32_t uni_fgetc(uni_file_t *uf)
+{
+  if(!uf->enctype) {
+    int c = getc(uf->f);
+    if(c == EOF)
+      uf->eof = 1;
+    else
+      uf->fpos++;
+    return c;
+#ifdef UNI_USE_ICONV
+  } else if(uf->enctype == 1) {
+    <<Return a character using iconv>>
+#endif
+  }
+  <<Return a Unicode character>>
+}
+@
+
+Rather than using the potentially flawed direct I/O routines, the
+Unicode reader always reads raw bytes and then calls the decoder
+instead.  That way, the readahead issue disappears.  The readahead
+buffer is always flushed to four characters every time, since UTF-32
+and UTF-16 both may require that much.  UTF-8 only requires three, but
+there is little point in making that a special case.
+
+<<Return a Unicode character>>=
+while(!uf->eof && uf->raptr < 4) {
+  int nr = fread(uf->readahead + uf->raptr, 1, 4 - uf->raptr, uf->f);
+  if(nr <= 0)
+    uf->eof = 1;
+  else
+    uf->raptr += nr;
+}
+if(uf->eof && !uf->raptr)
+  return -1;
+int cp, l;
+if(uf->enctype == 32) {
+  cp = utf32_decode((uint32_t *)uf->readahead, uf->bige);
+  l = 4;
+} else if(uf->enctype == 16) {
+  cp = utf16_decode((uint16_t *)uf->readahead, &l, uf->bige);
+  l *= 2;
+} else
+  cp = uni_utf8_decode(uf->readahead, &l);
+if(l > uf->raptr) {
+  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
+  uf->raptr = 0;
+  return -2;
+}
+if(l < 4)
+  memmove(uf->readahead, uf->readahead + l, 4 - l);
+if(cp < 0)
+  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
+uf->raptr -= l;
+uf->fpos += l;
+return cp < 0 ? -2 : cp;
+@
+
+The [[iconv]] conversion proceeds much differently.  If a character is
+availble in the output buffer, it validates and returns that character.
+Otherwise, it fills up the input buffer from the file, and then
+attempts to fill the output buffer using [[iconv]].  Any unprocessed
+input characters are then moved to the start of the input buffer for
+the next pass.
+
+<<Return a character using iconv>>=
+iconv_supt_t *ics = uf->enchelp;
+while(1) {
+  if(ics->olen) {
+    --ics->olen;
+    return utf32_decode(&ics->obuf[ics->optr++], __BYTE_ORDER == __BIG_ENDIAN);
+  }
+  char *ibuf = ics->ibuf;
+  size_t ilen = ics->ilen;
+  char *obuf = (char *)ics->obuf;
+  size_t olen = ICBUF_SIZE * 4;
+  while(!uf->eof && ilen < ICBUF_SIZE) {
+    int nr = fread(ibuf, 1, ICBUF_SIZE - ilen, uf->f);
+    if(nr <= 0)
+      uf->eof = 1;
+    else
+      ilen += nr;
+  }
+  while(1) {
+    iconv(ics->ic, &ibuf, &ilen, &obuf, &olen);
+    if(ibuf != ics->ibuf)
+      break;
+    /* ignore bad chars */
+    if(!--ilen)
+      break;
+    memmove(ics->ibuf, ics->ibuf + 1, ilen);
+  }
+  if(ilen)
+    memmove(ics->ibuf, ibuf, ilen);
+  else if(uf->eof)
+    iconv(ics->ic, NULL, NULL, &obuf, &olen);
+  ics->olen = olen / 4;
+  ics->optr = 0;
+  ics->ilen = ilen;
+}
+@
+
 \chapter{Properties}
 
 This library's primary purpose is to preparse the Unicode information
@@ -317,7 +1248,7 @@ down by keeping everything out of the cache.  The set
 <<Simple bit set definitions>>=
 /* for bit arrays */
 /* max bit number for Unicode */
-#define MAX_UNI_CP 0x10ffff
+#define UNI_MAX_CP 0x10ffff
 /* find array element index from bit number */
 #define BSET_ELT(a, b) ((a)[(b)/(sizeof(*(a))*8)])
 /* find array element's bit number from full bit number */
@@ -497,7 +1428,7 @@ if(op == UNI_SOP_NIL) {
   return;
 }
 if(op == UNI_SOP_ALL) {
-  *res_len = MAX_UNI_CP / setop_n + 1;
+  *res_len = UNI_MAX_CP / setop_n + 1;
   *res_low = 0;
   if(!*res_max)
     inisize(*res, (*res_max = *res_len));
@@ -758,8 +1689,8 @@ the upper region needs to be set the same way as the initial region.
 if(zz_op) {
   if(did_start)
     i -= (i - *res_low) % setop_n; /* align i with result */
-  if(i <= MAX_UNI_CP) {
-    uint32_t skip = (MAX_UNI_CP - i) / setop_n + 1;
+  if(i <= UNI_MAX_CP) {
+    uint32_t skip = (UNI_MAX_CP - i) / setop_n + 1;
     skip *= setop_n;
     <<Set gap to all ones>>
   }
@@ -963,9 +1894,9 @@ static void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
     tab[tab_len].low = a[i].high + 1;
     tab[tab_len].high = a[i + 1].low - 1;
   }
-  if(a_len && a[a_len - 1].high < MAX_UNI_CP) {
+  if(a_len && a[a_len - 1].high < UNI_MAX_CP) {
     tab[tab_len].low = a[a_len - 1].high + 1;
-    tab[tab_len].high = MAX_UNI_CP;
+    tab[tab_len].high = UNI_MAX_CP;
     tab_len++;
   }
   *rtab = tab;
@@ -1004,7 +1935,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
   } else if(op == UNI_SOP_ALL) {
     inisize(tab, 1);
     tab[0].low = 0;
-    tab[0].high = MAX_UNI_CP;
+    tab[0].high = UNI_MAX_CP;
     *rtab = tab;
     *r_len = 1;
     return;
@@ -1033,12 +1964,12 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
   uint32_t alow, ahigh, blow, bhigh;
   int32_t lasthigh = -1, curlow = -1, curhigh = -1;
 #define set_low_high(x) do { \
-  x##low = x##ptr < x##_len ? x[0].low : MAX_UNI_CP + 1; \
-  x##high = x##ptr < x##_len ? x[0].high : MAX_UNI_CP + 1; \
+  x##low = x##ptr < x##_len ? x[0].low : UNI_MAX_CP + 1; \
+  x##high = x##ptr < x##_len ? x[0].high : UNI_MAX_CP + 1; \
 } while(0)
   set_low_high(a);
   set_low_high(b);
-  while(alow <= MAX_UNI_CP || blow <= MAX_UNI_CP) {
+  while(alow <= UNI_MAX_CP || blow <= UNI_MAX_CP) {
     /* find next range where either a or b is different */
     /* compute bit op for that range as well (into res) */
     uint32_t nextlow, nexthigh, res;
@@ -1099,10 +2030,10 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     }
     lasthigh = nexthigh;
   }
-  if(invert && lasthigh < MAX_UNI_CP) {
+  if(invert && lasthigh < UNI_MAX_CP) {
     if(curlow < 0)
       curlow = lasthigh + 1;
-    curhigh = MAX_UNI_CP;
+    curhigh = UNI_MAX_CP;
   }
   if(curlow >= 0) {	
     if(tab_len == max_tab)
@@ -1927,12 +2858,12 @@ if(in_r) {
   if(!inv)
     (*ret)[rno++].high = low - 1;
   else
-    (*ret)[rno++].high = MAX_UNI_CP; /* or ~0? */
-} else if(inv && high < MAX_UNI_CP) { /* or ~0? */
+    (*ret)[rno++].high = UNI_MAX_CP; /* or ~0? */
+} else if(inv && high < UNI_MAX_CP) { /* or ~0? */
   if(rno == ret_max)
     resize(*ret, ret_max *= 2);
   (*ret)[rno].low = low;
-  (*ret)[rno++].high = MAX_UNI_CP;  /* or ~0? */
+  (*ret)[rno++].high = UNI_MAX_CP;  /* or ~0? */
 }
 *rlen = rno;
 @
@@ -1965,7 +2896,7 @@ uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
     bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
-  if(tab_len == 1 && !tab[0].low && tab[0].high == MAX_UNI_CP) {
+  if(tab_len == 1 && !tab[0].low && tab[0].high == UNI_MAX_CP) {
     bits_to_multi(NULL, 0, 1, 0, 1, 0, &ml, ml_len);
     return ml;
   }
@@ -1973,9 +2904,9 @@ uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
   low = tab[0].low;
   high = tab[tab_len - 1].high;
   /* if starts & ends with 1, make it an inverse array */
-  /* should also do this if low == 0 && tab[0].high > MAX_UNI_CP - high */
+  /* should also do this if low == 0 && tab[0].high > UNI_MAX_CP - high */
   /* or vice-versa, but it complicates things a bit */
-  def = !low && high == MAX_UNI_CP;
+  def = !low && high == UNI_MAX_CP;
   if(def) {
     low = tab[0].high + 1;
     high = tab[tab_len - 1].low - 1;
@@ -6155,6 +7086,194 @@ int uni_NFKC_CF(uint32_t *buf, int blen);
 #define uni_NFKC_CF(buf, blen) uni_NFKC_Casefold(buf, uni_NFD(buf, blen))
 @
 
+\subsection{Generic Normalized Unicode Input}
+
+To make things even easier, we can make a function which returns a
+normalized character from an input stream.  Any normalization type we
+have code for, we support.
+
+<<Unicode normalization support exports>>=
+typedef enum {
+  UNI_NORM_NONE, UNI_NORM_NFD, UNI_NORM_NFKD, UNI_NORM_NFC, UNI_NORM_NFKC,
+  UNI_NORM_NFKC_CF
+} uni_normtype_t;
+@
+
+<<Known Data Types>>=
+uni_normtype_t,%
+@
+
+<<Unicode normalization support exports>>=
+#include "uni_io.h"
+
+int32_t uni_fgetc_norm(uni_file_t *uf, uni_normtype_t nt);
+@
+
+<<Unicode normalization support functions>>=
+int32_t uni_fgetc_norm(uni_file_t *uf, uni_normtype_t nt)
+{
+  <<Get normalized character>>
+}
+@
+
+A simple function which returns a normalized character requires that
+the current decomposition and composition state be kept.  It would be
+ideal to extend the [[uni_file_t]] structure with the extra information
+rather than allocating yet another wrapper, but for now I would prefer
+[[uni_file_t]] to stay isolated to unnormalized I/O.
+
+In order to make this transparent, the extra support structure is
+automatically created and placed on a linked list.  It is assumed that
+the file will not be closed and reopened without an intervening EOF.
+It is also assumed that the function will not be called any more after
+it returns EOF.
+
+<<Unicode normalization support local definitions>>=
+typedef struct unifile_norm {
+  struct unifile_norm *next;
+  uni_file_t *uf;
+  <<Normalized input buffer state>>
+} unifile_norm_t;
+static unifile_norm_t *norm_files = NULL;
+@
+
+<<Known Data Types>>=
+unifile_norm_t,%
+@
+
+<<Get normalized character>>=
+unifile_norm_t *ufn = norm_files;
+
+while(ufn && ufn->uf != uf)
+  ufn = ufn->next;
+if(!ufn) {
+  inisize(ufn, 1);
+  clearbuf(ufn, 1);
+  ufn->next = norm_files;
+  norm_files = ufn;
+}
+
+<<Return normalized character if not EOF>>
+
+unifile_norm_t **bufp;
+for(bufp = &norm_files; *bufp != ufn; bufp = &(*bufp)->next);
+*bufp = ufn->next;
+free(ufn);
+
+return -1;
+@
+
+For support, we'll need to store at least the maximal decomposition of
+a character.  Technically, it is possible to require an infinite
+buffer to support canonical ordering and composition, but we'll only
+support a finite number and hope for the best.  Some future revision
+should make the buffer automatically expand when necessary.
+
+<<Normalized input buffer state>>=
+/* maximal decomposition of a single char is 18 chars */
+/* leave room in buf for at least 2 */
+uint32_t buf[128];
+@
+
+We'll also need to know how many characters are in the buffer, and how
+many of those are good to go.
+
+<<Normalized input buffer state>>=
+int blen, oklen;
+@
+
+To return a single character, we'll need to normalize until at least
+one character could not possibly be modified any more.
+
+<<Return normalized character if not EOF>>=
+int oklen = ufn->oklen;
+uint32_t *buf = ufn->buf;
+while(!oklen && !uf->eof) {
+  /* read a char into end of buf, if needed & possible */
+  <<Read and normalize a character>>
+}
+if(oklen) {
+  /* now we have oklen chars in buf that are ready to return */
+  int c = buf[0];
+  memmove(buf, buf + 1, (--ufn->blen) * sizeof(*buf));
+  ufn->oklen = oklen - 1;
+  return c;
+}
+@
+
+To add more characters, append a character to the buffer and
+decompose it.  The Unicode standard states that case folding
+requires an additional NFD step beforehand, but reading of the data
+suggests that instead, it needs canonical ordering and composition
+afterwards, just like the NFC and NFKC.  This makes case folding just
+another decomposition method.
+
+<<Read and normalize a character>>=
+int c;
+int bp = ufn->blen;
+c = buf[bp] = uni_fgetc(uf);
+if(nt == UNI_NORM_NONE) {
+  oklen = ufn->blen = ++bp;
+  break;
+}
+if(c != -1)
+  switch(nt) {
+    case UNI_NORM_NONE: /* here to remove warning */
+    case UNI_NORM_NFD:
+    case UNI_NORM_NFC:
+      bp += uni_NFD_dec(buf + bp, 1);
+      break;
+    case UNI_NORM_NFKD:
+    case UNI_NORM_NFKC:
+      bp += uni_NFKD_dec(buf + bp, 1);
+      break;
+    case UNI_NORM_NFKC_CF:
+      bp += uni_NFKC_Casefold(buf + bp, 1);
+  }
+@
+
+Then, the entire set of characters already read in can be ordered.  If
+no characters can be obtained from canonical ordering, try to read
+more right away.
+
+<<Read and normalize a character>>=
+int oblen = uni_Canon_Order(buf, bp, uf->eof);
+if(!oblen) {
+  ufn->blen = bp;
+  continue;
+}
+@
+
+Then, all characters which have been ordered can be composed.  If
+composition might need more characters, the next trip around the loop
+will get them.
+
+<<Read and normalize a character>>=
+switch(nt) {
+  case UNI_NORM_NONE: /* here to remove warning */
+  case UNI_NORM_NFD:
+  case UNI_NORM_NFKD:
+    /* no composition */
+    oklen = oblen;
+    break;
+  case UNI_NORM_NFC:
+  case UNI_NORM_NFKC:
+  case UNI_NORM_NFKC_CF: {
+    int cblen = uni_NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
+    if(uf->eof)
+      oklen = cblen;
+    /* move unordered characters down if composition removed chars */
+    if(cblen < oblen) {
+      if(bp > oblen)
+        memmove(buf + cblen, buf + oblen, (bp - oblen) * sizeof(*buf));
+      bp -= oblen - cblen;
+    }
+    break;
+  }
+}
+ufn->blen = bp;
+@
+
 \subsection{Testing - Normalization}
 
 To fully demonstrate that the normalization data is correct, the
@@ -8533,7 +9652,7 @@ int main(int argc, const char **argv)
       continue;
     for(s = lbuf, buf32len = 0; *s; buf32len++) {
       int len;
-      uint32_t c = utf8_decode(s, &len);
+      uint32_t c = uni_utf8_decode(s, &len);
       if(c == '\n')
         break;
       if(buf32len == buf32max)
@@ -8551,7 +9670,7 @@ int main(int argc, const char **argv)
   qsort(strs, nstrs, sizeof(*strs), uca_cmp);
   int i;
   for(i = 0; i < nstrs; i++) {
-    utf8_fputs(strs[i].str, strs[i].len, stdout);
+    uni_utf8_fputs(strs[i].str, strs[i].len, stdout);
     putchar('\n');
   }
   return 0;
@@ -11857,1093 +12976,6 @@ for regex:
   string property "exemplar" is UnicodeSet ldml/characters/exmplarCharacters
 @
 
-\chapter{File Input}
-
-Basic I/O support is provided in the form of UTF decoders and
-encoders.  More advanced I/O is provided in the form of arbitrary
-encoding input.
-
-<<Library [[uni]] Members>>=
-uni_io.o
-@
-
-\lstset{language=C}
-<<uni_io.c>>=
-<<Common C Header>>
-#include "uni_io.h"
-
-<<Unicode I/O local definitions>>
-
-<<Unicode I/O functions>>
-@
-
-<<Library [[uni]] headers>>=
-#include "uni_io.h"
-@
-
-<<uni_io.h>>=
-<<Common C Warning>>
-#ifndef UNI_IO_H
-#define UNI_IO_H
-
-#include "uni_prop.h"
-<<Unicode I/O Exports>>
-#endif
-@
-
-\section{Basic Unicode I/O}
-
-Unicode defines several file formats:  UTF-8, UTF-16, and UTF-32.  No
-special conversion needs to be made from UTF-32 to integer code
-points, other than to filter out invalid values and possibly byte-swap
-the code point.
-
-<<Common C Includes>>=
-#include <stdint.h>
-/* FIXME: this is glibc-specific */
-/* BSD apparently uses <sys/endian.h> */
-/* OpenBSD additionally uses different fn names */
-/* others may not even have any equivalent functions */
-#include <endian.h>
-@
-
-\lstset{language=make}
-<<makefile.vars>>=
-# for endian
-EXTRA_CFLAGS += -D_BSD_SOURCE
-@
-
-\lstset{language=C}
-<<Unicode I/O Exports>>=
-int utf32_encode(uint32_t *buf, int cp, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_encode(uint32_t *buf, int cp, int bige)
-{
-  if(cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000))
-    return 0;
-  *buf = bige ? htobe32(cp) : htole32(cp);
-  return 1;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_decode(const uint32_t *s, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_decode(const uint32_t *s, int bige)
-{
-  uint32_t c = bige ? be32toh(*s) : le32toh(*s);
-  if(c > 0x10ffff || (c >= 0xd800 && c < 0xe000))
-    return -1;
-  return c;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_putc(int c, FILE *f, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf32_putc(int c, FILE *f, int bige)
-{
-  uint32_t w;
-
-  if(!utf32_encode(&w, c, bige))
-    return 0;
-  return fwrite(&w, 4, 1, f);
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf32_getc(FILE *f, int bige); /* always reads 4 bytes */
-@
-
-<<Unicode I/O functions>>=
-int utf32_getc(FILE *f, int bige)
-{
-  uint32_t w;
-  int ret;
-
-  if((ret = fread(&w, 1, 4, f)) != 4)
-    return ret ? -2 : -1;
-  ret = utf32_decode(&w, bige);
-  return ret < 0 ? -3 : ret;
-}
-@
-
-For UTF-16, a slightly more complex scheme is used, involving the
-surrogate code points (D800 through DFFF) in pairs.  The first half of
-the surrogate code points (D800 through DBFF) is always used for the
-first member of the pair, and the second half is used for the other.
-The first member gives the first 5 bits, and the second member gives
-the remainder. Since this is for representing code points 10000 and
-up, an extra bit can be gained giving the full range through 10FFFF.
-
-<<Unicode I/O Exports>>=
-/* make sure at least 2 words avail in buf */
-/* returns # of words written */
-int utf16_encode(uint16_t *buf, int cp, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_encode(uint16_t *buf, int cp, int bige)
-{
-  if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
-    return 0;
-  if(cp < 0x10000) {
-    *buf = bige ? htobe16(cp) : htole16(cp);
-    return 1;
-  }
-  int u = (cp & 0x1f0000) >> 16;
-  cp &= 0xffff;
-  uint16_t w;
-  w = 0xd800 + ((u - 1) @<< 10) + (cp @>> 10);
-  *buf++ = bige ? htobe16(w) : htole16(w);
-  w = 0xdc00 + (cp > 0x3fff);
-  *buf = bige ? htobe16(w) : htole16(w);
-  return 2;
-}
-@
-
-<<Unicode I/O Exports>>=
-/* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 2 words available */
-int utf16_decode(const uint16_t *s, int *nread, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_decode(const uint16_t *s, int *nread, int bige)
-{
-  uint16_t w = bige ? be16toh(*s) : le16toh(*s);
-  if(nread)
-    *nread = 1;
-  if(w < 0xd800 || w >= 0xe000)
-    return w;
-  if(w >= 0xdc00)
-    return -1;
-  uint16_t w2 = bige ? be16toh(s[1]) : le16toh(s[1]);
-  if(w2 >= 0xe000 || w2 < 0xdc00)
-    return -1;
-  if(nread)
-    *nread = 2;
-  int c = w2 & 0x3ff;
-  c += (w & 0x3f) << 10;
-  w = (w >> 10) & 0xf;
-  c += (w + 1) << 16;
-  return c;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf16_putc(int c, FILE *f, int bige);
-@
-
-<<Unicode I/O functions>>=
-int utf16_putc(int c, FILE *f, int bige)
-{
-  unsigned char buf[4];
-  uint16_t enc[2], encl;
-  
-  encl = utf16_encode(enc, c, bige);
-  if(!encl)
-    return 0;
-  if(bige) {
-    buf[0] = enc[0] >> 8;
-    buf[1] = enc[0];
-    if(encl > 1) {
-      buf[2] = enc[1] >> 8;
-      buf[3] = enc[1];
-    }
-  } else {
-    buf[1] = enc[0] >> 8;
-    buf[0] = enc[0];
-    if(encl > 1) {
-      buf[3] = enc[1] >> 8;
-      buf[2] = enc[1];
-    }
-  }
-  return fwrite(buf, 2, encl, f);
-}
-@
-
-The input function needs to read ahead to get the second member of a
-pair.  If that character is not what was expected, the correct
-behavior is to undo the readahead and return the current code point as
-an error.  However, it is not possible in C standard I/O to push more
-than one character back into the stream.  For now, this is going to
-have to be erroneous behavior.
-
-<<Unicode I/O Exports>>=
-int utf16_getc(FILE *f, int bige, int *nread);  /* nread == # of bytes read */
-@
-
-<<Unicode I/O functions>>=
-int utf16_getc(FILE *f, int bige, int *nread)
-{
-  int c = fgetc(f), c2;
-  if(c == EOF) {
-    if(nread)
-      *nread = 0;
-    return -1;
-  }
-  c2 = fgetc(f);
-  if(c == EOF) {
-    if(nread)
-      *nread = 1;
-    return -2;
-  }
-  if(bige)
-    c = c2 + (c << 8);
-  else
-    c += c2 << 8;
-  if(c < 0xd800 || c >= 0xE000) {
-    if(nread)
-      *nread = 1;
-    return c;
-  }
-  if(c >= 0xdc00) {
-    if(nread)
-      *nread = 2;
-    return -3;
-  }
-  int res = (c & 0x3f) << 10;
-  int w = (c >> 10) & 0xf;
-  res += (w + 1) << 16;
-  if((c = fgetc(f)) == EOF) {
-    if(nread)
-      *nread = 2;
-    return -2;
-  }
-  if((c2 = fgetc(f)) == EOF) {
-    if(nread)
-      *nread = 3;
-    return -2;
-  }
-  if(bige)
-    c = c2 + (c << 8);
-  else
-    c += c2 << 8;
-  if(c < 0xdc00 || c >= 0xe000) {
-#if 0 /* FIXME: this does not work; ungetc() can't be called twice */
-    ungetc(c2, f);
-    ungetc(bige ? c >> 8 : c & 0xff, f);
-    if(nread)
-      *nread = 2;
-#else
-    if(nread)
-      *nread = 4;
-#endif
-    return -3;
-  }
-  if(nread)
-    *nread = 4;
-  res += c & 0x3ff;
-  return res + (c & 0x3ff);
-}
-@
-
-For UTF-8, an even more complex encoding scheme is used.  Again, a
-standalone memory codec is provided.  All code points over 007F are
-encoded using a multi-byte sequence.  All characters in a multi-byte
-sequence have their high bit set; the first non-zero bit determines
-the byte's role.  All but the first byte have only one high bit set,
-and encode 6 bits.  The first byte determines how many trailing bytes
-there are, and also encode 3--5 bits.  The number of high bits set in
-the first byte is the total number of bytes in the sequence.
-
-<<Unicode I/O Exports>>=
-/* make sure at least 4 bytes avail in buf */
-/* returns # of bytes written */
-int utf8_encode(char *buf, int cp);
-@
-
-<<Unicode I/O functions>>=
-int utf8_encode(char *buf, int cp)
-{
-    if((cp >= 0xD800 && cp < 0xE000) || cp > 0x10FFFF)
-        return 0;
-    if(cp < 128) {
-        *buf = cp;
-        return 1;
-    } else if(cp < 0x800) {
-        *buf = 0xc0 + (cp >> 6);
-        buf[1] = 0x80 + (cp & 0x3f);
-        return 2;
-    } else if(cp < 0x10000) {
-        *buf = 0xe0 + (cp >> 12);
-        buf[1] = 0x80 + ((cp >> 6) & 0x3f);
-        buf[2] = 0x80 + (cp & 0x3f);
-        return 3;
-    } else {
-        *buf = 0xf0 + (cp >> 18);
-        buf[1] = 0x80 + ((cp >> 12) & 0x3f);
-        buf[2] = 0x80 + ((cp >> 6) & 0x3f);
-        buf[3] = 0x80 + (cp & 0x3f);
-        return 4;
-    }
-}
-@
-
-<<Unicode I/O Exports>>=
-/* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 4 chars available */
-int utf8_decode(const char *buf, int *nread);
-@
-
-<<Unicode I/O functions>>=
-int utf8_decode(const char *buf, int *nread)
-{
-    const uint8_t *ubuf = (const uint8_t *)buf;
-    if(*ubuf < 0x7f) {
-        *nread = 1;
-        return (unsigned char)*ubuf;
-    }
-    int c = (unsigned char)*ubuf++, ec;
-    if((c & 0xf8) == 0xf0) {
-        c &= 0x07;
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 2;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 3;
-            return -1;
-        }
-        *nread = 4;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x10000 || c > 0x10FFFF)
-            return -1;
-        return c;
-    }
-    if((c & 0xf0) == 0xe0) {
-        c &= 0x0f;
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        c = (c << 6) + (ec & 0x3f);
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 2;
-            return -1;
-        }
-        *nread = 3;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
-            return -1;
-        return c;
-    }
-    if((c & 0xe0) == 0xc0) {
-        c &= 0x1f;
-        ec = (unsigned char)*ubuf++;
-        if((ec & 0xc0) != 0x80) {
-            *nread = 1;
-            return -1;
-        }
-        *nread = 2;
-        c = (c << 6) + (ec & 0x3f);
-        if(c < 0x80)
-            return -1;
-        return c;
-    }
-    *nread = 1;
-    return -1;
-}
-@
-
-<<Unicode I/O Exports>>=
-int utf8_putc(int c, FILE *f);
-@
-
-<<Unicode I/O functions>>=
-int utf8_putc(int c, FILE *f)
-{
-    char obuf[4];
-    int nout = utf8_encode(obuf, c);
-    return fwrite(obuf, 1, nout, f);
-}
-@
-
-UTF-8 output is common enough to warrant a string version of the
-output function as well.
-
-<<Unicode I/O Exports>>=
-int utf8_fputs(int *buf, int len, FILE *f);
-@
-
-<<Unicode I/O functions>>=
-int utf8_fputs(int *buf, int len, FILE *f)
-{
-  int ret = 0;
-
-  while(len-- > 0)
-    ret += utf8_putc(*buf++, f);
-  return ret;
-}
-@
-
-Like UTF-16 input, UTF-8 input requires some readahead.  For anything
-more than one character, C once again disallows returning the
-characters to the stream.  So, once again, bad input causes erroneous
-behavior.
-
-<<Unicode I/O Exports>>=
-int utf8_getc(FILE *f, int *nread);  /* nread == # of bytes read */
-@
-
-<<Unicode I/O functions>>=
-int utf8_getc(FILE *f, int *nread)
-{
-  int c;
-  int chrread = 1;
-
-  if((c = getc(f)) == EOF) {
-    c = -1;
-    chrread = 0;
-  } else if(c >= 0x80) {
-    int ec;
-    chrread = 1;
-    if((c & 0xf8) == 0xf0) {
-      <<Read 4-char utf-8>>
-      if(c < 0x10000 || c > 0x10ffff)
-        c = -3;
-    } else if((c & 0xf0) == 0xe0) {
-      <<Read 3-char utf-8>>
-      if(c < 0x800 || (c >= 0xD800 && c < 0xE000))
-        c = -3;
-    } else if((c & 0xe0) == 0xc0) {
-      <<Read 2-char utf-8>>
-      if(c < 0x80)
-        c = -3;
-    } else
-      c = -3;
-  }
-  if(nread)
-    *nread = chrread;
-  return c;
-}
-@
-
-<<Read 4-char utf-8>>=
-c &= 0x07;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-  if((ec = getc(f)) == EOF)
-    c = -2;
-  else if((ec & 0xc0) != 0x80) {
-    ungetc(ec, f);
-    c = -3;
-  } else {
-    chrread = 3;
-    c = (c << 6) + (ec & 0x3f);
-    if((ec = getc(f)) == EOF)
-      c = -2;
-    else if((ec & 0xc0) != 0x80) {
-      ungetc(ec, f);
-      c = -3;
-    } else {
-      chrread = 4;
-      c = (c << 6) + (ec & 0x3f);
-    }
-  }
-}
-@
-
-<<Read 3-char utf-8>>=
-c &= 0x0f;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-  if((ec = getc(f)) == EOF)
-    c = -2;
-  else if((ec & 0xc0) != 0x80) {
-    ungetc(ec, f);
-    c = -3;
-  } else {
-    chrread = 3;
-    c = (c << 6) + (ec & 0x3f);
-  }
-}
-@
-
-<<Read 2-char utf-8>>=
-c &= 0x1f;
-if((ec = getc(f)) == EOF)
-  c = -2;
-else if((ec & 0xc0) != 0x80) {
-  ungetc(ec, f);
-  c = -3;
-} else {
-  chrread = 2;
-  c = (c << 6) + (ec & 0x3f);
-}
-@
-
-\section{General File Input}
-
-A more general UTF reader would have to scan for a byte order mark and
-remember what it said.  This requires retaining state.
-
-<<Unicode I/O Exports>>=
-typedef struct {
-  FILE *f;
-  char *name;
-  <<Unicode file buffer state>>
-} unifile_t;
-@
-
-<<Known Data Types>>=
-unifile_t,%
-@
-
-Rather than automatically attaching state to a file on first access
-and never really knowing when to free it, explicit routines are
-provided to create and remove the state.   
-
-<<Unicode I/O Exports>>=
-/* encoding = NULL for automatic detection */
-/* automatically detects utf16/utf32 if encoding == UTF-8 */
-unifile_t *uni_fopen(const char *name, const char *encoding);
-void uni_fclose(unifile_t *uf);
-@
-
-<<Unicode I/O functions>>=
-unifile_t *uni_fopen(const char *name, const char *encoding)
-{
-  unifile_t *uf;
-
-  inisize(uf, 1);
-  clearbuf(uf, 1);
-  uf->name = strdup(name);
-  if(!uf->name) {
-    free(uf);
-    return NULL;
-  }
-  uf->f = fopen(name, "rb");
-  if(!uf->f) {
-    free(uf->name);
-    free(uf);
-    return NULL;
-  }
-  <<Initialize unicode file buffer state>>
-  return uf;
-}
-@
-
-<<Unicode I/O functions>>=
-void uni_fclose(unifile_t *uf)
-{
-  free(uf->name);
-  fclose(uf->f);
-  <<Free unicode file buffer state>>
-  free(uf);
-}
-@
-
-One limitation of standard I/O is that only one character may be
-pushed back into the stream.  To correct this, a 4-byte buffer is
-kept, along with a count.  In order to avoid reading from the file
-after the buffered characters have been removed, an end-of-file flag
-is kept as well.  In order to allow error messages to display the
-correct file offset, that is also kept.
-
-<<Unicode file buffer state>>=
-size_t fpos;
-char readahead[4];
-unsigned char raptr;
-unsigned char eof;
-@
-
-The first thing to do is to decide the file's encoding.  ASCII and
-ISO-Latin-1 can be read raw, since they map directly to Unicode.
-UTF-8 is taken to mean automatic Unicode detection, with UTF-8 as a
-default.  For all other input types, the [[iconv]] function should be
-used.%
-\footnote{The C99 library provides something similar in the
-[[mbstowcs]] function, but the POSIX [[iconv]] function is commonly
-available (perhaps even as a third party library), and could be
-provided as wrapper around [[mbstowcs]] if all else fails.  Unlike
-[[mbstowcs]], the type of the output can always be set to Unicode
-encodings, and the input type can be controlled more easily as well.}
-This function should be in the standard C library, but may be provided
-externally as well.  If so, [[CFLAGS]] and [[LDFLAGS]] may need to be
-modified appropriately.  In order to accomodate the case where a
-minimal C library has no working [[iconv]], or to otherwise avoid code
-bloat, this can be disabled with a configuration variable.
-
-\lstset{language=make}
-<<makefile.config>>=
-# Set to non-empty to enable iconv input support
-#USE_ICONV=y
-@
-
-<<makefile.vars>>=
-ifneq ($USE_ICONV,)
-EXTRA_CFLAGS += -DUNI_USE_ICONV
-endif
-@
-
-<<Unicode I/O local definitions>>=
-#ifdef UNI_USE_ICONV
-#include <langinfo.h>
-#include <locale.h>
-#include <iconv.h>
-#endif
-@
-
-
-<<Unicode file buffer state>>=
-unsigned char enctype;
-/*
- * 0 = ASCII/Latin-1
- * 1 = iconv (if UNI_USE_ICONV)
- * 8/16/32 = utf-8/16/32
- */
-#ifdef UNI_USE_ICONV
-void *enchelp;
-#endif
-@
-
-<<Unicode I/O local definitions>>=
-#ifdef UNI_USE_ICONV
-#define ICBUF_SIZE 1024
-typedef struct {
-  iconv_t ic;
-  char ibuf[ICBUF_SIZE];
-  int ilen;
-  uint32_t obuf[ICBUF_SIZE];
-  int optr, olen;
-} iconv_supt_t;
-#endif
-@
-
-<<Known Data Types>>=
-iconv_supt_t,%
-@
-
-<<Initialize unicode file buffer state>>=
-#ifdef UNI_USE_ICONV
-if(!encoding) {
-  setlocale(LC_CTYPE, "");
-  encoding = nl_langinfo(CODESET);
-}
-#endif
-if(!encoding)
-  encoding = "UTF-8";
-if(encoding && (!strcmp(encoding, "ISO-8859-1") ||
-                !strcmp(encoding, "ANSI_X3.4-1968"))) /* ASCII */
-  return uf; /* enctype == 0 */
-#ifdef UNI_USE_ICONV
-else if(encoding && strcmp(encoding, "UTF-8")) {
-  iconv_supt_t *ics;
-  inisize(ics, 1);
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-#define bo "LE"
-#else
-#define bo "BE"
-#endif
-  ics->ic = iconv_open("UTF-32" bo, encoding);
-  if(ics->ic == (iconv_t)-1) {
-    perror(encoding);
-    exit(1);
-  }
-  uf->enchelp = ics;
-  uf->enctype = 1;
-  return uf;
-}
-#endif
-/* otherwise it's Unicode */
-@
-
-<<Free unicode file buffer state>>=
-#ifdef UNI_USE_ICONV
-if(uf->enctype == 1 && uf->enchelp) {
-  iconv_supt_t *ics = uf->enchelp;
-  iconv_close(ics->ic);
-  free(ics);
-}
-#endif
-@
-
-The first thing to do on opening a new Unicode file is to check for
-the byte order mark (U+FEFF).  Flags are kept to indicate what was
-found.  Note that the byte order mark is still returned as the first
-character, so all read characters must be backed out.
-
-<<Unicode file buffer state>>=
-unsigned char bige;
-@
-
-<<Initialize unicode file buffer state>>=
-uf->enctype = 8; /* default is UTF-8 */
-/* Read and process BOM (FEFF) */
-int c;
-<<Read and store a char from [[uf]]>>
-if(c == 0xff) {
-  <<Read and store a char from [[uf]]>>
-  if(c == 0xfe) { /* FFFE UTF-16BE */
-    uf->bige = 1;
-    uf->enctype = 16;
-  }
-} else if(c == 0xfe) {
-  <<Read and store a char from [[uf]]>>
-  if(c == 0xff) {
-    <<Read and store a char from [[uf]]>>
-    if(!c) {
-      <<Read and store a char from [[uf]]>>
-      if(!c) /* FEFF0000 UTF-32LE */
-        uf->enctype = 32;
-      else /* FEFF */
-        uf->enctype = 16;
-    } else /* FEFF UTF-16LE */
-      uf->enctype = 16;
-  }
-} else if(!c) {
-  <<Read and store a char from [[uf]]>>
-  if(!c) {
-    <<Read and store a char from [[uf]]>>
-    if(c == 0xfe) {
-      <<Read and store a char from [[uf]]>>
-      if(c == 0xff) { /* 0000FEFF UTF-32BE */
-        uf->enctype = 32;
-	uf->bige = 1;
-      }
-    }
-  }
-}
-@
-
-<<Read and store a char from [[uf]]>>=
-c = getc(uf->f);
-if(c == EOF)
-  uf->eof = 1;
-else
-  uf->readahead[uf->raptr++] = c;
-@
-
-The reader then uses the appropriate method to read a character based
-on the [[enctype]].
-
-<<Unicode I/O Exports>>=
-int uni_fgetc(unifile_t *uf);
-@
-
-<<Unicode I/O functions>>=
-int uni_fgetc(unifile_t *uf)
-{
-  if(!uf->enctype) {
-    int c = getc(uf->f);
-    if(c == EOF)
-      uf->eof = 1;
-    else
-      uf->fpos++;
-    return c;
-#ifdef UNI_USE_ICONV
-  } else if(uf->enctype == 1) {
-    <<Return a character using iconv>>
-#endif
-  }
-  <<Return a Unicode character>>
-}
-@
-
-Rather than using the potentially flawed direct I/O routines, the
-Unicode reader always reads raw bytes and then calls the decoder
-instead.  That way, the readahead issue disappears.  The readahead
-buffer is always flushed to four characters every time, since UTF-32
-and UTF-16 both may require that much.  UTF-8 only requires three, but
-there is little point in making that a special case.
-
-<<Return a Unicode character>>=
-while(!uf->eof && uf->raptr < 4) {
-  int nr = fread(uf->readahead + uf->raptr, 1, 4 - uf->raptr, uf->f);
-  if(nr <= 0)
-    uf->eof = 1;
-  else
-    uf->raptr += nr;
-}
-if(uf->eof && !uf->raptr)
-  return -1;
-int cp, l;
-if(uf->enctype == 32) {
-  cp = utf32_decode((uint32_t *)uf->readahead, uf->bige);
-  l = 4;
-} else if(uf->enctype == 16) {
-  cp = utf16_decode((uint16_t *)uf->readahead, &l, uf->bige);
-  l *= 2;
-} else
-  cp = utf8_decode(uf->readahead, &l);
-if(l > uf->raptr) {
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-  uf->raptr = 0;
-  return -2;
-}
-if(l < 4)
-  memmove(uf->readahead, uf->readahead + l, 4 - l);
-if(cp < 0)
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-uf->raptr -= l;
-uf->fpos += l;
-return cp < 0 ? -2 : cp;
-@
-
-The [[iconv]] conversion proceeds much differently.  If a character is
-availble in the output buffer, it validates and returns that character.
-Otherwise, it fills up the input buffer from the file, and then
-attempts to fill the output buffer using [[iconv]].  Any unprocessed
-input characters are then moved to the start of the input buffer for
-the next pass.
-
-<<Return a character using iconv>>=
-iconv_supt_t *ics = uf->enchelp;
-while(1) {
-  if(ics->olen) {
-    --ics->olen;
-    return utf32_decode(&ics->obuf[ics->optr++], __BYTE_ORDER == __BIG_ENDIAN);
-  }
-  char *ibuf = ics->ibuf;
-  size_t ilen = ics->ilen;
-  char *obuf = (char *)ics->obuf;
-  size_t olen = ICBUF_SIZE * 4;
-  while(!uf->eof && ilen < ICBUF_SIZE) {
-    int nr = fread(ibuf, 1, ICBUF_SIZE - ilen, uf->f);
-    if(nr <= 0)
-      uf->eof = 1;
-    else
-      ilen += nr;
-  }
-  while(1) {
-    iconv(ics->ic, &ibuf, &ilen, &obuf, &olen);
-    if(ibuf != ics->ibuf)
-      break;
-    /* ignore bad chars */
-    if(!--ilen)
-      break;
-    memmove(ics->ibuf, ics->ibuf + 1, ilen);
-  }
-  if(ilen)
-    memmove(ics->ibuf, ibuf, ilen);
-  else if(uf->eof)
-    iconv(ics->ic, NULL, NULL, &obuf, &olen);
-  ics->olen = olen / 4;
-  ics->optr = 0;
-  ics->ilen = ilen;
-}
-@
-
-\section{Generic Normalized Unicode Input}
-
-To make things even easier, we can make a function which returns a
-normalized character.  Any normalization type we have code for, we
-support.
-
-<<Unicode normalization support exports>>=
-typedef enum {
-  UN_NONE, UN_NFD, UN_NFKD, UN_NFC, UN_NFKC, UN_NFKC_CF
-} uni_normtype_t;
-@
-
-<<Known Data Types>>=
-uni_normtype_t,%
-@
-
-<<Unicode normalization support exports>>=
-#include "uni_io.h"
-
-int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt);
-@
-
-<<Unicode normalization support functions>>=
-int uni_fgetc_norm(unifile_t *uf, uni_normtype_t nt)
-{
-  <<Get normalized character>>
-}
-@
-
-A simple function which returns a normalized character requires that
-the current decomposition and composition state be kept.  It would be
-ideal to extend the [[unifile_t]] structure with the extra information
-rather than allocating yet another wrapper, but for now I would prefer
-[[unifile_t]] to stay isolated to unnormalized I/O.
-
-In order to make this transparent, the extra support structure is
-automatically created and placed on a linked list.  It is assumed that
-the file will not be closed and reopened without an intervening EOF.
-It is also assumed that the function will not be called any more after
-it returns EOF.
-
-<<Unicode normalization support local definitions>>=
-typedef struct unifile_norm {
-  struct unifile_norm *next;
-  unifile_t *uf;
-  <<Normalized input buffer state>>
-} unifile_norm_t;
-static unifile_norm_t *norm_files = NULL;
-@
-
-<<Known Data Types>>=
-unifile_norm_t,%
-@
-
-<<Get normalized character>>=
-unifile_norm_t *ufn = norm_files;
-
-while(ufn && ufn->uf != uf)
-  ufn = ufn->next;
-if(!ufn) {
-  inisize(ufn, 1);
-  clearbuf(ufn, 1);
-  ufn->next = norm_files;
-  norm_files = ufn;
-}
-
-<<Return normalized character if not EOF>>
-
-unifile_norm_t **bufp;
-for(bufp = &norm_files; *bufp != ufn; bufp = &(*bufp)->next);
-*bufp = ufn->next;
-free(ufn);
-
-return -1;
-@
-
-For support, we'll need to store at least the maximal decomposition of
-a character.  Technically, it is possible to require an infinite
-buffer to support canonical ordering and composition, but we'll only
-support a finite number and hope for the best.  Some future revision
-should make the buffer automatically expand when necessary.
-
-<<Normalized input buffer state>>=
-/* maximal decomposition of a single char is 18 chars */
-/* leave room in buf for at least 2 */
-uint32_t buf[128];
-@
-
-We'll also need to know how many characters are in the buffer, and how
-many of those are good to go.
-
-<<Normalized input buffer state>>=
-int blen, oklen;
-@
-
-To return a single character, we'll need to normalize until at least
-one character could not possibly be modified any more.
-
-<<Return normalized character if not EOF>>=
-int oklen = ufn->oklen;
-uint32_t *buf = ufn->buf;
-while(!oklen && !uf->eof) {
-  /* read a char into end of buf, if needed & possible */
-  <<Read and normalize a character>>
-}
-if(oklen) {
-  /* now we have oklen chars in buf that are ready to return */
-  int c = buf[0];
-  memmove(buf, buf + 1, (--ufn->blen) * sizeof(*buf));
-  ufn->oklen = oklen - 1;
-  return c;
-}
-@
-
-To add more characters, append a character to the buffer and
-decompose it.  The Unicode standard states that case folding
-requires an additional NFD step beforehand, but reading of the data
-suggests that instead, it needs canonical ordering and composition
-afterwards, just like the NFC and NFKC.  This makes case folding just
-another decomposition method.
-
-int nread;
-
-<<Read and normalize a character>>=
-int c;
-int bp = ufn->blen;
-c = buf[bp] = uni_fgetc(uf);
-if(nt == UN_NONE) {
-  oklen = ufn->blen = ++bp;
-  break;
-}
-if(c != -1)
-  switch(nt) {
-    case UN_NONE: /* here to remove warning */
-    case UN_NFD:
-    case UN_NFC:
-      bp += uni_NFD_dec(buf + bp, 1);
-      break;
-    case UN_NFKD:
-    case UN_NFKC:
-      bp += uni_NFKD_dec(buf + bp, 1);
-      break;
-    case UN_NFKC_CF:
-      bp += uni_NFKC_Casefold(buf + bp, 1);
-  }
-@
-
-Then, the entire set of characters already read in can be ordered.  If
-no characters can be obtained from canonical ordering, try to read
-more right away.
-
-<<Read and normalize a character>>=
-int oblen = uni_Canon_Order(buf, bp, uf->eof);
-if(!oblen) {
-  ufn->blen = bp;
-  continue;
-}
-@
-
-Then, all characters which have been ordered can be composed.  If
-composition might need more characters, the next trip around the loop
-will get them.
-
-<<Read and normalize a character>>=
-switch(nt) {
-  case UN_NONE: /* here to remove warning */
-  case UN_NFD:
-  case UN_NFKD:
-    /* no composition */
-    oklen = oblen;
-    break;
-  case UN_NFC:
-  case UN_NFKC:
-  case UN_NFKC_CF: {
-    int cblen = uni_NFC_comp(buf, oblen, uf->eof ? NULL : &oklen);
-    if(uf->eof)
-      oklen = cblen;
-    /* move unordered characters down if composition removed chars */
-    if(cblen < oblen) {
-      if(bp > oblen)
-        memmove(buf + cblen, buf + oblen, (bp - oblen) * sizeof(*buf));
-      bp -= oblen - cblen;
-    }
-    break;
-  }
-}
-ufn->blen = bp;
-@
-
 \chapter{Testing}
 
 Here is a master driver to call some of the above code for testing.
@@ -13062,7 +13094,7 @@ buffer out before starting, and afer each step.
     printf(" %04X", buf[i]); \
   putchar('\n'); \
   putchar('\''); \
-  utf8_fputs(buf, blen, stdout); \
+  uni_utf8_fputs(buf, blen, stdout); \
   putchar('\''); \
   putchar('\n'); \
 } while(0)
@@ -13240,7 +13272,149 @@ start at [[UCD_LOC]].
 The easiest way to include this library's definitions is using
 [[#include "uni_all.h"]].  Linking requires [[-luni]].
 
-\section{Data Types for Storage}
+\section{Unicode Encodings}
+
+\input{unitypes.tex} %%% doc
+
+To transform UTF-32 data to and from UTF-32BE and UTF-32LE, the
+following functions are used.  The endianness is specified by
+[[bige]]; zero specifies little-endian and non-zero big-endian.  The
+encoder takes a [[cp]] and stores its result in a buffer; the stored
+length is returned (0 on error).  The decoder takes a character from a
+buffer, and returns the decoded character.  The return value is a
+signed integer; a negative result indicates an error (i.e., an invalid
+Unicode code point).
+
+% uni_utf32_encode prototype
+% uni_utf32_decode prototype
+
+Similarly, conversion of UTF-32 to and from UTF-16BE and UTF-16LE is
+done using the following functions.  At least two words must be
+available in the encoder's return buffer.  If the buffer may be
+invalid, ensure that at least two words are available in the decoder's
+input buffer as well (padding with zero is safe).  The results and
+parameters have the same meaning as for the utf32 functions above,
+except that the decoder also returns the number of words it read from
+the buffer in [[*nread]] (optionally, if [[nread]] is non-[[NULL]]).
+
+% uni_utf16_encode prototype
+% uni_utf16_decode prototype
+
+Similarly, conversion of UTF-32 to and from UTF-8 is done using the
+following functions.  At least 4 bytes must be available in the
+encoder's return buffer.  If the buffer may be invalid, ensure that at
+least 4 characters are available in the decoder's input buffer
+(padding with zero is safe).  The results and parameters have the same
+meaning as for the utf16 functions above.
+
+% uni_utf8_encode prototype
+% uni_utf8_decode prototype
+
+To read and write these types directly from/to a file, the following
+functions may be used.  The writers return the number of words in the
+target format (e.g. 32-bit words for UTF-32) written to the file on
+success, and zero or less on failure.  If the failure was due to a
+short write, the return value is the negative of the number of words
+actually written.  Use [[ferror]] to distinguish between invalid input
+and read/write errors.  The readers return $-1$ if no characters could
+be read, $-2$ on a short (less than a full code point) read, $-3$ on
+invalid code points, and otherwise the read character.
+
+Note that due to limitations of the C [[FILE]] API, it may not be
+possible to recover from errors reading UTF-16 input.  A read of an
+initial surrogate character, followed by anything but an initial
+surrogate character will result in the file's read pointer advanced
+past the second word, which can no longer be returned to the input
+stream.  However, the [[nread]] parameter, if non-[[NULL]], can be
+used to determine the number of actual bytes read from the input
+stream.  If that is 4, and an error occurred, then recovery could be
+done by seeking backwards in the input stream (assuming it is
+seekable).
+
+% uni_utf32_putc prototype
+% uni_utf16_putc prototype
+% uni_utf8_putc prototype
+% uni_utf32_getc prototype
+% uni_utf16_getc prototype
+% uni_utf8_getc prototype
+
+For convenience, UTF-32 strings may also be written to UTF-8 files.  A
+UTF-32 buffer [[buf]] of length [[len]] is written to UTF-8 file
+[[f]].  Like the single-character output functions above, the return
+value is the number of words (bytes in this case) written on success,
+or less than or equal to zero on error.  If less than zero, this is
+the (short) number of bytes written.
+
+% uni_utf8_fputs prototype
+
+Reading files whose encoding is unknown (e.g. UTF-16 and UTF-32) is
+supported by a separate mechanism.  Instead of using the standard C
+[[FILE]] type, it uses the opaque type [[uni_file_t]].  Functions to
+open, close, and read from such files are provided.
+
+The [[uni_fopen]] function supports multiple input file encodings, as
+specified by the [[encoding]] parameter.  If the library was compiled
+with [[iconv]] support, all available input encodings for [[iconv]]
+are supported.  Otherwise, only ASCII (\verb|ANSI_X3.4-1968|;
+range unchecked), ISO Latin-1 (\verb|ISO-8859-1|), and generic Unicode
+are supported.  In either case, generic Unicode can be specified using
+\verb|UTF-8|.  The default (if [[encoding]] is [[NULL]]) is to use
+the current locale's encoding if [[iconv]] support is compiled in and
+the current locale's encoding can be obtained, or \verb|UTF-8|
+(generic Unicode) if not.
+
+For generic Unicode input, if the first character could be Byte Order
+Mark (U+FEFF) in any supported format, it is considered to be one, and
+the format of the file is the format of that Byte Order Mark:
+
+\begin{quote}
+\begin{tabular}{ll}
+First bytes of file&Format\\
+\texttt{00 00 FE FF}&UTF-32BE\\
+\texttt{FF FE 00 00}&UTF-32LE\\
+\texttt{FE FF}&UTF-16BE\\
+\texttt{FF FE}&UTF-16LE\\
+Other&UTF-8\\
+\end{tabular}
+\end{quote}
+
+Note that a UTF-16LE file whose first character after the Byte Order
+Mark is zero is determined to be a UTF-32LE file, instead.  While a
+potential conflict exists between all other formats and ``Other'',
+there is no valid UTF-8 character which starts with FF or FE, so there
+should be no conflict.  Also, the Byte Order Mark is part of the file
+data, so it is returned as the first character.
+
+Also note that there is no problem recovering from short multi-word
+sequences in UTF-16 files as there was with [[uni_utf16_getc]].
+
+The return value for [[uni_fopen]] is [[NULL]] on error, or a pointer
+to the file structure.  This structure is freed by [[uni_fclose]].
+The [[uni_fgetc]] return value is the same as the return value from
+the readers above:  the number of characters read on success, and less
+than zero on error.
+
+% uni_fopen prototype
+% uni_fclose prototype
+% uni_fgetc prototype
+
+Since normalization is a common requirement for user input, a function
+to read a single normalized character is provided as well.  The [[nt]]
+parameter takes a normalization type, corresponding to the standard
+normalization type names:  [[UNI_NORM_NFD]], [[UNI_NORM_NFKD]],
+[[UNI_NORM_NFC]], [[UNI_NORM_NFKC]], and [[UNI_NORM_NFKC_CF]].  For
+completeness, no normalization can be specified using
+[[UNI_NORM_NONE]], although it is cheaper to just use [[uni_fgetc]].
+
+Since normalization needs lookahead, the entire file must be read
+using this function in order for it to work properly.  Changing the
+normalization type mid-stream is also generally not supported, since
+any normalization in progress will not be affected.  Calling this
+function after an error or EOF is returned is not supported, either.
+
+% uni_fgetc_norm prototype
+
+\section{Data Types for Property Storage}
 
 \subsection{Bit Sets}
 
