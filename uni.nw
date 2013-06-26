@@ -1444,7 +1444,7 @@ $\overline{A\cup B}$&true&false&false&false&$(x\in A)\overline\vee (x\in B)$&15&
 (x \in A)\wedge o_1 \oplus (x \in B)\wedge o_2 \oplus (x \in A\cap
 B)\wedge o_3$, where $o_n$ is true if bit $n$ is one in the operation
 number.  Operation names are of the enumeration type [[uni_sop_t]],
-and are prefixed with [[UNI_SOP_]].  Where two operations names are
+and are prefixed with [[UNI_SOP_]].  Where two operation names are
 given, either will work.}
 \end{quote}
 % End-doc op-table
@@ -4052,6 +4052,7 @@ makefile.unidat: uni_prop.gen.h
 -include makefile.unidat
 $(RNGDAT_NAMES:%=%.gen.c): uni_prop.gen.h
 	@touch "$@"
+$(RNGDAT_NAMES:%=%.gen.o): uni_prop.h
 @
 
 <<Library [[uni]] Members>>=
@@ -4908,6 +4909,140 @@ if(!strcmp(pn, "gc")) {
 }
 @
 
+One other set of aliases has already been read, and is treated in some
+contexts almost like enumeration properties: the property names
+themselves.  While it defeats the purpose of placing properties in
+separate files for statically linking only needed properties, a master
+table of all properties and their exported symbol values will make
+other projects' data file generation much easier.
+
+<<[[uni_propdesc_t]]>>=
+typedef struct {
+  uni_alias_t name;
+  const uint32_t *mtab;
+  uint32_t mtab_len;
+  const void *rng_tab;
+  uint32_t rng_tab_len;
+  uni_prop_type_t type;
+  <<Additional property structure members>>
+} uni_propdesc_t;
+@
+
+<<Unicode property exports for generator>>=
+typedef enum {
+  UNI_PROP_TYPE_NONE,
+  <<Additional property type names>>
+  UNI_PROP_TYPE_BOOL, UNI_PROP_TYPE_ENUM
+} uni_prop_type_t;
+<<[[uni_propdesc_t]]>>
+@
+
+<<Dump character information as C code>>=
+fprintf(gen_h, "extern const uni_propdesc_t uni_propdesc[];\n");
+open_wf(pnf, "uni_propdesc.gen.c");
+fputs("#include \"uni_prop.h\"\n"
+      "#include <stdio.h>\n\n" /* for NULL */
+      "const uni_propdesc_t uni_propdesc[] = {\n", pnf);
+uni_valueof_t *prop_ptrs;
+uint32_t num_prop_ptrs = 0, max_prop_ptrs;
+inisize(prop_ptrs, max_prop_ptrs = 20);
+int index = 0;
+for(i = 0; i < nparsed; i++) {
+  uni_prop_type_t t = UNI_PROP_TYPE_NONE;
+  const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
+                                            parsed_props[i].name;
+  if(!parsed_props[i].mt)
+    continue;
+  if(parsed_props[i].rng)
+    t = UNI_PROP_TYPE_BOOL;
+  <<Set prop type for export>>
+  if(t == UNI_PROP_TYPE_NONE)
+    continue;
+  if(index)
+    fputs(",\n", pnf);
+  if(num_prop_ptrs >= max_prop_ptrs - 4)
+    resize(prop_ptrs, max_prop_ptrs *= 2);
+  fprintf(pnf, "\t{{\"%s\"", name);
+  prop_ptrs[num_prop_ptrs].name = strdup(name);
+  prop_ptrs[num_prop_ptrs++].val = index;
+  if(i < num_prop_aliases) {
+    fprintf(pnf, ", \"%s\"", prop_aliases[i].long_name);
+    if(strcmp(prop_aliases[i].long_name, name)) {
+      prop_ptrs[num_prop_ptrs].name = strdup(prop_aliases[i].long_name);
+      prop_ptrs[num_prop_ptrs++].val = index;
+    }
+    if(prop_aliases[i].alt_name && strcmp(prop_aliases[i].alt_name, name) &&
+       strcmp(prop_aliases[i].long_name, prop_aliases[i].alt_name)) {
+      fprintf(pnf, ", \"%s\"", prop_aliases[i].alt_name);
+      prop_ptrs[num_prop_ptrs].name = strdup(prop_aliases[i].alt_name);
+      prop_ptrs[num_prop_ptrs++].val = index;
+    }
+    if(prop_aliases[i].alt_name2 && strcmp(prop_aliases[i].alt_name, name) &&
+       strcmp(prop_aliases[i].long_name, prop_aliases[i].alt_name) &&
+       strcmp(prop_aliases[i].alt_name, prop_aliases[i].alt_name2)) {
+      fprintf(pnf, ", \"%s\"", prop_aliases[i].alt_name2);
+      prop_ptrs[num_prop_ptrs].name = strdup(prop_aliases[i].alt_name);
+      prop_ptrs[num_prop_ptrs++].val = index;
+    }
+  }
+  fprintf(pnf, "},\n"
+               "\t\tuni_%s_mtab, uni_%s_mtab_len, uni_%s_rng, uni_%s_rng_len,\n",
+               name, name, name, name);
+  fprintf(pnf, "\t\t%d", (int)t);
+  <<Print additional property structure members>>
+  fputc('}', pnf);
+  index++;
+}
+fprintf(gen_h, "#define uni_propdesc_len %d\n"
+               "extern const uni_valueof_t uni_propdesc_valueof[];\n",
+               index);
+fputs("\n};\n\n"
+      "const uni_valueof_t uni_propdesc_valueof[] = {\n", pnf);
+qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), cmp_valueof);
+for(i = num_prop_ptrs - 1; i > 0; i--) {
+  if(!strcmp(prop_ptrs[i -1].name, prop_ptrs[i].name)) {
+    if(prop_ptrs[i - 1].val != prop_ptrs[i].val) {
+      fprintf(stderr, "Prop name conflict %s\n", prop_ptrs[i].name);
+      exit(1);
+    }
+    num_prop_ptrs--;
+    movebuf(prop_ptrs + i, prop_ptrs + i + 1, num_prop_ptrs - i);
+  }
+}
+for(i = 0; i < num_prop_ptrs; i++)
+  fprintf(pnf, "\t{\"%s\", %d}%s\n", prop_ptrs[i].name, prop_ptrs[i].val,
+                                   i < num_prop_ptrs - 1 ? "," : "");
+fputs("};\n", pnf);
+fclose(pnf);
+fprintf(gen_h, "#define uni_propdesc_valueof_len %d /* %d lookups max */\n"
+               "extern const uni_valueof_t uni_propdesc_valueof_approx[];\n",
+	       num_prop_ptrs, lg2(num_prop_ptrs + 1));
+open_wf(paf, "uni_prop_valueof_approx.gen.c");
+fputs("#include \"uni_prop.h\"\n"
+      "#include <stdio.h>\n\n" /* for NULL */
+      "const uni_valueof_t uni_propdesc_valueof_approx[] = {\n", paf);
+for(i = 0; i < num_prop_ptrs; i++)
+  uni_enum_name_strip((char *)prop_ptrs[i].name);
+qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), cmp_valueof);
+for(i = num_prop_ptrs - 1; i > 0; i--) {
+  if(!strcmp(prop_ptrs[i -1].name, prop_ptrs[i].name)) {
+    if(prop_ptrs[i - 1].val != prop_ptrs[i].val) {
+      fprintf(stderr, "Prop name loose conflict %s\n", prop_ptrs[i].name);
+      exit(1);
+    }
+    num_prop_ptrs--;
+    movebuf(prop_ptrs + i, prop_ptrs + i + 1, num_prop_ptrs - i);
+  }
+}
+for(i = 0; i < num_prop_ptrs; i++)
+  fprintf(paf, "\t{\"%s\", %d}%s\n", prop_ptrs[i].name, prop_ptrs[i].val,
+                                   i < num_prop_ptrs - 1 ? "," : "");
+fputs("};\n", paf);
+fclose(paf);
+fprintf(gen_h, "#define uni_propdesc_valueof_approx_len %d /* %d lookups max */\n",
+	       num_prop_ptrs, lg2(num_prop_ptrs + 1));
+@
+
 Now that the aliases have been taken care of, it's time to read in the
 enumeration properties themselves.  As with the boolean types, a range
 table will be built first, and then converted to a multi-level table
@@ -4937,6 +5072,28 @@ static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
     ++p->rng_len;
   }
 }
+@
+
+<<Set prop type for export>>=
+if(parsed_props[i].rng_dat8)
+  t = UNI_PROP_TYPE_ENUM;
+@
+
+<<Additional property structure members>>=
+uint8_t def;
+const uni_alias_t *nameof;
+const uni_valueof_t *valueof, *valueof_approx;
+uint32_t nameof_len, valueof_len;
+@
+
+<<Print additional property structure members>>=
+fprintf(pnf, ", %d", (int)parsed_props[i].def);
+if(t == UNI_PROP_TYPE_ENUM && enum_vals[i]) {
+  fprintf(pnf, ", uni_%s_nameof, uni_%s_valueof, uni_%s_valueof_approx,\n"
+               "\t\tU_NUM_%s, uni_%s_valueof_len",
+               name, name, name, name, name);
+} else
+  fputs(", NULL, NULL, NULL, 0, 0", pnf);
 @
 
 <<UCD parser local functions>>=
@@ -5484,12 +5641,6 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 uni_x_of(i, mtab, def)
 @
 
-<<FIXME>>=
-add pseudo-enum "prop" == property names & aliases
-  perhaps when mtab present, also have val be the mtab?
-  limit to supported properties?
-@
-
 \section{Numeric Properties}
 
 Numeric properties are a subset of enumerated properties.  The
@@ -5892,6 +6043,15 @@ void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 uni_x_val(i, mtab, &mn, &md);
 @
 
+<<Additional property type names>>=
+UNI_PROP_TYPE_NUM,
+@
+
+<<Set prop type for export>>=
+if(parsed_props[i].rng_num)
+  t = UNI_PROP_TYPE_NUM;
+@
+
 <<FIXME>>=
 numeric (UAX44-LM1):
   compare as floating-point number w/ limited precision
@@ -6245,9 +6405,9 @@ static void dump_strs(prop_t *p, FILE *gen_h)
     off += len;
   }
   fclose(of);
-  fprintf(gen_h, "extern const uint32_t uni_%s_strs[]; "
-                 "/* %d words (%d bytes) (%d words saved) */\n",
-		 p->name, off, off * 4, saved);
+  fprintf(gen_h, "extern const uint32_t uni_%s_strs[];\n"
+                 "#define uni_%s_strs_len %d /* (%d bytes) (%d words saved) */\n",
+		 p->name, p->name, off, off * 4, saved);
 }
 @
 
@@ -6467,6 +6627,46 @@ fprintf(gen_h, "extern const uni_str_rng_t uni_dm_rng[];\n"
 tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("dm", tmt, gen_h);
 free(tmt);
+@
+
+The generic all-property table needs to have a pointer to the string
+table for each property.
+
+<<Property parsed contents>>=
+const char *strs_name;
+@
+
+<<Parse UCD files>>=
+parsed_props[add_prop("canon_decomp")].strs_name = "dm_full";
+parsed_props[add_prop("compat_decomp")].strs_name = "dm_full";
+parsed_props[add_prop("dm")].strs_name = "dm_full";
+parsed_props[add_prop("canon_decomp")].mt = (uint32_t *)~0;
+parsed_props[add_prop("compat_decomp")].mt = (uint32_t *)~0;
+parsed_props[add_prop("dm")].mt = (uint32_t *)~0;
+@
+
+<<Additional property type names>>=
+UNI_PROP_TYPE_STR,
+@
+
+<<Set prop type for export>>=
+if(parsed_props[i].strs_name || parsed_props[i].strs)
+  t = UNI_PROP_TYPE_STR;
+@
+
+<<Additional property structure members>>=
+const uint32_t *strs;
+uint32_t strs_len;
+@
+
+<<Print additional property structure members>>=
+if(parsed_props[i].strs_name)
+  fprintf(pnf, ", uni_%s_strs, uni_%s_strs_len",
+               parsed_props[i].strs_name, parsed_props[i].strs_name);
+else if(parsed_props[i].strs)
+  fprintf(pnf, ", uni_%s_strs, uni_%s_strs_len", name, name);
+else
+  fputs(", NULL, 0", pnf);
 @
 
 The lookup functions return offset and length.  An additional lookup
@@ -6742,6 +6942,10 @@ fprintf(gen_h, "extern const uni_str_rng_t uni_canon_comp_rng[];\n"
 cm_prop->mt = cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->rng_len, &ml_len);
 print_mtab("canon_comp", cm_prop->mt, gen_h);
 fputs("str(canon_comp);\n", tstf);
+@
+
+<<Parse UCD files>>=
+cm_prop->mt = (uint32_t *)~0; /* force addition to prop table */
 @
 
 The same lookup function as was used for decomposition lookups mostly
@@ -7031,6 +7235,13 @@ dump_str_tabs(&parsed_props[prop_uc], gen_h, tstf);
 dump_str_tabs(&parsed_props[prop_tc], gen_h, tstf);
 @
 
+<<Parse UCD files>>=
+/* force addition to prop table */
+parsed_props[prop_lc].mt = (uint32_t *)~0;
+parsed_props[prop_uc].mt = (uint32_t *)~0;
+parsed_props[prop_tc].mt = (uint32_t *)~0;
+@
+
 While the properties were named after the final result, these tables
 only provide a small part of it.  To get the final result, a helper
 function is provided, along with macros to use that function.
@@ -7183,6 +7394,10 @@ postproc_sc(cf);
 dump_str_tabs(&parsed_props[prop_cf], gen_h, tstf);
 @
 
+<<Parse UCD files>>=
+parsed_props[prop_cf].mt = (uint32_t *)~0; /* force addition to prop table */
+@
+
 Technically, any entry which is in the S class but not in the F class
 should have no translation.  However, I believe that there is no such
 case.  Like with the case conversions, a macro is provided for cf
@@ -7224,6 +7439,10 @@ if(num_fields == 3 && !strcmp(fields[1], "NFKC_CF"))
 
 <<Dump character information as C code>>=
 dump_str_tabs(&parsed_props[prop_NFKC_CF], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+parsed_props[prop_NFKC_CF].mt = (uint32_t *)~0; /* force addition to prop table */
 @
 
 It might also quite useful for the other case folding techniques to
@@ -7885,6 +8104,10 @@ fclose(f);
 dump_str_tabs(&parsed_props[prop_bmg], gen_h, tstf);
 @
 
+<<Parse UCD files>>=
+parsed_props[prop_bmg].mt = (uint32_t *)~0; /* force addition to prop table */
+@
+
 While scx is officially an ``Other'' property, it can be treated just
 like a string.  The difference is that the string elements are script
 enumeration values, rather than code points.
@@ -7918,6 +8141,10 @@ fclose(f);
 
 <<Dump character information as C code>>=
 dump_str_tabs(&parsed_props[prop_scx], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+parsed_props[prop_scx].mt = (uint32_t *)~0; /* force addition to prop table */
 @
 
 Another ``Other'' property which can be treated as a string for now is
@@ -8028,6 +8255,13 @@ dump_str_tabs(&parsed_props[prop_cjkSimplifiedVariant], gen_h, tstf);
 dump_str_tabs(&parsed_props[prop_cjkCompatibilityVariant], gen_h, tstf);
 @
 
+<<Parse Unihan files>>=
+/* force addition to prop table */
+parsed_props[prop_cjkTraditionalVariant].mt = (uint32_t *)~0;
+parsed_props[prop_cjkSimplifiedVariant].mt = (uint32_t *)~0;
+parsed_props[prop_cjkCompatibilityVariant].mt = (uint32_t *)~0;
+@
+
 Another optional string value comes from the IDNA compatiblity
 database.  This is available from a separate location
 (\url{http://www.unicode.org/Public/idna/}), but is only checked for
@@ -8058,6 +8292,10 @@ if((f = fopen("IdnaMappingTable.txt", "r")) ||
 
 <<Dump character information as C code>>=
 dump_str_tabs(&parsed_props[prop_IDNA_Mapping], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+parsed_props[prop_IDNA_Mapping].mt = (uint32_t *)~0; /* force addition to prop table */
 @
 
 <<UCD parser local functions>>=
@@ -8608,6 +8846,12 @@ fprintf(gen_h, "#define uni_DUCET_var_top %d\n", (int)ducet_vartop);
 dump_str_tabs(&parsed_props[prop_DUCET], gen_h, tstf);
 fprintf(gen_h, "#define uni_DUCET_CLDR_var_top %d\n", (int)cldr_vartop);
 dump_str_tabs(&parsed_props[prop_DUCET_CLDR], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+/* force addition to prop table */
+parsed_props[prop_DUCET].mt = (uint32_t *)~0;
+parsed_props[prop_DUCET_CLDR].mt = (uint32_t *)~0;
 @
 
 In order to compensate for some of the compression above, a special
@@ -10087,6 +10331,15 @@ static void doit_dat16(const char *name, const uni_chrrng_dat16_t *rng, uint32_t
     tt = tend();
     printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
 }
+@
+
+<<Additional property type names>>=
+UNI_PROP_TYPE_DAT16,
+@
+
+<<Set prop type for export>>=
+if(parsed_props[i].rng_dat16)
+  t = UNI_PROP_TYPE_DAT16;
 @
 
 It would probably be possible to skip normalization up to (but not
@@ -14116,9 +14369,12 @@ int main(void)
 Before starting, ensure that all prerequisites are present.  To build
 this, build.nw and tjm-ext.nw are required.  If you obtained the PDF
 or HTML version of this document, these are included.  Otherwise, they
-may be obtained the same place you got this.  The other prerequisites
-are the Unicode data files.  Make sure the file locations are also set
-correctly in the config file.
+may be obtained the same place you got this.  In addition, tjm-ext.nw
+must be built (using the same build instructions as below, although
+the command \texttt{make~libsupt.a} is probably sufficient) in a
+separate directory (i.e., without uni.nw in the same directory).  The
+other prerequisites are the Unicode data files.  Make sure the file
+locations are also set correctly in the config file.
 
 \begin{itemize}
 \item The Unicode Character Database; this library was tested using
@@ -14578,6 +14834,50 @@ multiply code point values by 4 when using [[multi_tab_lookup]].
 
 % cp_val_to_multi prototype
 
+\section{All Properties}
+
+All currently supported properties are provided via
+[[const uni_propdesc_t uni_propdesc[]]].  Each entry describes a
+property, and points to its data.  This array's length is given by the
+preprocessor symbol [[uni_propdesc_len]].  It is intended to be
+used to scan for desired properties, find property names and their
+aliases, and generate data based on that.  However, there is no harm
+in using it if you intend to support every single property, anyway.
+Including a reference to this array, or the associated
+[[uni_propdesc_valueof]] array, will defeat the static linking
+property of this library, pulling every single property's data in.
+
+Looking up a property by name is done using the
+[[const uni_valueof_t uni_propdesc_valueof[]]] and
+[[const uni_valueof_t uni_propdesc_valueof_approx[]]] arrays.  The
+lengths of these two arrays are
+[[uni_propdesc_valueof_len]] and [[uni_propdesc_valueof_approx_len]],
+respectively.  See Enumeration Properties (section \ref{sec:enum}) for
+details on the [[uni_alias_t]] and [[uni_valueof_t]] structures, and
+how to use them.
+
+The [[name]] field contains the canonical name and all known aliases
+for the property name.  The [[mtab]] and [[mtab_len]] describe the
+multi-level table for the property.  The [[rng_tab]] and
+[[rng_tab_len]] describe the sorted range table or sorted code point
+table for the property.  See the sections below for details on what
+these tables contain.  The [[type]] field determines which section
+describes the tables:
+
+\begin{itemize}
+\item [[UNI_PROP_TYPE_BOOL]]: Boolean Properties
+\item [[UNI_PROP_TYPE_ENUM]]: Enumeration Properties; in addition, the
+name translation tables are in [[nameof]], [[valueof]],
+[[valueof_approx]], [[nameof_len]], and [[valueof_len]].  The default
+is in [[def]].
+\item [[UNI_PROP_TYPE_NUM]]: Numeric Properties
+\item [[UNI_PROP_TYPE_STR]]: String Properties; in addition, the
+string table is in [[strs]] and [[strs_len]].
+\item [[UNI_PROP_TYPE_DAT16]]: The FCD property (sec. \ref{FCD})
+\end{itemize}
+
+\input{[[uni_propdesc_t]].tex} % C
+
 \section{Boolean Properties}
 
 The supported boolean properties are listed in table
@@ -14688,7 +14988,7 @@ res = BIT_SET_OP(is_uni_X(cp), op, is_uni_Y(cp)) & 1;
 \end{verbatim}
 \end{quote}
 
-\section{Enumerated Properties}
+\section{\label{sec:enum}Enumerated Properties}
 
 For lists of names, there are both the canonical names and aliases.
 These are stored in an array of [[uni_alias_t]] structures.  Any
@@ -14892,6 +15192,8 @@ are defined:
 \item [[const uint32_t uni_]]\emph{ST}[[_strs[]]] is a string table
 containing all string values.  \emph{ST} may or may not be the same as
 \emph{SP}.
+\item [[uni_]]\emph{ST}[[_len]] is the length of the string table (a
+preprocessor symbol), in case it needs to be written out to a file.
 \item [[const uni_str_rng_t uni_]]\emph{SP}[[_rng[]]] is a sorted list
 of code points with their associated string offsets and lengths.
 \item [[uni_]]\emph{SP}[[_rng_len]] is the length of the above array
@@ -14956,6 +15258,45 @@ characters which have already been sorted; these can safely be removed
 before the next pass.
 
 % uni_Canon_Order prototype
+
+\label{FCD} In some cases, a chain of transformations begins with NFD
+normalization.  However, subsequent steps may succeed even without
+fully normalized text.  In particular, if the next step is canonically
+closed, it can perform the normalization as part of its
+transformation.  For this case, the data only needs to be in what is
+called Fast C or D form, or FCD.  A pseudo-property is provided to
+perform this test.  The following function performs this test on a
+string, returning true if no normalization needs to be performed:
+
+% uni_is_FCD prototype
+
+The following symbols are defined for accessing the raw FCD data:
+
+\begin{itemize}
+\item [[const uni_chrrng_dat16_t uni_FCD_rng[]]] is a sorted range
+table whose 16-bit unsigned data is a ccc pair for the FCD test.
+\item [[uni_FCD_rng_len]] is the length of that table (a preprocessor
+symbol).
+\item [[const uint32_t uni_FCD_mtab[]]] is a multi-level table with
+the same data.
+\item [[uni_FCD_mtab_len]] is the length of that table, in case it is
+to be written out to a file.
+\item [[uint16_t uni_FCD_of(uint32_t cp)]] is a function
+which returns the 16-bit ccc pair for the given [[cp]].  Internally,
+this is a preprocessor macro which uses the multi-level table and
+[[uni_x_dat16]].
+\end{itemize}
+
+Each 16-bit word has the ccc of the first character of any potential
+canonical decomposition as its high byte, and the ccc of the last
+character of any potential canonical decomposition as its low byte.
+See Unicode Technical Note \#5 for details on the algorithm.  Also see
+that technical note for a brief description of what it means for a
+transformation to be canonically closed.  The only property currently
+guaranteed to meet this requirement is the DUCET.  The UCA is not
+always guaranteed to meet this requirement; if the literal text is to
+be appended to the key, then the literal text must be in NFD form
+first.
 
 \subsection{Decomposition}
 
