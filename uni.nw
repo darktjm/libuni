@@ -540,7 +540,6 @@ int uni_utf8_encode(uint8_t *buf, uint32_t cp)
 @
 
 <<Unicode I/O Exports>>=
-<<Unicode I/O Exports>>=
 /* this function returns -1 on errors */
 /* if the buffer may be invalid, ensure at least 4 chars available */
 int32_t uni_utf8_decode(const uint8_t *s, int *nread);
@@ -4110,7 +4109,7 @@ place, the storage size of the range table is kept as well.
 
 <<Property parsed contents>>=
 uni_chrrng_t *rng;
-uint32_t rng_len, max_rng_len;
+uint32_t len, max_len;
 uint32_t *mt;
 @
 
@@ -4121,16 +4120,16 @@ uint32_t i, j;
 <<UCD parser local functions>>=
 static void add_bool_rng(prop_t *p, uint32_t low, uint32_t high)
 {
-  if(!p->max_rng_len)
-    inisize(p->rng, (p->max_rng_len = 8));
-  if(p->rng_len && p->rng[p->rng_len - 1].high == low - 1)
-    p->rng[p->rng_len - 1].high = high;
+  if(!p->max_len)
+    inisize(p->rng, (p->max_len = 8));
+  if(p->len && p->rng[p->len - 1].high == low - 1)
+    p->rng[p->len - 1].high = high;
   else {
-    if(p->rng_len == p->max_rng_len)
-      resize(p->rng, (p->max_rng_len *= 2));
-    p->rng[p->rng_len].low = low;
-    p->rng[p->rng_len].high = high;
-    ++p->rng_len;
+    if(p->len == p->max_len)
+      resize(p->rng, (p->max_len *= 2));
+    p->rng[p->len].low = low;
+    p->rng[p->len].high = high;
+    ++p->len;
   }
 }
 @
@@ -4262,18 +4261,18 @@ for(i = 0; i < nparsed; i++)
 static void fixup_rng(prop_t *p)
 {
   uint32_t i;
-  qsort(p->rng, p->rng_len, sizeof(uni_chrrng_t), uni_cmprng);
+  qsort(p->rng, p->len, sizeof(uni_chrrng_t), uni_cmprng);
   /* starting at top means only optimized entries are memmove'd */
-  for(i = p->rng_len - 1; i > 0; i--) {
+  for(i = p->len - 1; i > 0; i--) {
     uint32_t j = i;
     while(i > 0 && p->rng[i - 1].high == p->rng[i].low - 1)
       i--;
     if(i == j)
       continue;
     p->rng[i].high = p->rng[j].high;
-    if(j < p->rng_len - 1)
-        movebuf(p->rng + i + 1, p->rng + j + 1, p->rng_len - (j + 1));
-    p->rng_len -= j - i;
+    if(j < p->len - 1)
+        movebuf(p->rng + i + 1, p->rng + j + 1, p->len - (j + 1));
+    p->len -= j - i;
     if(!i)
       break;
   }
@@ -4317,7 +4316,7 @@ uint32_t ml_len;
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng)
     parsed_props[i].mt = rng_to_multi_bit(parsed_props[i].rng,
-                                          parsed_props[i].rng_len,
+                                          parsed_props[i].len,
                                           &ml_len);
 @
 
@@ -4423,17 +4422,17 @@ for(i = 0; i < nparsed; i++) {
     open_wf(of, nbuf);
     fprintf(of, "#include \"uni_prop.h\"\n\n"
                 "const uni_chrrng_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].rng_len; j++)
-      fprintf(of, "\t{ %d, %d }%s\n", parsed_props[i].rng[j].low,
-                                      parsed_props[i].rng[j].high,
-				      j < parsed_props[i].rng_len - 1 ? "," : "");
+    for(j = 0; j < parsed_props[i].len; j++)
+      fprintf(of, "\t{ 0x%04X, 0x%04X }%s\n", parsed_props[i].rng[j].low,
+                                              parsed_props[i].rng[j].high,
+					      j < parsed_props[i].len - 1 ? "," : "");
     fputs("};\n", of);
     fclose(of);
     fprintf(gen_h, "extern const uni_chrrng_t uni_%s_rng[];\n"
 		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
                    "#define is_uni_%s(x) is_uni_x(x, uni_%s_mtab)\n",
-		   name, name, parsed_props[i].rng_len,
-		   lg2(parsed_props[i].rng_len + 1), name, name);
+		   name, name, parsed_props[i].len,
+		   lg2(parsed_props[i].len + 1), name, name);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "bool(%s);\n", name);
   }
@@ -5235,8 +5234,8 @@ typedef struct {
   uni_alias_t name;
   const uint32_t *mtab;
   uint32_t mtab_len;
-  const void *rng_tab;
-  uint32_t rng_tab_len;
+  const void *tab;
+  uint32_t tab_len;
   uni_prop_type_t type;
   <<Additional property structure members>>
 } uni_propdesc_t;
@@ -5299,8 +5298,9 @@ for(i = 0; i < nparsed; i++) {
     }
   }
   fprintf(pnf, "},\n"
-               "\t\tuni_%s_mtab, uni_%s_mtab_len, uni_%s_rng, uni_%s_rng_len,\n",
-               name, name, name, name);
+               "\t\tuni_%s_mtab, uni_%s_mtab_len, uni_%s_%s, uni_%s_%s_len,\n",
+               name, name, name, <<Plain table name>> "rng", name,
+	       <<Plain table name>> "rng");
   fprintf(pnf, "\t\t%d", (int)t);
   <<Print additional property structure members>>
   fputc('}', pnf);
@@ -5370,18 +5370,18 @@ static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
 {
   if(p->def == val)
     return;
-  if(!p->max_rng_len)
-    inisize(p->rng_dat8, (p->max_rng_len = 8));
-  if(p->rng_len && p->rng_dat8[p->rng_len - 1].high == low - 1 &&
-     p->rng_dat8[p->rng_len - 1].dat == val)
-    p->rng_dat8[p->rng_len - 1].high = high;
+  if(!p->max_len)
+    inisize(p->rng_dat8, (p->max_len = 8));
+  if(p->len && p->rng_dat8[p->len - 1].high == low - 1 &&
+     p->rng_dat8[p->len - 1].dat == val)
+    p->rng_dat8[p->len - 1].high = high;
   else {
-    if(p->rng_len == p->max_rng_len)
-      resize(p->rng_dat8, (p->max_rng_len *= 2));
-    p->rng_dat8[p->rng_len].low = low;
-    p->rng_dat8[p->rng_len].high = high;
-    p->rng_dat8[p->rng_len].dat = val;
-    ++p->rng_len;
+    if(p->len == p->max_len)
+      resize(p->rng_dat8, (p->max_len *= 2));
+    p->rng_dat8[p->len].low = low;
+    p->rng_dat8[p->len].high = high;
+    p->rng_dat8[p->len].dat = val;
+    ++p->len;
   }
 }
 @
@@ -5581,17 +5581,17 @@ if(num_fields == 3) {
 uni_chrrng_t *new;
 uint32_t new_len;
 uni_chrrng_setop(parsed_props[prop_NFD_QC].rng,
-                 parsed_props[prop_NFD_QC].rng_len, UNI_SOP_INV_A,
+                 parsed_props[prop_NFD_QC].len, UNI_SOP_INV_A,
 		 NULL, 0, &new, &new_len);
 free(parsed_props[prop_NFD_QC].rng);
 parsed_props[prop_NFD_QC].rng = new;
-parsed_props[prop_NFD_QC].rng_len = new_len;
+parsed_props[prop_NFD_QC].len = new_len;
 uni_chrrng_setop(parsed_props[prop_NFKD_QC].rng,
-                 parsed_props[prop_NFKD_QC].rng_len, UNI_SOP_INV_A,
+                 parsed_props[prop_NFKD_QC].len, UNI_SOP_INV_A,
 		 NULL, 0, &new, &new_len);
 free(parsed_props[prop_NFKD_QC].rng);
 parsed_props[prop_NFKD_QC].rng = new;
-parsed_props[prop_NFKD_QC].rng_len = new_len;
+parsed_props[prop_NFKD_QC].len = new_len;
 @
 
 Then there are a number of files that describe just one enumerated
@@ -5763,9 +5763,9 @@ uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
 static void fixup_rng_dat8(prop_t *p)
 {
   uint32_t i;
-  qsort(p->rng_dat8, p->rng_len, sizeof(uni_chrrng_dat8_t), uni_cmprng_dat8);
+  qsort(p->rng_dat8, p->len, sizeof(uni_chrrng_dat8_t), uni_cmprng_dat8);
   /* starting at top means only optimized entries are memmove'd */
-  for(i = p->rng_len - 1; i > 0; i--) {
+  for(i = p->len - 1; i > 0; i--) {
     uint32_t j = i;
     while(i > 0 && p->rng_dat8[i - 1].high == p->rng_dat8[i].low - 1 &&
           p->rng_dat8[i - 1].dat == p->rng_dat8[i].dat)
@@ -5773,9 +5773,9 @@ static void fixup_rng_dat8(prop_t *p)
     if(i == j)
       continue;
     p->rng_dat8[i].high = p->rng_dat8[j].high;
-    if(j < p->rng_len - 1)
-        movebuf(p->rng_dat8 + i + 1, p->rng_dat8 + j + 1, p->rng_len - (j + 1));
-    p->rng_len -= j - i;
+    if(j < p->len - 1)
+        movebuf(p->rng_dat8 + i + 1, p->rng_dat8 + j + 1, p->len - (j + 1));
+    p->len -= j - i;
     if(!i)
       break;
   }
@@ -5787,7 +5787,7 @@ for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat8) {
     fixup_rng_dat8(&parsed_props[i]);
     parsed_props[i].mt = rng_dat8_to_multi(parsed_props[i].rng_dat8,
-                                          parsed_props[i].rng_len,
+                                          parsed_props[i].len,
                                           &ml_len, parsed_props[i].def);
 }
 @
@@ -5892,10 +5892,10 @@ for(i = 0; i < nparsed; i++) {
     open_wf(of, nbuf);
     fprintf(of, "#include \"uni_prop.h\"\n\n"
 		"const uni_chrrng_dat8_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].rng_len; j++) {
+    for(j = 0; j < parsed_props[i].len; j++) {
       uint32_t val = parsed_props[i].rng_dat8[j].dat;
       uni_alias_t *aliases = val_aliases[i];
-      fprintf(of, "\t{ %d, %d, ",
+      fprintf(of, "\t{ 0x%04X, 0x%04X, ",
                   parsed_props[i].rng_dat8[j].low,
 	          parsed_props[i].rng_dat8[j].high);
       if(!aliases || (isdigit(aliases[0].short_name[0]) &&
@@ -5915,15 +5915,15 @@ for(i = 0; i < nparsed; i++) {
 	} else
 	  fprintf(of, "U_%s_%s", name, val_name);
       }
-      fprintf(of, " }%s\n", j < parsed_props[i].rng_len - 1 ? "," : "");
+      fprintf(of, " }%s\n", j < parsed_props[i].len - 1 ? "," : "");
     }
     fputs("};\n", of);
     fclose(of);
     fprintf(gen_h, "extern const uni_chrrng_dat8_t uni_%s_rng[];\n"
 		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
 		   "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
-		   name, name, parsed_props[i].rng_len,
-		   lg2(parsed_props[i].rng_len + 1), name, name,
+		   name, name, parsed_props[i].len,
+		   lg2(parsed_props[i].len + 1), name, name,
 		   parsed_props[i].def);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "dat8(%s, %d);\n", name, parsed_props[i].def);
@@ -6012,10 +6012,10 @@ int rng_num; /* flag */
 static void add_dat32_rng(prop_t *p, uint32_t low, uint32_t high,
                           uint32_t dat)
 {
-  if(!p->max_rng_len)
-    inisize(p->rng_dat32, (p->max_rng_len = 8));
-  if(p->rng_len) {
-    uni_chrrng_dat32_t *last = &p->rng_dat32[p->rng_len -1];
+  if(!p->max_len)
+    inisize(p->rng_dat32, (p->max_len = 8));
+  if(p->len) {
+    uni_chrrng_dat32_t *last = &p->rng_dat32[p->len -1];
     if(last->len < 255 && last->low + last->len == low - 1 &&
        last->dat == dat) {
       if(high < last->low + 256) {
@@ -6027,16 +6027,16 @@ static void add_dat32_rng(prop_t *p, uint32_t low, uint32_t high,
     }
   }
   while(1) {
-    if(p->rng_len == p->max_rng_len)
-      resize(p->rng_dat32, (p->max_rng_len *= 2));
-    p->rng_dat32[p->rng_len].dat = dat;
-    p->rng_dat32[p->rng_len].low = low;
-    ++p->rng_len;
+    if(p->len == p->max_len)
+      resize(p->rng_dat32, (p->max_len *= 2));
+    p->rng_dat32[p->len].dat = dat;
+    p->rng_dat32[p->len].low = low;
+    ++p->len;
     if(high < low + 256) {
-      p->rng_dat32[p->rng_len - 1].len = high - low;
+      p->rng_dat32[p->len - 1].len = high - low;
       return;
     }
-    p->rng_dat32[p->rng_len - 1].len = 255;
+    p->rng_dat32[p->len - 1].len = 255;
     low += 256;
   }
 }
@@ -6243,9 +6243,9 @@ generate the multi-level table, assuming that the range data is correct.
 static void fixup_rng_dat32(prop_t *p)
 {
   uint32_t i;
-  qsort(p->rng_dat32, p->rng_len, sizeof(uni_chrrng_dat32_t), uni_cmprng_dat32);
+  qsort(p->rng_dat32, p->len, sizeof(uni_chrrng_dat32_t), uni_cmprng_dat32);
   /* starting at top means only optimized entries are memmove'd */
-  for(i = p->rng_len - 1; i > 0; i--) {
+  for(i = p->len - 1; i > 0; i--) {
     uint32_t j = i, len = p->rng_dat32[i].len, k;
     while(i > 0 &&
           p->rng_dat32[i - 1].low + p->rng_dat32[i - 1].len == p->rng_dat32[i].low - 1 &&
@@ -6262,9 +6262,9 @@ static void fixup_rng_dat32(prop_t *p)
     }
     p->rng_dat32[k].len = len;
     if(k != j) {
-      if(j < p->rng_len - 1)
-          movebuf(p->rng_dat32 + k + 1, p->rng_dat32 + j + 1, p->rng_len - (j + 1));
-      p->rng_len -= j - k;
+      if(j < p->len - 1)
+          movebuf(p->rng_dat32 + k + 1, p->rng_dat32 + j + 1, p->len - (j + 1));
+      p->len -= j - k;
     }
     if(!i)
       break;
@@ -6277,7 +6277,7 @@ for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat32) {
     fixup_rng_dat32(&parsed_props[i]);
     parsed_props[i].mt = rng_dat32_to_multi(parsed_props[i].rng_dat32,
-                                            parsed_props[i].rng_len,
+                                            parsed_props[i].len,
                                             &ml_len);
 }
 @
@@ -6296,18 +6296,18 @@ for(i = 0; i < nparsed; i++) {
     open_wf(of, nbuf);
     fprintf(of, "#include \"uni_prop.h\"\n\n"
                 "const uni_chrrng_dat32_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].rng_len; j++)
-      fprintf(of, "\t{ %d, %d, 0x%08x }%s\n",
+    for(j = 0; j < parsed_props[i].len; j++)
+      fprintf(of, "\t{ 0x%04X, %d, 0x%08x }%s\n",
                   parsed_props[i].rng_dat32[j].low,
 	          parsed_props[i].rng_dat32[j].len,
 	          parsed_props[i].rng_dat32[j].dat,
-		  j < parsed_props[i].rng_len - 1 ? "," : "");
+		  j < parsed_props[i].len - 1 ? "," : "");
     fputs("};\n", of);
     fclose(of);
     fprintf(gen_h, "extern const uni_chrrng_dat32_t uni_%s_rng[];\n"
 		   "#define uni_%s_rng_len %d /* %d lookups max */\n",
-		   name, name, parsed_props[i].rng_len,
-		   lg2(parsed_props[i].rng_len + 1));
+		   name, name, parsed_props[i].len,
+		   lg2(parsed_props[i].len + 1));
     <<Print special 32-bit range table stuff>>
     print_mtab(name, parsed_props[i].mt, gen_h);
   }
@@ -6412,7 +6412,7 @@ be to store similar properties together.  For example, the main string
 properties are either case folding-related or normalization-related,
 and some have the others as their default values.  These could be
 combined when they have many elements in common.  For now, though,
-range tables are built using 32-bit pointers and lengths.  The merging
+plain tables are built using 32-bit pointers and lengths.  The merging
 into a single string table can be done during post-processing.
 However, to assist with this, multiple tables sharing the same string
 table can use the [[flags]] field to distinguish themselves.
@@ -6428,7 +6428,7 @@ raw_cp_str_t,%
 @
 
 <<Property parsed contents>>=
-raw_cp_str_t *rng_str;
+raw_cp_str_t *str_arr;
 uint32_t *strs;
 uint32_t strs_len, max_strs;
 @
@@ -6438,8 +6438,8 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
                         uint32_t len)
 {
   uint32_t off = p->strs_len;
-  if(!p->max_rng_len) {
-    inisize(p->rng_str, (p->max_rng_len = 8));
+  if(!p->max_len) {
+    inisize(p->str_arr, (p->max_len = 8));
     inisize(p->strs, (p->max_strs = 32));
   }
   while(off + len > p->max_strs)
@@ -6447,13 +6447,13 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
   cpybuf(p->strs + off, val, len);
   p->strs_len += len;
   for(; low <= high; low++) {
-    if(p->rng_len == p->max_rng_len)
-      resize(p->rng_str, (p->max_rng_len *= 2));
-    p->rng_str[p->rng_len].cp = low;
-    p->rng_str[p->rng_len].off = off;
-    p->rng_str[p->rng_len].len = len;
-    p->rng_str[p->rng_len].flags = 0;
-    ++p->rng_len;
+    if(p->len == p->max_len)
+      resize(p->str_arr, (p->max_len *= 2));
+    p->str_arr[p->len].cp = low;
+    p->str_arr[p->len].off = off;
+    p->str_arr[p->len].len = len;
+    p->str_arr[p->len].flags = 0;
+    ++p->len;
   }
 }
 @
@@ -6474,7 +6474,7 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
 } while(0)
 @
 
-\subsection{Parsing the UCD - Decomposition}
+\subsection{Parsing the UCD -- Decomposition}
 
 The first string field from [[UnicodeData.txt]] is the decomposition
 mapping (dm) field.  For compatibility decompositions, the initial
@@ -6577,10 +6577,10 @@ prop_t *dm_prop = &parsed_props[prop_dm];
 uint8_t can_val = enum_val(prop_dt, "can");
 uint8_t none_val = enum_val(prop_dt, "None");
 prop_t *dt_prop = &parsed_props[prop_dt];
-for(i = 0; i < dm_prop->rng_len; i++) {
-  uint32_t cp = dm_prop->rng_str[i].cp;
-  uint32_t str[64], len = dm_prop->rng_str[i].len;
-  int is_can = uni_chrrng_dat8(cp, dt_prop->rng_dat8, dt_prop->rng_len,
+for(i = 0; i < dm_prop->len; i++) {
+  uint32_t cp = dm_prop->str_arr[i].cp;
+  uint32_t str[64], len = dm_prop->str_arr[i].len;
+  int is_can = uni_chrrng_dat8(cp, dt_prop->rng_dat8, dt_prop->len,
                                none_val) == can_val;
   int do_dec = !is_can;
   int did_repl = 0;
@@ -6596,16 +6596,16 @@ for(i = 0; i < dm_prop->rng_len; i++) {
     dm_prop->strs = NULL;
     dm_prop->max_strs = dm_prop->strs_len = 0;
   }
-  unex = &dmf_prop->rng_str[dmf_prop->rng_len - 1];
-  unex->off = dm_prop->rng_str[i].off;
+  unex = &dmf_prop->str_arr[dmf_prop->len - 1];
+  unex->off = dm_prop->str_arr[i].off;
   unex->len = len;
   cpybuf(str, dmf_prop->strs + unex->off, len);
   if(is_can)
     for(j = 0; j < len; j++) {
-      uint8_t dt = uni_chrrng_dat8(str[j], dt_prop->rng_dat8, dt_prop->rng_len,
+      uint8_t dt = uni_chrrng_dat8(str[j], dt_prop->rng_dat8, dt_prop->len,
                                    none_val);
       if(dt == can_val) {
-        raw_cp_str_t *dec = bsearch(str + j, dm_prop->rng_str, dm_prop->rng_len,
+        raw_cp_str_t *dec = bsearch(str + j, dm_prop->str_arr, dm_prop->len,
 				    sizeof(raw_cp_str_t), uni_cmp_cp);
         if(dec->len > 1)
           movebuf(str + j + dec->len, str + j + 1, len - j - 1);
@@ -6622,10 +6622,10 @@ for(i = 0; i < dm_prop->rng_len; i++) {
   }
   if(do_dec) {
     for(j = 0; j < len; j++) {
-      uint8_t dt = uni_chrrng_dat8(str[j], dt_prop->rng_dat8, dt_prop->rng_len,
+      uint8_t dt = uni_chrrng_dat8(str[j], dt_prop->rng_dat8, dt_prop->len,
                                    none_val);
       if(dt != none_val) {
-        raw_cp_str_t *dec = bsearch(str + j, dm_prop->rng_str, dm_prop->rng_len,
+        raw_cp_str_t *dec = bsearch(str + j, dm_prop->str_arr, dm_prop->len,
 				    sizeof(raw_cp_str_t), uni_cmp_cp);
         if(dec->len > 1)
           movebuf(str + j + dec->len, str + j + 1, len - j - 1);
@@ -6639,7 +6639,7 @@ for(i = 0; i < dm_prop->rng_len; i++) {
       if(!is_can)
         unex->flags = 3;
       add_str_rng(dmf_prop, cp, cp, str, len);
-      dmf_prop->rng_str[dmf_prop->rng_len - 1].flags = 1;
+      dmf_prop->str_arr[dmf_prop->len - 1].flags = 1;
     } else if(!is_can)
       unex->flags = 1;
   }
@@ -6682,14 +6682,14 @@ static uint32_t merge_strs(prop_t *p)
   uint32_t i, saved = 0;
 
   sort_strs = p->strs;
-  qsort(p->rng_str, p->rng_len, sizeof(*p->rng_str), cmp_strs);
-  for(i = p->rng_len - 1; i; i--)
-    if(p->rng_str[i - 1].len <= p->rng_str[i].len &&
-       !memcmp(p->strs + p->rng_str[i - 1].off,
-               p->strs + p->rng_str[i].off,
-	       p->rng_str[i - 1].len * 4)) {
-      p->rng_str[i - 1].off = p->rng_str[i].off;
-      saved += p->rng_str[i - 1].len;
+  qsort(p->str_arr, p->len, sizeof(*p->str_arr), cmp_strs);
+  for(i = p->len - 1; i; i--)
+    if(p->str_arr[i - 1].len <= p->str_arr[i].len &&
+       !memcmp(p->strs + p->str_arr[i - 1].off,
+               p->strs + p->str_arr[i].off,
+	       p->str_arr[i - 1].len * 4)) {
+      p->str_arr[i - 1].off = p->str_arr[i].off;
+      saved += p->str_arr[i - 1].len;
   }
   return saved;
 }
@@ -6703,17 +6703,17 @@ static void dump_strs(prop_t *p, FILE *gen_h)
   open_wf(of, nbuf);
   fprintf(of, "#include <stdint.h>\n\n"
               "const uint32_t uni_%s_strs[] = {\n\t", p->name);
-  for(i = 0, off = 0; i < p->rng_len; i++) {
-    uint32_t j, len = p->rng_str[i].len;
-    if(i < p->rng_len - 1 && p->rng_str[i].off == p->rng_str[i + 1].off) {
-      p->rng_str[i].off = len ? off : 1;
+  for(i = 0, off = 0; i < p->len; i++) {
+    uint32_t j, len = p->str_arr[i].len;
+    if(i < p->len - 1 && p->str_arr[i].off == p->str_arr[i + 1].off) {
+      p->str_arr[i].off = len ? off : 1;
       continue;
     }
     for(j = 0; j < len; j++)
-      fprintf(of, "0x%X%s", p->strs[p->rng_str[i].off + j],
-                            j == len - 1 && i == p->rng_len - 1 ? "\n};\n" :
+      fprintf(of, "0x%X%s", p->strs[p->str_arr[i].off + j],
+                            j == len - 1 && i == p->len - 1 ? "\n};\n" :
 			          !((off + j + 1) % 8) ? ",\n\t" : ", ");
-    p->rng_str[i].off = len ? off : 1;
+    p->str_arr[i].off = len ? off : 1;
     off += len;
   }
   fclose(of);
@@ -6727,23 +6727,26 @@ static void dump_strs(prop_t *p, FILE *gen_h)
 dump_strs(dmf_prop, gen_h);
 @
 
-Now that the string offsets and lengths are correct, the range table
-is ready to convert into a multi-level table, and then both can be
-printed.  The range table could simply be the same as the raw table,
-using the flags to distinguish entries.  The multi-level table,
+Now that the string offsets and lengths are correct, the plain table
+is ready to be converted into a multi-level table, and then both can
+be printed.  The plain table could simply be the same as the raw
+table, using the flags to distinguish entries.  The multi-level table,
 though, expects only one value per index, and each value must be the
 same size.  Rather than figure out a way to squeeze all three values
 into an efficient representation, three separate tables are generated.
 While it would definitely be possible to encode the offset and length
 into 24 bits, the current multi-level table implementation only
 supports sizes which are powers of two.  Encoding into 16 bits might
-be possible, but is likely too complex to be useful.  Instead, 32 bits
-are used: 16 for the offset, 8 for the length, and 8 for a flag
-indicating whether or not this entry is a compatibility decomposition.
-The full decomposition tables are similar, but have no flag.  The
+be possible, but is likely too complex to be useful.  Other string
+propreties may also benefit from more breathing room.  Instead, 32
+bits are used: 16 for the offset and 16 for the length.  The raw dm
+property also needs to distinquish between canonical and compatibility
+results.  There is a binary property to help, but that requires an
+extra lookup.  Instead, a flag is ored into the length field. The
 compatibility decomposition table uses entries from the canonical
 table where no compatibility decomposition exists.  Rather than make
-the range tables completely different, three separate range tables
+the plain tables behave completely differently than the multi-level
+tables (i.e., be a single merged table), three separate plain tables
 will be generated as well.
 
 <<UCD parser local functions>>=
@@ -6760,54 +6763,51 @@ static int cmp_cp_flg(const void *a, const void *b)
 }
 @
 
-<<[[uni_str_rng_t]]>>=
+<<[[uni_str_arr_t]]>>=
 typedef struct {
   uint32_t cp;
-  uint16_t off;
-  uint8_t len, flags;
-} uni_str_rng_t;
+  uint16_t off, len;
+} uni_str_arr_t;
 @
 
-<<[[uni_str_rng_val_t]]>>=
+<<[[uni_str_ptr_t]]>>=
 typedef struct {
-  uint16_t off;
-  uint8_t len, flags;
-} uni_str_rng_val_t;
+  uint16_t off, len;
+} uni_str_ptr_t;
 @
 
 <<Unicode property exports for generator>>=
-<<[[uni_str_rng_t]]>>
-<<[[uni_str_rng_val_t]]>>
+<<[[uni_str_arr_t]]>>
+<<[[uni_str_ptr_t]]>>
 @
 
 <<Known Data Types>>=
-uni_str_rng_t,uni_str_rng_val_t,%
+uni_str_arr_t,uni_str_ptr_t,%
 @
 
 <<Dump character information as C code>>=
-qsort(dmf_prop->rng_str, dmf_prop->rng_len, sizeof(*dmf_prop->rng_str), cmp_cp_flg);
-uni_str_rng_t *dec;
-inisize(dec, dmf_prop->rng_len);
+qsort(dmf_prop->str_arr, dmf_prop->len, sizeof(*dmf_prop->str_arr), cmp_cp_flg);
+uni_str_arr_t *dec;
+inisize(dec, dmf_prop->len);
 /* the easy table: canon full mapping is all w/ flags == 0 */
-open_wf(cf, "uni_canon_decomp_rng.gen.c");
+open_wf(cf, "uni_canon_decomp_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
-      "const uni_str_rng_t uni_canon_decomp_rng[] = {\n\t", cf);
+      "const uni_str_arr_t uni_canon_decomp_arr[] = {\n\t", cf);
 uint32_t curent;
-for(i = 0; dmf_prop->rng_str[i].flags; i++);
-for(curent = 0; i < dmf_prop->rng_len; i++, curent++) {
-  dec[curent].cp = dmf_prop->rng_str[i].cp;
-  dec[curent].off = dmf_prop->rng_str[i].off;
-  dec[curent].len = dmf_prop->rng_str[i].len;
-  dec[curent].flags = 0;
-  while(i < dmf_prop->rng_len - 1 && dmf_prop->rng_str[i + 1].flags)
+for(i = 0; dmf_prop->str_arr[i].flags; i++);
+for(curent = 0; i < dmf_prop->len; i++, curent++) {
+  dec[curent].cp = dmf_prop->str_arr[i].cp;
+  dec[curent].off = dmf_prop->str_arr[i].off;
+  dec[curent].len = dmf_prop->str_arr[i].len;
+  while(i < dmf_prop->len - 1 && dmf_prop->str_arr[i + 1].flags)
     ++i;
-  fprintf(cf, "{ 0x%X, %d, %d }%s", (int)dec[curent].cp, (int)dec[curent].off,
-                                    (int)dec[curent].len,
-				    i < dmf_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
+  fprintf(cf, "{ 0x%04X, %d, %d }%s", (int)dec[curent].cp, (int)dec[curent].off,
+                                      (int)dec[curent].len,
+				      i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(cf);
-fprintf(gen_h, "extern const uni_str_rng_t uni_canon_decomp_rng[];\n"
-	       "#define uni_canon_decomp_rng_len %d /* %d lookups max */\n",
+fprintf(gen_h, "extern const uni_str_arr_t uni_canon_decomp_arr[];\n"
+	       "#define uni_canon_decomp_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
 @
 
@@ -6868,13 +6868,13 @@ free(tmt);
 <<Dump character information as C code>>=
 /* the next harder table: flags == 1 -> full compat decomp */
 /* needs to duplicate full canon decomp when empty */
-open_wf(kf, "uni_compat_decomp_rng.gen.c");
+open_wf(kf, "uni_compat_decomp_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
-      "const uni_str_rng_t uni_compat_decomp_rng[] = {\n\t", kf);
-for(i = curent = 0; i < dmf_prop->rng_len; i++, curent++) {
-  raw_cp_str_t *cur = &dmf_prop->rng_str[i];
+      "const uni_str_arr_t uni_compat_decomp_arr[] = {\n\t", kf);
+for(i = curent = 0; i < dmf_prop->len; i++, curent++) {
+  raw_cp_str_t *cur = &dmf_prop->str_arr[i];
   /* could be canon followed by compat, or compat followed by dm */
-  if(i < dmf_prop->rng_len - 1 && cur[1].cp == cur->cp &&
+  if(i < dmf_prop->len - 1 && cur[1].cp == cur->cp &&
      !(cur->flags & 1) && (cur[1].flags & 1)) {
     ++i;
     ++cur;
@@ -6882,18 +6882,19 @@ for(i = curent = 0; i < dmf_prop->rng_len; i++, curent++) {
   dec[curent].cp = cur->cp;
   dec[curent].off = cur->off;
   dec[curent].len = cur->len;
-  dec[curent].flags = cur->flags & 1;
+  if(cur->flags & 1)
+    dec[curent].len |= 0x8000;
   /* could be canon/compat followed by dm */
-  if(i < dmf_prop->rng_len - 1 && cur->cp == cur[1].cp)
+  if(i < dmf_prop->len - 1 && cur->cp == cur[1].cp)
     ++i;
-  fprintf(kf, "{ 0x%X, %d, %d%s }%s",
-              (int)dec[curent].cp, (int)dec[curent].off, (int)dec[curent].len,
-	      dec[curent].flags ? ", 1" : "",
-	      i < dmf_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
+  fprintf(kf, "{ 0x%04X, %d, %d%s }%s",
+              (int)cur->cp, (int)cur->off, (int)cur->len,
+	      (cur->flags & 1) ? " | 0x8000" : "",
+	      i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(kf);
-fprintf(gen_h, "extern const uni_str_rng_t uni_compat_decomp_rng[];\n"
-	       "#define uni_compat_decomp_rng_len %d /* %d lookups max */\n",
+fprintf(gen_h, "extern const uni_str_arr_t uni_compat_decomp_arr[];\n"
+	       "#define uni_compat_decomp_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
 tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("compat_decomp", tmt, gen_h);
@@ -6904,19 +6905,18 @@ free(tmt);
 /* the hardest table: 2/3 -> dm */
 /* needs to duplicate full canon decomp when empty */
 /* needs to duplicate full compat decomp when empty & full canon empty*/
-/* needs to duplicate full canon decomp when empty */
-open_wf(dm, "uni_dm_rng.gen.c");
+open_wf(dm, "uni_dm_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
-      "const uni_str_rng_t uni_dm_rng[] = {\n\t", dm);
-for(i = curent = 0; i < dmf_prop->rng_len; i++) {
-  raw_cp_str_t *cur = &dmf_prop->rng_str[i];
+      "const uni_str_arr_t uni_dm_arr[] = {\n\t", dm);
+for(i = curent = 0; i < dmf_prop->len; i++) {
+  raw_cp_str_t *cur = &dmf_prop->str_arr[i];
 
-  if(i < dmf_prop->rng_len - 1 && cur[1].cp == cur->cp) {
+  if(i < dmf_prop->len - 1 && cur[1].cp == cur->cp) {
     /* possibilities: canon,compat,dm canon,dm canon,compat compat,dm */
     if(cur[1].flags & 2) {
       ++i; /* compat,dm or canon,dm: skip full */
       cur++;
-    } else if(i < dmf_prop->rng_len - 2 && cur->cp == cur[2].cp) {
+    } else if(i < dmf_prop->len - 2 && cur->cp == cur[2].cp) {
       i += 2; /* canon,compat,dm: skip both full */
       cur += 2;
     } else /* canon,compat; skip compat when done */
@@ -6925,16 +6925,17 @@ for(i = curent = 0; i < dmf_prop->rng_len; i++) {
   dec[curent].cp = cur->cp;
   dec[curent].off = cur->off;
   dec[curent].len = cur->len;
-  dec[curent].flags = cur->flags & 1;
-  fprintf(dm, "{ 0x%X, %d, %d%s }%s", (int)dec[curent].cp, (int)dec[curent].off,
-                                      (int)dec[curent].len,
-				      dec[curent].flags ? ", 1" : "",
-				      i < dmf_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
+  if(cur->flags & 1)
+    dec[curent].len |= 0x8000;
+  fprintf(dm, "{ 0x%04X, %d, %d%s }%s", (int)cur->cp, (int)cur->off,
+                                        (int)cur->len,
+				        (cur->flags & 1) ? " | 0x8000" : "",
+				        i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
   curent++;
 }
 fclose(dm);
-fprintf(gen_h, "extern const uni_str_rng_t uni_dm_rng[];\n"
-	       "#define uni_dm_rng_len %d /* %d lookups max */\n",
+fprintf(gen_h, "extern const uni_str_arr_t uni_dm_arr[];\n"
+	       "#define uni_dm_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
 tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("dm", tmt, gen_h);
@@ -6979,6 +6980,10 @@ else if(parsed_props[i].strs)
   fprintf(pnf, ", uni_%s_strs, uni_%s_strs_len", name, name);
 else
   fputs(", NULL, 0", pnf);
+@
+
+<<Plain table name>>=
+t == UNI_PROP_TYPE_STR ? "arr" :
 @
 
 The lookup functions return offset and length.  An additional lookup
@@ -7030,7 +7035,7 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
       *compat = 0;
     return;
   } else {
-    uni_str_rng_val_t *v = (void *)mr;
+    uni_str_ptr_t *v = (void *)mr;
     if(h >= 0 && !v->len && v->off) {
       *off = -1;
       *len = h && (cp - 0xAC00) % 28 ? 3 : 2;
@@ -7038,9 +7043,9 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
         *compat = 0;
     } else {
       *off = v->off;
-      *len = v->len;
+      *len = v->len & 0x7fff;
       if(compat)
-        *compat = v->flags;
+        *compat = v->len >> 15;
     }
   }
 }
@@ -7052,9 +7057,9 @@ To test the table implementations, a different, but nearly identical,
 set of routines is used compared to the ones one for booleans.
 
 <<Functions to help test generated tables>>=
-#define str(x) doit_str(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
+#define str(x) doit_str(#x, uni_##x##_arr, uni_##x##_arr_len, uni_##x##_mtab)
 
-static void doit_str(const char *name, const uni_str_rng_t *rng, uint32_t nent,
+static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
                      const uint32_t *mtab)
 {
     uint32_t i;
@@ -7065,19 +7070,17 @@ static void doit_str(const char *name, const uni_str_rng_t *rng, uint32_t nent,
            name, nent, nent * 8, lg2(nent + 1));
     print_mtab_info(mtab, nent * 8);
     /* check integrity */
-    uni_str_rng_val_t *ms, *rs, z;
-    uni_str_rng_t *r;
+    const uni_str_ptr_t *ms, *rs, z;
+    uni_str_arr_t *r;
     clearbuf(&z, 1);
     for(i = 0; i < 0x110000; i++) {
       r = bsearch(&i, rng, nent, sizeof(*rng), uni_cmp_cp);
-      rs = r ? (uni_str_rng_val_t *)&r->off : &z;
-      multi_tab_lookup(mtab, i * 4, (const uint8_t **)&ms, 0);
-      if(!ms)
-        ms = &z;
+      rs = r ? (uni_str_ptr_t *)&r->off : &z;
+      ms = uni_x_str_of(i, mtab);
       if(memcmp(ms, rs, sizeof(*ms))) {
         fprintf(stderr, "mismatch %s@%d %d/%d/%d %d/%d/%d\n", name, i,
-	                (int)rs->off, (int)rs->len, (int)rs->flags,
-			(int)ms->off, (int)ms->len, (int)ms->flags);
+	                (int)rs->off, (int)rs->len & 0x7fff, (int)rs->len >> 15,
+			(int)ms->off, (int)ms->len & 0x7fff, (int)ms->len >> 15);
 	exit(1);
       }
     }
@@ -7092,9 +7095,23 @@ static void doit_str(const char *name, const uni_str_rng_t *rng, uint32_t nent,
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
-        multi_tab_lookup(mtab, i * 4, (const uint8_t **)&ms, 0);
+        uni_x_str_of(i, mtab);
     tt = tend();
     printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+}
+@
+
+<<Unicode property exports>>=
+const uni_str_ptr_t *uni_x_str_of(uint32_t cp, const uint32_t *tab);
+@
+
+<<Unicode property functions>>=
+const uni_str_ptr_t *uni_x_str_of(uint32_t cp, const uint32_t *tab)
+{
+  const uni_str_ptr_t *ret;
+  static const uni_str_ptr_t z = {0};
+  multi_tab_lookup(tab, cp * 4, (const uint8_t **)&ret, 0);
+  return ret ? ret : &z;
 }
 @
 
@@ -7104,7 +7121,168 @@ fputs("str(canon_decomp);\n"
       "str(dm);\n", tstf);
 @
 
-\subsection{Parsing the UCD - Composition}
+\subsection{Parsing the UCD -- DUCET Decompositions}
+
+An alternate decomposition table is that provided by
+\texttt{decomps.txt}.  No official algorithm uses this, but it can be
+handy for examining the DUCET.  Some DUCET mappings automatically
+decompose the character they are mapping.  These include canonical
+compositions, compatibility compositions, and ``other'' compositions
+defined by this text file.  The format of the file is similar to
+\texttt{UnicodeData.txt}: semicolon-separated fileds, the first of
+which is a single code point.  The second field is similar to the dt
+portion of the decomposition mapping field, but is separate from the
+dm-equivalent field.  The third field is the dm-equivalent field, but
+without dt information.  A special decomposition type, \texttt{sort},
+is used to indicate mappings which are only in this file.  Rather than
+create a new enumeration (or add \texttt{sort} to the dt enumeration),
+this is encoded as compat.  The way to distinguish real compat
+mappings from \texttt{sort} mappings is to look it up in the regular
+dt table.
+
+While the \texttt{sort} value is documented, decomps also adds
+\texttt{circlekata} and \texttt{smallnarrow}, which are tranlsated to
+\texttt{circle} and \texttt{narrow}, repsectively, for now.  No great
+effort will be put into solving this problem; I used this table when
+analyzing the DUCET, and see little other value for it.
+
+<<Initialize UCD files>>=
+decl_str(DUCET_dm);
+decl_enum(DUCET_dt, "None");
+@
+
+<<Parse UCD files>>=
+prop_DUCET_dt = add_prop("DUCET_dt");
+parsed_props[prop_DUCET_dt].def = parsed_props[prop_dt].def;
+/* copy enum decls from dt for lookup */
+enum_vals[prop_DUCET_dt] = enum_vals[prop_dt];
+enum_vals_len[prop_DUCET_dt] = enum_vals_len[prop_dt];
+open_f("decomps.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  char *dt_val;
+  split_line(lbuf);
+  if(num_fields != 3) /* e.g. comment lines */
+   continue;
+  low = high = strtol(fields[0], NULL, 16);
+  dt_val = fields[1];
+  if(*dt_val) {
+    if(*dt_val++ != '<') {
+      perror("decomps");
+      exit(1);
+    }
+    for(s = dt_val; *s && *s != '>'; s++);
+    if(*s != '>' || s[1]) {
+      perror("decomps");
+      exit(1);
+    }
+    *s = 0;
+    if(!strcmp(dt_val, "sort"))
+      dt_val = (char *)"compat";
+    else if(!strcmp(dt_val, "circlekata"))
+      dt_val[6] = 0;
+    else if(!strcmp(dt_val, "smallnarrow"))
+      dt_val += 5;
+  }
+  if(*dt_val)
+    add_enum(DUCET_dt, dt_val);
+  else
+    add_enum(DUCET_dt, "can");
+  add_str(DUCET_dm, fields[2]);
+}
+/* remove enum info so new enum not created */
+enum_vals[prop_DUCET_dt] = NULL;
+enum_vals_len[prop_DUCET_dt] = 0;
+@
+
+Unfortunately, some of the dm strings have multiple entries for one
+index.  Luckily, the dt values do not have the same problem.  To fix
+the dm strings, the result is sorted, and any duplicate indices are
+removed by merging the two entries, separated by a zero.  Nothing ever
+maps to zero, so there should be no problem distinguishing the
+entries.  No attempt is made to sort the entries; there are at most
+two anyway, so searching is no great effort.
+
+<<Parse UCD files>>=
+prop_t *prop_ddm = &parsed_props[prop_DUCET_dm];
+qsort(prop_ddm->str_arr, prop_ddm->len, sizeof(raw_cp_str_t), uni_cmp_cp);
+for(i = prop_ddm->len - 1; i > 0; i--) {
+  for(j = i; j > 0; j--)
+    if(prop_ddm->str_arr[j - 1].cp != prop_ddm->str_arr[i].cp)
+      break;
+  if(j == i)
+    continue;
+  low = j;
+  int len = 0;
+  for(j = low; j <= i; j++)
+    len += prop_ddm->str_arr[j].len + 1;
+  while(prop_ddm->max_strs < prop_ddm->strs_len + len)
+    resize(prop_ddm->strs, prop_ddm->max_strs *= 2);
+  for(j = low, len = 0; j <= i; j++) {
+    movebuf(prop_ddm->strs + prop_ddm->strs_len + len,
+            prop_ddm->strs + prop_ddm->str_arr[j].off,
+	    prop_ddm->str_arr[j].len);
+    len += prop_ddm->str_arr[j].len + 1;
+    prop_ddm->strs[prop_ddm->strs_len + len - 1] = 0;
+  }
+  len--;  /* strip final 0 */
+  prop_ddm->str_arr[low].off = prop_ddm->strs_len;
+  prop_ddm->str_arr[low].len = len;
+  prop_ddm->strs_len += len;
+  movebuf(prop_ddm->str_arr + low + 1, prop_ddm->str_arr + i + 1,
+          prop_ddm->len - i - 1);
+  prop_ddm->len -= i - low;
+  if(!(i = low))
+    break;
+}
+@
+
+To dump the tables, the generic routines can be relied upon.  However,
+there is not yet a generic routine to dump string tables.  In order to
+avoid stomping on the work done for the decomposition tables, the
+generic routine for strings needs to be called manually.
+
+<<Dump character information as C code>>=
+dump_str_tabs(prop_ddm, gen_h, tstf);
+@
+
+<<UCD parser local functions>>=
+static void dump_str_tabs(prop_t *prop, FILE *gen_h, FILE *tstf)
+{
+  uint32_t i;
+  char nbuf[64];
+  uni_str_arr_t *short_str;
+  inisize(short_str, prop->len);
+  dump_strs(prop, gen_h);
+  /* dump_strs "un-sorts" str_arr */
+  qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp);
+  sprintf(nbuf, "uni_%s_arr.gen.c", prop->name);
+  open_wf(rt, nbuf);
+  fprintf(rt, "#include \"uni_prop.h\"\n\n"
+              "const uni_str_arr_t uni_%s_arr[] = {\n\t", prop->name);
+  for(i = 0; i < prop->len; i++) {
+    short_str[i].cp = prop->str_arr[i].cp;
+    short_str[i].off = prop->str_arr[i].off;
+    short_str[i].len = prop->str_arr[i].len;
+    fprintf(rt, "{ 0x%04X, %d, %d}%s", (int)short_str[i].cp, (int)short_str[i].off,
+                                       (int)short_str[i].len,
+				       i < prop->len - 1 ? ",\n\t" : "\n};\n");
+  }
+  fclose(rt);
+  fprintf(gen_h, "extern const uni_str_arr_t uni_%s_arr[];\n"
+	         "#define uni_%s_arr_len %d /* %d lookups max */\n",
+	         prop->name, prop->name, i, lg2(i + 1));
+  uint32_t ml_len, *tmt = cp_val_to_multi((uni_cp_val_t *)short_str, i, &ml_len);
+  print_mtab(prop->name, tmt, gen_h);
+  free(tmt);
+  free(short_str);
+  /* for direct lookup */
+  fprintf(gen_h, "#define uni_%s_of(cp) uni_x_str_of(cp, uni_%s_mtab)\n",
+                 prop->name, prop->name);
+  fprintf(tstf, "str(%s);\n", prop->name);
+}
+@
+
+\subsection{Parsing the UCD -- Composition}
 
 As mentioned earlier, composition takes place on pairs.  The canonical
 composition of A and B is C if the plain dm value for C is A B, and dt
@@ -7145,17 +7323,17 @@ decl_str(cm);
 prop_cm = add_prop("canon_comp");
 prop_t *fce_prop = &parsed_props[add_prop("Comp_Ex")];
 prop_t *cm_prop = &parsed_props[prop_cm];
-for(i = 0; i < dm_prop->rng_len; i++) {
+for(i = 0; i < dm_prop->len; i++) {
   uint32_t str[2];
-  uint32_t cp = dm_prop->rng_str[i].cp; /* cp == C */
-  if(dm_prop->rng_str[i].len != 2 ||
-     uni_chrrng_dat8(cp, dt_prop->rng_dat8, dt_prop->rng_len, none_val) !=
+  uint32_t cp = dm_prop->str_arr[i].cp; /* cp == C */
+  if(dm_prop->str_arr[i].len != 2 ||
+     uni_chrrng_dat8(cp, dt_prop->rng_dat8, dt_prop->len, none_val) !=
          can_val ||
-     is_cp_chrrng(cp, fce_prop->rng, fce_prop->rng_len))
+     is_cp_chrrng(cp, fce_prop->rng, fce_prop->len))
     continue; /* skip if not canonical composition */
-  str[0] = dmf_prop->strs[dm_prop->rng_str[i].off + 1]; /* B */
+  str[0] = dmf_prop->strs[dm_prop->str_arr[i].off + 1]; /* B */
   str[1] = cp;
-  cp = dmf_prop->strs[dm_prop->rng_str[i].off]; /* A */
+  cp = dmf_prop->strs[dm_prop->str_arr[i].off]; /* A */
   /* just add; tables are merged later */
   add_str_rng(cm_prop, cp, cp, str, 2);
 }
@@ -7164,30 +7342,30 @@ add_str_rng(cm_prop, 0x1100, 0x1112, NULL, 0); /* L */
 for(i = 0xAC00; i <= 0xD7A3; i += 28) /* LV */
   add_str_rng(cm_prop, i, i, NULL, 0);
 /* merge B->C tables */
-qsort(cm_prop->rng_str, cm_prop->rng_len, sizeof(*cm_prop->rng_str), uni_cmp_cp);
-for(i = cm_prop->rng_len - 1; i > 0; i--) {
+qsort(cm_prop->str_arr, cm_prop->len, sizeof(*cm_prop->str_arr), uni_cmp_cp);
+for(i = cm_prop->len - 1; i > 0; i--) {
   int off, k;
   j = i;
-  while(j > 0 && cm_prop->rng_str[i].cp == cm_prop->rng_str[j - 1].cp)
+  while(j > 0 && cm_prop->str_arr[i].cp == cm_prop->str_arr[j - 1].cp)
     j--;
   if(j == i)
     continue;
   while(cm_prop->strs_len + 2 * (i - j + 1) > cm_prop->max_strs)
     resize(cm_prop->strs, (cm_prop->max_strs *= 2));
   for(k = j, off = 0; k <= i; k++) {
-    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->rng_str[k].off];
-    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->rng_str[k].off + 1];
+    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->str_arr[k].off];
+    cm_prop->strs[cm_prop->strs_len + off++] = cm_prop->strs[cm_prop->str_arr[k].off + 1];
   }
-  cm_prop->rng_str[j].off = cm_prop->strs_len;
-  cm_prop->rng_str[j].len = 2 * (i - j + 1);
+  cm_prop->str_arr[j].off = cm_prop->strs_len;
+  cm_prop->str_arr[j].len = 2 * (i - j + 1);
   cm_prop->strs_len += 2 * (i - j + 1);
   /* sort B->C table by B */
-  qsort(cm_prop->strs + cm_prop->rng_str[j].off, (i - j) + 1,
+  qsort(cm_prop->strs + cm_prop->str_arr[j].off, (i - j) + 1,
         2 * sizeof(*cm_prop->strs), uni_cmp_cp);
   /* remove excess entries */
-  movebuf(cm_prop->rng_str + j + 1, cm_prop->rng_str + i + 1,
-          cm_prop->rng_len - i - 1);
-  cm_prop->rng_len -= i - j;
+  movebuf(cm_prop->str_arr + j + 1, cm_prop->str_arr + i + 1,
+          cm_prop->len - i - 1);
+  cm_prop->len -= i - j;
   if(!(i = j))
     break;
 }
@@ -7219,39 +7397,38 @@ that's better than writing a dumper function just for this table.
 
 <<Dump character information as C code>>=
 int max_len = 0;
-for(i = 0; i < cm_prop->rng_len; i++)
-  if(cm_prop->rng_str[i].len > max_len)
-    max_len = cm_prop->rng_str[i].len;
+for(i = 0; i < cm_prop->len; i++)
+  if(cm_prop->str_arr[i].len > max_len)
+    max_len = cm_prop->str_arr[i].len;
 max_len /= 2;
 fprintf(gen_h, "/* %d max B->C len (%d lookups) */\n", max_len, lg2(max_len + 1));
 dump_strs(cm_prop, gen_h);
 @
 
-The A-indexed range table can now be sorted, converted to a
+The A-indexed plain table can now be sorted, converted to a
 multi-level table, and printed.  The [[dec]] table built above is
 reused as temporary storage to convert to the smaller format for the
 multi-level table. It is guaranteed to be large enough, because every
 composition entry corresponds to at least one decomposition entry.
 
 <<Dump character information as C code>>=
-qsort(cm_prop->rng_str, cm_prop->rng_len, sizeof(*cm_prop->rng_str), uni_cmp_cp);
-open_wf(cm, "uni_canon_comp_rng.gen.c");
+qsort(cm_prop->str_arr, cm_prop->len, sizeof(*cm_prop->str_arr), uni_cmp_cp);
+open_wf(cm, "uni_canon_comp_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
-      "const uni_str_rng_t uni_canon_comp_rng[] = {\n\t", cm);
-for(i = 0; i < cm_prop->rng_len; i++) {
-  raw_cp_str_t *cur = &cm_prop->rng_str[i];
+      "const uni_str_arr_t uni_canon_comp_arr[] = {\n\t", cm);
+for(i = 0; i < cm_prop->len; i++) {
+  raw_cp_str_t *cur = &cm_prop->str_arr[i];
   dec[i].cp = cur->cp;
   dec[i].off = cur->off;
   dec[i].len = cur->len;
-  dec[i].flags = 0;
-  fprintf(cm, "{ 0x%X, %d, %d }%s", (int)cur->cp, (int)cur->off, (int)cur->len,
-				    i < cm_prop->rng_len - 1 ? ",\n\t" : "\n};\n");
+  fprintf(cm, "{ 0x%04X, %d, %d }%s", (int)cur->cp, (int)cur->off, (int)cur->len,
+				      i < cm_prop->len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(cm);
-fprintf(gen_h, "extern const uni_str_rng_t uni_canon_comp_rng[];\n"
-	       "#define uni_canon_comp_rng_len %d /* %d lookups max */\n",
+fprintf(gen_h, "extern const uni_str_arr_t uni_canon_comp_arr[];\n"
+	       "#define uni_canon_comp_arr_len %d /* %d lookups max */\n",
 	       i, lg2(i + 1));
-cm_prop->mt = cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->rng_len, &ml_len);
+cm_prop->mt = cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->len, &ml_len);
 print_mtab("canon_comp", cm_prop->mt, gen_h);
 fputs("str(canon_comp);\n", tstf);
 @
@@ -7302,7 +7479,7 @@ uint32_t uni_lookup_compent(uint32_t cp, const uint32_t *tab, uint32_t len)
 }
 @
 
-\subsection{Parsing the UCD - Case Conversion}
+\subsection{Parsing the UCD -- Case Conversion}
 
 The next strings are the various case conversion tables.
 [[UnicodeData.txt]] contains three of them: the simple case mappings
@@ -7405,7 +7582,7 @@ open_f("SpecialCasing.txt");
     int32_t num; \
     uint8_t den; \
     prop_t *sc = &parsed_props[prop_s##n]; \
-    uni_chrrng_val(low, sc->rng_dat32, sc->rng_len, &num, &den); \
+    uni_chrrng_val(low, sc->rng_dat32, sc->len, &num, &den); \
     if(!den || num != str[1]) \
       add_str_rng(&parsed_props[prop_##n], low, high, str, len + 1); \
   } else \
@@ -7466,27 +7643,27 @@ fclose(f);
 <<Parse UCD files>>=
 #define postproc_sc(n) do { \
   prop_t *prop = &parsed_props[prop_##n]; \
-  qsort(prop->rng_str, prop->rng_len, sizeof(*prop->rng_str), uni_cmp_cp); \
+  qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp); \
   /* pass 1: merge */ \
-  for(i = 1; i < prop->rng_len; i++) { \
-    raw_cp_str_t *prev = &prop->rng_str[i - 1], *cur = &prop->rng_str[i]; \
+  for(i = 1; i < prop->len; i++) { \
+    raw_cp_str_t *prev = &prop->str_arr[i - 1], *cur = &prop->str_arr[i]; \
     if(cur->cp == prev->cp) { \
       uint32_t newstr[cur->len + prev->len]; \
       cpybuf(newstr, prop->strs + prev->off, prev->len); \
       cpybuf(newstr + prev->len, prop->strs + cur->off, cur->len); \
       prev->cp = 0; \
       add_str_rng(prop, cur->cp, cur->cp, newstr, cur->len + prev->len); \
-      cur->off = prop->rng_str[prop->rng_len - 1].off; \
+      cur->off = prop->str_arr[prop->len - 1].off; \
       cur->len += prev->len; \
-      prop->rng_len--; \
+      prop->len--; \
     } \
   } \
   /* pass 2: remove merged */ \
   /* doing it one at a time is inefficient, but simple and good enough */ \
-  for(i = 0; i < prop->rng_len; i++) \
-    if(!prop->rng_str[i].cp) { \
-      movebuf(&prop->rng_str[i], &prop->rng_str[i + 1], prop->rng_len - i); \
-      prop->rng_len--; \
+  for(i = 0; i < prop->len; i++) \
+    if(!prop->str_arr[i].cp) { \
+      movebuf(&prop->str_arr[i], &prop->str_arr[i + 1], prop->len - i); \
+      prop->len--; \
       i--; \
     } \
 } while(0)
@@ -7501,44 +7678,6 @@ btricks.h \
 
 <<Additional parse-ucd includes>>=
 #include "btricks.h"
-@
-
-<<UCD parser local functions>>=
-static void dump_str_tabs(prop_t *prop, FILE *gen_h, FILE *tstf)
-{
-  uint32_t i;
-  char nbuf[64];
-  uni_str_rng_t *short_str;
-  inisize(short_str, prop->rng_len);
-  dump_strs(prop, gen_h);
-  /* dump_strs "un-sorts" range table */
-  qsort(prop->rng_str, prop->rng_len, sizeof(*prop->rng_str), uni_cmp_cp);
-  sprintf(nbuf, "uni_%s_rng.gen.c", prop->name);
-  open_wf(rt, nbuf);
-  fprintf(rt, "#include \"uni_prop.h\"\n\n"
-              "const uni_str_rng_t uni_%s_rng[] = {\n\t", prop->name);
-  for(i = 0; i < prop->rng_len; i++) {
-    short_str[i].cp = prop->rng_str[i].cp;
-    short_str[i].off = prop->rng_str[i].off;
-    short_str[i].len = prop->rng_str[i].len;
-    short_str[i].flags = prop->rng_str[i].flags;
-    fprintf(rt, "{ 0x%X, %d, %d}%s", (int)short_str[i].cp, (int)short_str[i].off,
-                                     (int)short_str[i].len,
-				     i < prop->rng_len - 1 ? ",\n\t" : "\n};\n");
-  }
-  fclose(rt);
-  fprintf(gen_h, "extern const uni_str_rng_t uni_%s_rng[];\n"
-	         "#define uni_%s_rng_len %d /* %d lookups max */\n",
-	         prop->name, prop->name, i, lg2(i + 1));
-  uint32_t ml_len, *tmt = cp_val_to_multi((uni_cp_val_t *)short_str, i, &ml_len);
-  print_mtab(prop->name, tmt, gen_h);
-  free(tmt);
-  free(short_str);
-  /* for direct lookup */
-  fprintf(gen_h, "#define uni_%s_of(cp) uni_x_str_of(cp, uni_%s_mtab)\n",
-                 prop->name, prop->name);
-  fprintf(tstf, "str(%s);\n", prop->name);
-}
 @
 
 <<Dump character information as C code>>=
@@ -7601,7 +7740,7 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
     ret = NULL;
     return *(uint32_t *)mr >> 8;
   }
-  uni_str_rng_val_t *v = (void *)mr;
+  uni_str_ptr_t *v = (void *)mr;
   const uint32_t *str = strs + v->off;
   if(!(*str & ~UNI_SC_FL_LEN_MASK) && v->len == (*str & UNI_SC_FL_LEN_MASK) + 1) {
     /* no conditions */
@@ -8262,15 +8401,15 @@ succeeded.  If it ever fails, the composition code will need to be
 rewritten to support resizable buffers.
 
 <<Parse UCD files>>=
-for(i = 0; i < cm_prop->rng_len; i++) {
-  const uint32_t *bctab = cm_prop->strs + cm_prop->rng_str[i].off;
-  int len1 = uni_utf8_enclen(cm_prop->rng_str[i].cp);
-  for(j = 0; j < cm_prop->rng_str[i].len; j += 2) {
+for(i = 0; i < cm_prop->len; i++) {
+  const uint32_t *bctab = cm_prop->strs + cm_prop->str_arr[i].off;
+  int len1 = uni_utf8_enclen(cm_prop->str_arr[i].cp);
+  for(j = 0; j < cm_prop->str_arr[i].len; j += 2) {
     int len2 = uni_utf8_enclen(bctab[j]);
     int clen = uni_utf8_enclen(bctab[j + 1]);
     if(clen > len1 + len2) {
       fprintf(stderr, "Compose UTF-8 overflow: %04X(%d) + %04X(%d) < %04X(%d)\n",
-                      (int)cm_prop->rng_str[i].cp, len1, (int)bctab[j], len2,
+                      (int)cm_prop->str_arr[i].cp, len1, (int)bctab[j], len2,
 		      (int)bctab[j + 1], clen);
       exit(1);
     }
@@ -8791,7 +8930,7 @@ if(uni_NFC32(obuf, 1, &obptr, -1, &l1) != 1 || obuf[0] != i ||
 }
 @
 
-\subsection{Parsing the UCD - Others}
+\subsection{Parsing the UCD -- Others}
 
 [[BidiMirroring.txt]] contains the last officially supported string
 property.
@@ -9016,16 +9155,16 @@ static void str_to_enum(prop_t *p, const char *def)
   merge_strs(p);
   p->def = def ? ~0 : 0;
   inisize(val_aliases[pnum], max_val_aliases[pnum] = 5);
-  inisize(p->rng_dat8, p->rng_len);
-  for(i = 0; i < p->rng_len; i++) {
-    if(p->rng_str[i].off == poff && p->rng_str[i].len == plen) {
-      p->rng_dat8[i].low = p->rng_dat8[i].high = p->rng_str[i].cp;
+  inisize(p->rng_dat8, p->len);
+  for(i = 0; i < p->len; i++) {
+    if(p->str_arr[i].off == poff && p->str_arr[i].len == plen) {
+      p->rng_dat8[i].low = p->rng_dat8[i].high = p->str_arr[i].cp;
       p->rng_dat8[i].dat = seq;
       continue;
     }
     seq++;
-    poff = p->rng_str[i].off;
-    plen = p->rng_str[i].len;
+    poff = p->str_arr[i].off;
+    plen = p->str_arr[i].len;
     if(num_val_aliases[pnum] == max_val_aliases[pnum])
       resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
     {
@@ -9064,8 +9203,8 @@ static void str_to_enum(prop_t *p, const char *def)
         cmp_valueof);
   free(p->strs);
   p->strs = NULL;
-  free(p->rng_str);
-  p->rng_str = NULL;
+  free(p->str_arr);
+  p->str_arr = NULL;
 }
 @
 
@@ -9094,7 +9233,7 @@ if((f = fopen("xidmodifications.txt", "r")) ||
 }
 @
 
-\subsection{Parsing the UCD - DUCET}
+\subsection{Parsing the UCD -- DUCET}
 
 The most complex optional string value is derived from the Default
 Unicode Collation Element Table
@@ -9193,30 +9332,10 @@ static uint32_t parse_ducet(const char *fname, int propn)
 }
 @
 
-The raw DUCET data is actually of limited use.  Only one optional
-poorly defined pseudo-property depends on it (``DUCET primary values''
---- even the property name is undefined).  The Unicode Collation
-Algorithm is defined in terms of creating string sort keys from the
-raw data as well, but in order to support modifications due to locale,
-even that use is probably better served by a different representation.
-However, the raw data is provided anyway in case there is a use I have
-yet to envision.
-
 The raw data in the Unicode 6.2 DUCET comes to 126,219 words, of which
 6,212 can be removed due to redundancy.  This is too much data for the
-16-bit offset used by [[uni_str_rng_t]] type, so some adjustment needs
-to be made.  Before making adjustments, though, the original raw data
-is copied so that it can be converted into a more useful format later
-without having to deal with any compression techniques.
-
-<<Post-process DUCET>>=
-uint32_t *strs;
-raw_cp_str_t *ents;
-inisize(strs, prop->strs_len);
-inisize(ents, prop->rng_len);
-cpybuf(strs, prop->strs, prop->strs_len);
-cpybuf(ents, prop->rng_str, prop->rng_len);
-@
+16-bit offset used by [[uni_str_arr_t]] type, so some adjustment needs
+to be made.
 
 A little space can be saved while storing this by making some strings
 identical when they would normally not be, thereby increasing the
@@ -9227,10 +9346,10 @@ words.
 
 <<Post-process DUCET>>=
 <<Prepare for DUCET post-processing>>
-for(i = 0; i < prop->rng_len; i++) {
-  uint32_t len = prop->rng_str[i].len;
-  uint32_t *str = prop->strs + prop->rng_str[i].off;
-  uint32_t cp = prop->rng_str[i].cp;
+for(i = 0; i < prop->len; i++) {
+  uint32_t len = prop->str_arr[i].len;
+  uint32_t *str = prop->strs + prop->str_arr[i].off;
+  uint32_t cp = prop->str_arr[i].cp;
   <<Reduce DUCET entry>>
 }
 @
@@ -9253,25 +9372,82 @@ characters.  This brings the total down to 117,631 words, with 11,800
 removed due to redundancy.  In other words, it saves an additional
 7,204 words.
 
+This requires decomposition lookup during DUCET lookup.  However, the
+UCA algorithm specifies NFD form for its input strings; in that case,
+the decomposition will already be done, and no extra work is needed in
+the lookup function.  However, a special case (FCD; see below) allows
+for unnormalized data inputs, where this lookup would be necessary.
+
+Note that the standard specifies a much more liberal decomposition
+policy.  It uses compatibility decomposition instead of canonical
+decomposition, and replaces level 3 with a translation of the dt
+property value.  The amount of additional work at run-time isn't that
+great, and it might reduce the table a lot, but it affects many
+characterrs even after NFD decomposition, so for now, entries which
+use this technique are not suppressed.
+
+% tertiary weight table (note: can is impossible):
+%  none     def 02
+%  wide     def 03
+%  compat   def 04
+%  font     def 05
+%  circle   def 06
+%  can/none uc  08
+%  wide     uc  09
+%  compat   uc  0A
+%  font     uc  0B
+%  circle   uc  0C
+%  small    sh  0D
+%  none     nh  0E
+%  small    sk  0F
+%  narrow   snk 10
+%  none     nk  11
+%  narrow   nkh 12
+%  circle   ck  13
+%  super    def 14
+%  sub      def 15
+%  vertical def 16
+%  initial  def 17
+%  medial   def 18
+%  final    def 19
+%  isolated def 1A
+%  noBreak  def 1B
+%  square   def 1C
+%  square/super/sub uc 1D
+%  fraction def 1E
+%  compat   --  1F
+%
+% uc == Uppercase, sh == small hira, nh == non-small hira,
+% sk == small kata, nk == non-small kata, snk == small narrow kata,
+% nkh == narrow katakana/hangul, ck == circled kata
+% -- == def for last char in decomp; also used for disambiguation
+
+% l4 weight:
+%   l3-ignorable and Cc, Cf, or "variation selector":  0
+%   otherwise:  cp (but what about contractions & expansions?)
+% however, l4=0 weight rule is violated on 12 entries:
+%  0600 0601 0602 0603 0604 0605 06DD 2061 2062 2063 2064 110BD
+%   all of these are Cc or Cf, but have l4 == cp
+
 <<Prepare for reading DUCET>>=
 /* sort dmf for decomp lookup */
-qsort(dmf_prop->rng_str, dmf_prop->rng_len, sizeof(*dmf_prop->rng_str), cmp_cp_flg);
+qsort(dmf_prop->str_arr, dmf_prop->len, sizeof(*dmf_prop->str_arr), cmp_cp_flg);
 @
 
 <<Prepare for DUCET post-processing>>=
 prop_t *dmf_prop = &parsed_props[add_prop("dm_full")];
 /* sort ducet for component lookup */
-qsort(prop->rng_str, prop->rng_len, sizeof(*prop->rng_str), uni_cmp_cp);
+qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp);
 @
 
 <<Reduce DUCET entry>>=
 /* if it's decomposed first, then store that case as 0-len string */
 if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
-  raw_cp_str_t *dec = bsearch(&cp, dmf_prop->rng_str,
-                              dmf_prop->rng_len,
+  raw_cp_str_t *dec = bsearch(&cp, dmf_prop->str_arr,
+                              dmf_prop->len,
 			      sizeof(raw_cp_str_t), uni_cmp_cp);
   if(dec) {
-    while(dec->flags && dec > dmf_prop->rng_str && dec->cp == cp)
+    while(dec->flags && dec > dmf_prop->str_arr && dec->cp == cp)
       dec--; /* select canonical full decomp only */
     if(dec->flags || dec->cp != cp)
       dec = NULL;
@@ -9282,16 +9458,16 @@ if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
       uint32_t ocp = str[3 + 4 * j];
       if(ocp != dmf_prop->strs[dec->off + j])
         break;
-      cd = bsearch(&ocp, prop->rng_str,
-	           prop->rng_len, sizeof(raw_cp_str_t),
+      cd = bsearch(&ocp, prop->str_arr,
+	           prop->len, sizeof(raw_cp_str_t),
 		   uni_cmp_cp);
       if(!cd)
         break;
       /* scan for single-element entry */
       /* some may have ocp as 1st char of multi-char entry */
-      while(cd->len != 4 && cd > prop->rng_str && cd[-1].cp == ocp)
+      while(cd->len != 4 && cd > prop->str_arr && cd[-1].cp == ocp)
         cd--;
-      while(cd->len != 4 && cd < prop->rng_str + prop->rng_len - 1 &&
+      while(cd->len != 4 && cd < prop->str_arr + prop->len - 1 &&
             cd[1].cp == ocp)
 	cd++;
       if(cd->len != 4 ||
@@ -9300,7 +9476,7 @@ if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
 	break;
     }
     if(j == dec->len)
-      prop->rng_str[i].len = 0;
+      prop->str_arr[i].len = 0;
   }
 }
 /* 6.2: 105831 words (11800 saved) */
@@ -9309,36 +9485,13 @@ if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
 
 Similarly, some multi-character collation elements are the canonical
 decomposition of a single character, and the sort key is the sort key
-for that character.  That case is also encoded by a zero-length key,
-but retains the extra collation element characters as its string. 
-This brings the total down to 117,297 words, with 11,881 removed due
-to redundancy.  In other words, it saves an additional 415 words.
-
-<<Prepare for DUCET post-processing>>=
-prop_t *cm_prop = &parsed_props[add_prop("canon_comp")];
-@
-
-<<Reduce DUCET entry>>=
-if(len >=5 && len <= 6) { /* support 2 or 3 chars */
-  raw_cp_str_t *btab = bsearch(&cp, cm_prop->rng_str, cm_prop->rng_len,
-                               sizeof(*cm_prop->rng_str), uni_cmp_cp);
-  if(btab && btab->len) { /* ignore missing and hangul */
-    cp = uni_lookup_compent(str[4], cm_prop->strs + btab->off, btab->len);
-    if(len == 6) {
-      btab = bsearch(&cp, cm_prop->rng_str, cm_prop->rng_len,
-                     sizeof(*cm_prop->rng_str), uni_cmp_cp);
-      if(btab && btab->len)
-        cp = uni_lookup_compent(str[5], cm_prop->strs + btab->off, btab->len);
-    }
-    if(cp == str[3]) {
-      prop->rng_str[i].len -= 4;
-      prop->rng_str[i].off += 4;
-    }
-  }
-}
-/* 6.2: 105416 words (11881 saved) */
-/* 6.2-CLDR: 104937 words (12688 saved) */
-@
+for that character.  That case could also be encoded by a zero-length
+key, but retaining the extra collation element characters as its
+string.  However, not much is saved (about 415 words, although
+surprisingly many more for the CLDR table), so this extra lookup
+complication is not imposed.  Unlike the decomposition entries above,
+the composition entries are legitimate multi-character collation
+elements, even after NFD transformation.
 
 While there is a pattern to most of the rest of the DUCET, it is
 difficult to encode, and encoding would make lookup much more
@@ -9419,28 +9572,28 @@ space is removed.  The result is 33,723 words, with 3,308 words
 removed due to redundancy.  This saves an additional 75,416 words.
 
 <<Post-process DUCET>>=
-for(i = 0; i < prop->rng_len; i++) {
+for(i = 0; i < prop->len; i++) {
   int k;
-  uint32_t len = prop->rng_str[i].len;
+  uint32_t len = prop->str_arr[i].len;
   uint32_t extra[3], extra_len = len % 4;
-  uint32_t *str = prop->strs + prop->rng_str[i].off;
+  uint32_t *str = prop->strs + prop->str_arr[i].off;
   for(j = 0; j < extra_len; j++)
     extra[j] = str[len - extra_len + j];
   for(j = 0, k = extra_len; j + 3 < len; j += 4, k++) {
     str[k] = (str[j] << 16) + (str[j + 1] << 7) + (str[j + 2] << 2);
     if(str[j + 3] == 1)
-      str[k] |= 1;
+      str[k] |= prop->str_arr[i].cp != 0; /* special case: 0 is 0 */
     else if(str[j + 3]) {
       str[k] |= 2;
       str[++k] = str[j + 3] << 2;
     }
   }
-  prop->rng_str[i].len = k;
+  prop->str_arr[i].len = k;
   for(k = 0; j < len; j++, k++)
     str[k] = (extra[k] << 2) | 3;
 }
-/* 6.2: 30415 words (3308 saved) */
-/* 6.2-CLDR: 29489 words (3157 saved) */
+/* 6.2: 30639 words (3252 saved) */
+/* 6.2-CLDR: 20489 words (3157 saved) */
 @
 
 The final problem to deal with is the possibility of multiple sort
@@ -9453,65 +9606,74 @@ few first index characters.  The encoding allows limited binary
 searching, as well: the nearest index extension can be located by
 checking the lower two bits for 3.
 
-The only possible conflicts are the zero-length canonical composition
-and decomposition entries.  Two adjacent entries with zero-length keys
-look like one long index string extension.  The entry with no index
-extension is always first, so detecting zero-length canonical
-decomposition entries is easy: if the first character is an index
-extension or the end of the string, then the key is blank. Similarly,
-if the very last index extension has a blank key, it is obvious.
-However, blank keys in the middle need an explicit separator between
-the consecutive index extensions.  A zero can never be part of an
-index extension, so a blank key is indicated by adding an index
-character of zero.
+The raw DUCET data is actually of limited use.  Only one optional
+poorly defined pseudo-property depends on it (``DUCET primary values''
+--- even the property name is undefined).  The Unicode Collation
+Algorithm is defined in terms of creating string sort keys from the
+raw data as well, but in order to support modifications due to locale,
+even that use is probably better served by a different representation.
+Given the added complexity of run-time reordering of the DUCET, a
+simpler, ``raw'' DUCET UCA implementation is provided to demonstrate
+the use of the property.  However, merging the keys may make it
+difficult to reorganize the table.  For this reason, the original data
+is copied first.  Only the entry pointers are copied:  the strings
+cannot be merged in-place anyway (since they might overlap), so
+merging always appends new strings and leaves the old ones alone.
+
+<<Post-process DUCET>>=
+raw_cp_str_t *raw_ents;
+uint32_t raw_ents_size;
+inisize(raw_ents, raw_ents_size = prop->len);
+cpybuf(raw_ents, prop->str_arr, raw_ents_size);
+@
+
+The only potential conflicts when merging are the zero-length canonical
+decomposition entries.  The entry with no index extension is always
+first, so detecting zero-length canonical decomposition entries is
+easy: if the first character is an index extension or the end of the
+string, then the key is blank.  A sanity check is made to ensure that
+there is always a key for the zero-length extension case.
 
 <<Post-process DUCET>>=
 ducet_strs = prop->strs; /* for sort & abbrev */
-for(i = prop->rng_len - 1; i > 0; i--) {
-  uint32_t cp = prop->rng_str[i].cp;
-  for(j = i; j > 0 && prop->rng_str[j - 1].cp == cp; j--);
+for(i = prop->len - 1; i > 0; i--) {
+  uint32_t cp = prop->str_arr[i].cp;
+  for(j = i; j > 0 && prop->str_arr[j - 1].cp == cp; j--);
   if(i == j)
     continue;
   /* sort by index extension */
   low = j;
-  qsort(prop->rng_str + low, i - low + 1, sizeof(*prop->rng_str), cmp_ducet_idx);
-  if(prop->rng_str[low].len && (ducet_strs[prop->rng_str[low].off] & 3) == 3) {
+  qsort(prop->str_arr + low, i - low + 1, sizeof(*prop->str_arr), cmp_ducet_idx);
+  if(prop->str_arr[low].len && (ducet_strs[prop->str_arr[low].off] & 3) == 3) {
     fprintf(stderr, "Error: no DUCET entry for %04X\n", (int)cp);
     exit(1);
   }
   uint32_t len = 0;
-  for(j = low; j <= i; j++) {
-    len += prop->rng_str[j].len;
-    if(j > low && j < i && /* in the middle, */
-       /* if last char is index char, key is blank */
-       (ducet_strs[prop->rng_str[j].off + prop->rng_str[j].len - 1] & 3) == 3)
-      len++; /* so a zero needs to be added */
-  }
+  for(j = low; j <= i; j++)
+    len += prop->str_arr[j].len;
   while(prop->max_strs < prop->strs_len + len) {
     resize(prop->strs, (prop->max_strs *= 2));
     ducet_strs = prop->strs; /* for sort & abbrev */
   }
   cpybuf(ducet_strs + prop->strs_len,
-         ducet_strs + prop->rng_str[low].off,
-	 prop->rng_str[low].len);
-  prop->rng_str[low].off = prop->strs_len;
-  prop->strs_len += prop->rng_str[low].len;
-  prop->rng_str[low].len = len;
+         ducet_strs + prop->str_arr[low].off,
+	 prop->str_arr[low].len);
+  prop->str_arr[low].off = prop->strs_len;
+  prop->strs_len += prop->str_arr[low].len;
+  prop->str_arr[low].len = len;
   for(j = low + 1; j <= i; j++) {
-    uint32_t *str = ducet_strs + prop->rng_str[j].off;
-    len = prop->rng_str[j].len;
+    uint32_t *str = ducet_strs + prop->str_arr[j].off;
+    len = prop->str_arr[j].len;
     cpybuf(ducet_strs + prop->strs_len, str, len);
     prop->strs_len += len;
-    if(j < i && (str[len - 1] & 3) == 3)
-      ducet_strs[prop->strs_len++] = 3; /* zero index ext. separator */
   }
-  movebuf(prop->rng_str + low + 1, prop->rng_str + i + 1,
-          prop->rng_len - i - 1);
-  prop->rng_len -= i - low;
+  movebuf(prop->str_arr + low + 1, prop->str_arr + i + 1,
+          prop->len - i - 1);
+  prop->len -= i - low;
   if(!(i = low))
     break;
 }
-/* 6.2: 30498 words (3250 saved) */
+/* 6.2: 30641 words (3250 saved) */
 /* 6.2-CLDR: 29491 words (3155 saved) */
 @
 
@@ -9540,15 +9702,14 @@ static int cmp_ducet_idx(const void *a, const void *b)
 }
 @
 
-Unsurprisingly, adding a few zeroes here and there increases the size
-a bit, but not much (25 words).  Combining entries also reduces
-redundancy a bit (gaining 58 words).  Thus the original 126,219 words
-are reduced to 30,498 words.  This allows use of 16-bit offsets, as
-supported by the [[uni_str_rng_t]] type.  Note that this is just the
-string table; the lookup tables add additional overhead (about 200kb
-for the code point table and 100kb for the multi-level table).
-Finally, the raw DUCET is ready to be dumped.  The collected default
-variable top is dumped to the header as well.
+Unsurprisingly, combining entries reduces redundancy a bit (gaining 2
+words).  Thus the original 126,219 words are reduced to 30,641 words.
+This allows the use of 16-bit offsets, as supported by the
+[[uni_str_arr_t]] type.  Note that this is just the string table; the
+lookup tables add additional overhead (about 200kb for the code point
+table and 100kb for the multi-level table). Finally, the raw DUCET is
+ready to be dumped.  The collected default variable top is dumped to
+the header as well.
 
 <<Dump character information as C code>>=
 fprintf(gen_h, "#define uni_DUCET_var_top %d\n", (int)ducet_vartop);
@@ -9557,10 +9718,8 @@ fprintf(gen_h, "#define uni_DUCET_CLDR_var_top %d\n", (int)cldr_vartop);
 dump_str_tabs(&parsed_props[prop_DUCET_CLDR], gen_h, tstf);
 @
 
-<<Parse UCD files>>=
-/* force addition to prop table */
-parsed_props[prop_DUCET].mt = (uint32_t *)~0;
-parsed_props[prop_DUCET_CLDR].mt = (uint32_t *)~0;
+<<Post-process DUCET>>=
+prop->mt = (uint32_t *)~0; /* force addition to prop table */
 @
 
 In order to compensate for some of the compression above, a special
@@ -9807,15 +9966,37 @@ enough and yet small enough (12 ranges/300 bytes) that conversion
 would not save much, but the blk checks are just single ranges each
 (and the blk table is much larger, at 220 ranges/8032 bytes).  This
 assumes that the ranges will never change in the future, which is
-actually a pretty safe bet.
+actually a pretty safe bet.%
+\footnote{The standard does not specify how to deal with Hangul
+syllables.  It provides several recommendations, but none of the
+recommendations come with a usable weight range.  If I knew the DUCET
+better, I could probably pick some, but for now they are just treated
+as regular synthetic entries.  That's too bad, because the Simple and
+Terminator methods really are pretty simple, but I have no idea what to
+choose for the non-zero weights.  The Data method is impractical for a
+generic library, as it adjusts weight based on the data to collate.}
+
+The UCA standard gives no hints on how to set the secondary value;
+presumably any non-zero number will work, because the primaries will
+always differ.  The most common value (0020) is chosen for this.  The
+tertiary value has a table, but since no decomposition is involved,
+and all special cases are already covered in the DUCET, all characters
+get the default (0002) assigned to them.
+
+For the fourth level, the UCA standard states that any non-zero value
+should be used on the first key element, and zero on the second.
+However, actual DUCET values which refer to synthesized values (via
+decomposition) show a non-zero level four on the second key element as
+well, and in fact both use the code point.  For consistency, that is
+what is generated.
 
 <<DUCET lookup state members>>=
-uni_str_rng_val_t v;
+uni_str_ptr_t v;
 uint32_t c;
 @
 
 <<Look up in DUCET given no state>>=
-const uni_str_rng_val_t *v;
+const uni_str_ptr_t *v;
 multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
 if(v && (v->off || v->len)) {
   st->v = *v;
@@ -9827,7 +10008,7 @@ if(v && (v->off || v->len)) {
   if(is_uni_UIdeo(c)) {
 #if 0
     uni_blk_t blk = uni_blk_of(c);
-    if(blk == u_blk_CJK || blk == u_blk_CJK_Compat)
+    if(blk == U_blk_CJK || blk == U_blk_CJK_Compat)
 #else
     if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3300 && c <= 0x33FF))
 #endif
@@ -9836,7 +10017,7 @@ if(v && (v->off || v->len)) {
       *lev123 += 0xFB80 << 16;
   } else
     *lev123 += 0xFBC0 << 16;
-  *lev4 = c;
+  *lev4 = c; /* actual value does not matter, as long as it's non-0 */
   <<Return more than one DUCET value>>
 }
 @
@@ -10209,9 +10390,6 @@ const uint32_t *str = st->strs + st->v.off;
 for(i = 0; i < st->curoff; i++)
   if((str[i] & 3) != 3)
     break;
-if(i == st->curoff) {
-  <<Return blank multi-character index DUCET result>>
-}
 <<Return non-blank DUCET result>>
 @
 
@@ -10226,7 +10404,7 @@ uint32_t multi_ret_len;
 @
 
 <<Return blank single-character index DUCET result>>=
-const uni_str_rng_val_t *v;
+const uni_str_ptr_t *v;
 multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
 st->multi_ret = uni_dm_full_strs + v->off;
 st->multi_ret_len = v->len;
@@ -10277,25 +10455,6 @@ case DUCET_lookup_compret:
   {
     <<Return DUCET entry for next decomp character>>
   }
-@
-
-The multi-character index entries with blank keys denote canonical
-composition.  This may require more than one composition lookup.  It
-always returns exactly one value.
-
-<<Return blank multi-character index DUCET result>>=
-int16_t coff;
-uint8_t clen;
-uni_find_canon_comp(c, &coff, &clen);
-c = uni_lookup_compent(*str >> 2, uni_canon_comp_strs + coff, clen);
-if(st->curoff > 1 && str[1] != 3 && (str[1] & 3) == 3) {
-  uni_find_canon_comp(c, &coff, &clen);
-  c = uni_lookup_compent(str[1] >> 2, uni_canon_comp_strs + coff, clen);
-}
-const uni_str_rng_val_t *v;
-<<Look up and return DUCET value for [[c]]>>
-st->state = DUCET_lookup_start;
-<<Return one DUCET value>>
 @
 
 The non-blank result only requires work if there is more than one key
@@ -10583,11 +10742,56 @@ if(last_ffff >= 0 && last_ffff == nres - 2 &&
 
 <<FIXME>>=
   Unimplemented CLDR options:
-    caseLevel=on/off: add level "2.5" "case level"
+    caseLevel=on/off: add level "2.5" "case level" (even if 2 not present)
+      l2.5 == LOWEST ? 1 : upper_first ? (UPPER ? 2 : MIXED ? 3 : 4) :
+                                         (UPPER ? 4 : MIXED ? 3 : 2)
+         or 0 if sorting by l1 and l1 = 0
+	 or 0 if sorting by l2+ and l2 = 0
+      for DUCET_CLDR members:
+        LOWEST if U+FFFE
+        UPPER if l3 == 08-0C, 0E, 11-12, 1D
+	UNCASED otherwise
+      for locale customizations of single char could take old l3.  for
+      multi-char locale customizations, canonically decompose & compute
+      for each char:
+        UNCASED if gc == Lm
+	LOWER if Lowercase or Changes_When_Uppercased or "exception":
+	   sc=Hira or sc=Kata and na="*SMALL*" and dm=""
+	   U+2129
+	UPPER if Uppercase or Changes_When_Uppercased or "exception":
+	   sc=Hira or sc=Kata and na!="*SMALL*" and na!="*ITERATION*" and dm=""
+	   U+2118 U+213A U+2141-U+2144 U+1F150-U+1F169 U+1F170-U+1F18A
+	MIXED if gc == Lt "or both (a) and (b)" meaning probably
+	                  "or both Lowercase and Uppercase"
+	UNCASED otherwise
+	note on LOWER/UPPER exceptions above:  the additional code points
+	are not given in a rule or a data file anywhere, but must be
+	lifted directly from tr35-##.html.  They are merely described as
+	"characters xxcase in form".  Not only that, but they are
+	presented as characters rather than numeric code points, so good
+	luck figuring them out from printed copies..
+      then for original char, combine all.  If all but UNCASED are same,
+      use that; otherwise MIXED
     caseFirst=upper/lower/off: force upper/lower case reordering
+      when caseLevel=on, see above.  Otherwise, l2.5 is prepended to
+      the l3 value, by shifting left 5 and oring with l3 (I think; it's
+      hard to say what "ct" means:  it could mean what I said, or it
+      could mean that t is multiplied by c) if l2 is non-0.  If l3
+      is 0, it stays 0.  If l2 is 0 (and l3 non-0), 4 is prepended
+      instead of l2.5. 
     hiraganaQuaternary=on/off: use FFFE instead of FFFF for shifted Hiragana
+      Trivial, but requires sc property table (maybe)
+        3041-3096, 309D-309F, 1B001, 1F200
     numeric=on/off: replace digit strings with numeric value at l1
+      My guess: order them all at same pos as 0 and add 2nd key w/ 
+      only primary set to 15 bits at a time, in big-endian order,
+      setting bit 0.
     reorder=<set>{,<set>}: reorder major groups
+      Need to know where major groups were to reorder them
+    collation=<type>
+      standard, ducet, locale-defined collation types
+        - apparently same as "standard" if unspecified for locale
+    locale tailoring (really a superset of collation=)
 @
 
 Given the lookup function, it is possible to create simple UCA
@@ -10749,11 +10953,6 @@ def_uni_str_uca_keyn(16)
 def_uni_str_uca_keyn(8)
 @
 
-<<FIXME>>=
-  Unimplemented CLDR options:
-    collation type = search (not even sure what that means)
-@
-
 For string comparison, the raw keys are looked up, and scanned once
 per level.
 
@@ -10788,6 +10987,11 @@ static int uni_uca_strcmpn(const void *stra, unsigned int lena,
     lev = 4;
   } else if(lev < 1)
     lev = 3;
+  /* FIXME: do comparison duing read, and abort if mismatch at l1 */
+  /*        and retain running l2/l3/l4/literal comparison */
+  /*        i.e., do not allocate key arrays at all */
+  /*        probably requires rewrite of uni_str_ducetn to be state */
+  /*        machine similar to lookup_tab */
   rawa = uni_str_ducetn(stra, lena, strget, opts, &raw_lena, NULL);
   rawb = uni_str_ducetn(strb, lenb, strget, opts, &raw_lenb, NULL);
   if(!raw_lena && !raw_lenb)
@@ -10920,27 +11124,27 @@ decl_num(FCD);
 
 <<Parse UCD files>>=
 prop_t *ccc_prop = &parsed_props[prop_ccc];
-qsort(ccc_prop->rng_dat8, ccc_prop->rng_len, sizeof(*ccc_prop->rng_dat8), uni_cmp_cp);
+qsort(ccc_prop->rng_dat8, ccc_prop->len, sizeof(*ccc_prop->rng_dat8), uni_cmp_cp);
 prop_t *FCD_prop = &parsed_props[prop_FCD = add_prop("FCD")];
-FCD_prop->rng_len = FCD_prop->max_rng_len = ccc_prop->rng_len;
-inisize(FCD_prop->rng_dat16, FCD_prop->rng_len);
-for(i = 0; i < FCD_prop->rng_len; i++) {
+FCD_prop->len = FCD_prop->max_len = ccc_prop->len;
+inisize(FCD_prop->rng_dat16, FCD_prop->len);
+for(i = 0; i < FCD_prop->len; i++) {
   FCD_prop->rng_dat16[i].low = ccc_prop->rng_dat8[i].low;
   FCD_prop->rng_dat16[i].high = ccc_prop->rng_dat8[i].high;
   FCD_prop->rng_dat16[i].dath = FCD_prop->rng_dat16[i].datl = ccc_prop->rng_dat8[i].dat;
 }
-for(i = 0; i < dmf_prop->rng_len; i++) {
+for(i = 0; i < dmf_prop->len; i++) {
   uint8_t sccc, eccc;
   int l, h, m;
-  uint32_t cp = dmf_prop->rng_str[i].cp;
-  if(dmf_prop->rng_str[i].flags)
+  uint32_t cp = dmf_prop->str_arr[i].cp;
+  if(dmf_prop->str_arr[i].flags)
     continue;
-  sccc = uni_chrrng_dat8(dmf_prop->strs[dmf_prop->rng_str[i].off],
-                         ccc_prop->rng_dat8, ccc_prop->rng_len, ccc_prop->def);
-  eccc = uni_chrrng_dat8(dmf_prop->strs[dmf_prop->rng_str[i].off + 
-                                        dmf_prop->rng_str[i].len - 1],
-		         ccc_prop->rng_dat8, ccc_prop->rng_len, ccc_prop->def);
-  for(l = 0, h = FCD_prop->rng_len - 1; l <= h; ) {
+  sccc = uni_chrrng_dat8(dmf_prop->strs[dmf_prop->str_arr[i].off],
+                         ccc_prop->rng_dat8, ccc_prop->len, ccc_prop->def);
+  eccc = uni_chrrng_dat8(dmf_prop->strs[dmf_prop->str_arr[i].off + 
+                                        dmf_prop->str_arr[i].len - 1],
+		         ccc_prop->rng_dat8, ccc_prop->len, ccc_prop->def);
+  for(l = 0, h = FCD_prop->len - 1; l <= h; ) {
     m = (l + h) / 2;
     if(FCD_prop->rng_dat16[m].high < cp)
       l = m + 1;
@@ -10959,22 +11163,22 @@ for(i = 0; i < dmf_prop->rng_len; i++) {
       continue;
     }
     /* always ensure room for 2, even if only 1 needed */
-    if(FCD_prop->rng_len >= FCD_prop->max_rng_len - 1)
-      resize(FCD_prop->rng_dat16, FCD_prop->max_rng_len *= 2);
+    if(FCD_prop->len >= FCD_prop->max_len - 1)
+      resize(FCD_prop->rng_dat16, FCD_prop->max_len *= 2);
     if(FCD_prop->rng_dat16[m].low == cp) {
       movebuf(FCD_prop->rng_dat16 + m + 1, FCD_prop->rng_dat16 + m,
-              FCD_prop->rng_len - m);
-      FCD_prop->rng_len++;
+              FCD_prop->len - m);
+      FCD_prop->len++;
       FCD_prop->rng_dat16[m + 1].low++;
     } else if(FCD_prop->rng_dat16[m].high == cp) {
       movebuf(FCD_prop->rng_dat16 + m + 2, FCD_prop->rng_dat16 + m + 1,
-              FCD_prop->rng_len - m - 1);
-      FCD_prop->rng_len++;
+              FCD_prop->len - m - 1);
+      FCD_prop->len++;
       FCD_prop->rng_dat16[m++].high--;
     } else {
       movebuf(FCD_prop->rng_dat16 + m + 2, FCD_prop->rng_dat16 + m,
-              FCD_prop->rng_len - m);
-      FCD_prop->rng_len += 2;
+              FCD_prop->len - m);
+      FCD_prop->len += 2;
       FCD_prop->rng_dat16[m++].high = cp - 1;
       FCD_prop->rng_dat16[m + 1].low = cp + 1;
     }
@@ -10982,11 +11186,11 @@ for(i = 0; i < dmf_prop->rng_len; i++) {
     FCD_prop->rng_dat16[m].dath = sccc;
     FCD_prop->rng_dat16[m].datl = eccc;
   } else if(sccc || eccc) {
-    if(FCD_prop->rng_len == FCD_prop->max_rng_len)
-      resize(FCD_prop->rng_dat16, FCD_prop->max_rng_len *= 2);
+    if(FCD_prop->len == FCD_prop->max_len)
+      resize(FCD_prop->rng_dat16, FCD_prop->max_len *= 2);
     movebuf(FCD_prop->rng_dat16 + l + 1, FCD_prop->rng_dat16 + l,
-            FCD_prop->rng_len - l);
-    FCD_prop->rng_len++;
+            FCD_prop->len - l);
+    FCD_prop->len++;
     FCD_prop->rng_dat16[l].low = FCD_prop->rng_dat16[l].high = cp;
     FCD_prop->rng_dat16[l].dath = sccc;
     FCD_prop->rng_dat16[l].datl = eccc;
@@ -11003,9 +11207,9 @@ equal, as well.
 static void fixup_rng_dat16(prop_t *p)
 {
   uint32_t i;
-  qsort(p->rng_dat16, p->rng_len, sizeof(uni_chrrng_dat16_t), uni_cmprng_dat16);
+  qsort(p->rng_dat16, p->len, sizeof(uni_chrrng_dat16_t), uni_cmprng_dat16);
   /* starting at top means only optimized entries are memmove'd */
-  for(i = p->rng_len - 1; i > 0; i--) {
+  for(i = p->len - 1; i > 0; i--) {
     uint32_t j = i;
     while(i > 0 && p->rng_dat16[i - 1].high == p->rng_dat16[i].low - 1 &&
           p->rng_dat16[i - 1].dath == p->rng_dat16[i].dath &&
@@ -11014,9 +11218,9 @@ static void fixup_rng_dat16(prop_t *p)
     if(i == j)
       continue;
     p->rng_dat16[i].high = p->rng_dat16[j].high;
-    if(j < p->rng_len - 1)
-        movebuf(p->rng_dat16 + i + 1, p->rng_dat16 + j + 1, p->rng_len - (j + 1));
-    p->rng_len -= j - i;
+    if(j < p->len - 1)
+        movebuf(p->rng_dat16 + i + 1, p->rng_dat16 + j + 1, p->len - (j + 1));
+    p->len -= j - i;
     if(!i)
       break;
   }
@@ -11028,7 +11232,7 @@ for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat16) {
     fixup_rng_dat16(&parsed_props[i]);
     parsed_props[i].mt = rng_dat16_to_multi(parsed_props[i].rng_dat16,
-                                            parsed_props[i].rng_len,
+                                            parsed_props[i].len,
                                             &ml_len);
 }
 @
@@ -11043,20 +11247,20 @@ for(i = 0; i < nparsed; i++) {
     open_wf(of, nbuf);
     fprintf(of, "#include \"uni_prop.h\"\n\n"
                 "const uni_chrrng_dat16_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].rng_len; j++)
-      fprintf(of, "\t{ %d, %d, %d, %d }%s\n",
+    for(j = 0; j < parsed_props[i].len; j++)
+      fprintf(of, "\t{ 0x%04X, 0x%02X, 0x%04X, 0x%02X }%s\n",
                   parsed_props[i].rng_dat16[j].low,
                   parsed_props[i].rng_dat16[j].datl,
 	          parsed_props[i].rng_dat16[j].high,
 	          parsed_props[i].rng_dat16[j].dath,
-		  j < parsed_props[i].rng_len - 1 ? "," : "");
+		  j < parsed_props[i].len - 1 ? "," : "");
     fputs("};\n", of);
     fclose(of);
     fprintf(gen_h, "extern const uni_chrrng_dat16_t uni_%s_rng[];\n"
 		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
 		   "#define uni_%s_of(x) uni_x_dat16(x, uni_%s_mtab)\n",
-		   name, name, parsed_props[i].rng_len,
-		   lg2(parsed_props[i].rng_len + 1), name, name);
+		   name, name, parsed_props[i].len,
+		   lg2(parsed_props[i].len + 1), name, name);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "dat16(%s);\n", name);
   }
@@ -11158,10 +11362,6 @@ int uni_is_FCD8(const uint8_t *str, unsigned int len);
 uni_is_FCDn(32)
 uni_is_FCDn(16)
 uni_is_FCDn(8)
-@
-
-<<FIXME>>=
-Test
 @
 
 To test collation, the CollationTest files are used.  As with the
@@ -11437,8 +11637,8 @@ int main(int argc, const char **argv)
 }
 @
 
-While implementation of the UCA algorithm with the raw tables is
-possible, there are a few desirable functions which cannot be
+While implementation of the UCA algorithm with the raw tables was not
+difficult, there are a few desirable functions which cannot be
 accomplished with this data format:%
 \footnote{In fact, the first two are the very reason this library
 exists.  All of the prior information can be obtained from other
@@ -11460,25 +11660,265 @@ CLDR support.
 \end{itemize}
 
 At the minimum, these functions all require a lookup table ordered by
-sort key rather than collation element.
+sort key rather than collation element.  Also, the canonical
+decomposition entries are there solely to support the FCD shortcut, so
+they are dropped (moved to the top by the sort, and then dropped
+post-sort, actually).  It would be much more pleasant to drop the
+composition entries as well, but they are legitimate multi-character
+collation elements.
+
+Similar to the UCA, the sort compares each level separately, ignoring
+zeroes.  The first level to mismatch determines the order.
+
+<<DUCET parser globals>>=
+<<DUCET lookup format defs>>
+
+static int cmp_ducet_lev123(const uint32_t *kx, uint32_t xlen,
+                            const uint32_t *ky, uint32_t ylen,
+			    const uint32_t mask)
+{
+  uint32_t i = 0, j = 0;
+  while(i < xlen && j < ylen) {
+    while(i < xlen && !(kx[i] & mask))
+      i += 1 + ((kx[i] & 3) == 2);
+    while(j < ylen && !(ky[j] & mask))
+      j += 1 + ((ky[j] & 3) == 2);
+    if(j == ylen)
+      return i != xlen; /* 0 if both at end, 1 otherwise */
+    if(i == xlen)
+      return -1;
+    if((kx[i] & mask) > (ky[j] & mask))
+      return 1;
+    if((kx[i] & mask) < (ky[j] & mask))
+      return -1;
+    i += 1 + ((kx[i] & 3) == 2);
+    j += 1 + ((ky[j] & 3) == 2);
+  }
+  while(i < xlen && !(kx[i] & mask))
+    i += 1 + ((kx[i] & 3) == 2);
+  while(j < ylen && !(ky[j] & mask))
+    j += 1 + ((ky[j] & 3) == 2);
+  return j == ylen ? i != xlen : -1;
+}
+@
+
+<<DUCET parser globals>>=
+static int cmp_by_key(const void *a, const void *b)
+{
+  const raw_cp_str_t *x = a, *y = b;
+  const uint32_t *sx = ducet_strs + x->off, *kx,
+                 *sy = ducet_strs + y->off, *ky;
+  uint32_t xlen = x->len, ylen = y->len;
+  /* push decomps to the top */
+  if(!xlen || !ylen)
+    return xlen ? -1 : ylen ? 1 : 0;
+  /* find end of index extension */
+  for(kx = sx; (*kx & 3) == 3; kx++, xlen--);
+  for(ky = sy; (*ky & 3) == 3; ky++, ylen--);
+  /* always compare level 1 on all keys, then 2 on all keys, etc. */
+  int c = cmp_ducet_lev123(kx, xlen, ky, ylen, UNI_DUCET_LEV1_MASK);
+  if(c)
+    return c;
+  c = cmp_ducet_lev123(kx, xlen, ky, ylen, UNI_DUCET_LEV2_MASK);
+  if(c)
+    return c;
+  c = cmp_ducet_lev123(kx, xlen, ky, ylen, UNI_DUCET_LEV3_MASK);
+  if(c)
+    return c;
+  /* level 4 */
+  while(xlen && ylen) {
+    uint32_t x4, y4;
+    switch(*kx & 3) {
+      case 0:
+        x4 = 0;
+	break;
+      case 1:
+        x4 = x->cp;
+	break;
+      default: /* can never be 3 */
+      /* case 2: */
+        x4 = *++kx;
+	xlen--;
+	break;
+    }
+    switch(*ky & 3) {
+      case 0:
+        y4 = 0;
+	break;
+      case 1:
+        y4 = x->cp;
+	break;
+      default: /* can never be 3 */
+      /* case 2: */
+        y4 = *++ky;
+	ylen--;
+	break;
+    }
+    if(x4 && y4) {
+      if(x4 < y4)
+        return -1;
+      if(x4 > y4)
+        return 1;
+      x4 = y4 = 0; /* skip */
+    }
+    if(!x4) {
+      kx++;
+      xlen--;
+    }
+    if(!y4) {
+      ky++;
+      ylen--;
+    }
+  }
+  while(xlen && !(*kx & 3)) {
+    kx++;
+    xlen--;
+  }
+  while(ylen && !(*ky & 3)) {
+    ky++;
+    ylen--;
+  }
+  if(xlen)
+    return 1;
+  if(ylen)
+    return -1;
+  return 0;
+}
+@
 
 <<Post-process DUCET>>=
-free(strs);
-free(ents);
+qsort(raw_ents, raw_ents_size, sizeof(*raw_ents), cmp_by_key);
+/* remove decomp entries */
+while(raw_ents_size > 0 && !raw_ents[raw_ents_size - 1].len)
+  raw_ents_size--;
+@
+
+After sorting, the index and value should be swapped.  Using the full
+51-bit key (30 for levels 1-3, plus up to 21 for level 4) as an index
+is impractical.  Instead, much like the forward table, there should be
+one ``character'' for the index, followed by ``index extensions''
+containing the rest of the key.  In this case, the first level is the
+most important, so that is the primary index.  The format of the
+string at that index is similar to the forward lookup table:  the
+first two bits indicate if something is part of the index extension,
+or part of the value for that index.  A 3 in the lower two bits
+indicates part of the value this time.  Unlike the forward table, the
+value must include the first character, and there is little value in
+suppressing the first index ``character'' in the ``index extension,''
+so the ``index extension'' is the full key.
+
+<<Post-process DUCET>>=
+uint32_t *rev_strs, max_rev_strs, rev_strs_len = 0;
+inisize(rev_strs, max_rev_strs = 2 * raw_ents_size);
+for(i = raw_ents_size - 1; /* i >= 0 */ ; i--) {
+  const uint32_t *si = prop->strs + raw_ents[i].off, *kpi, *sj, *kpj;
+  int len = raw_ents[i].len + 1; /* + 1 for cp */
+  for(kpi = si; (*kpi & 3) == 3; kpi++);
+  for(j = i; j > 0; j--) {
+    sj = prop->strs + raw_ents[j - 1].off;
+    for(kpj = sj; (*kpj & 3) == 3; kpj++);
+    if((*kpj & UNI_DUCET_LEV1_MASK) != (*kpi & UNI_DUCET_LEV1_MASK))
+      break;
+    len += raw_ents[j - 1].len + 1; /* + 1 for cp */
+  }
+  /* alread sorted by full index, so just append them all */
+  while(max_rev_strs < rev_strs_len + len)
+    resize(rev_strs, max_rev_strs *= 2);
+  uint32_t *dp = rev_strs + rev_strs_len;
+  for(low = j; j <= i; j++) {
+    sj = prop->strs + raw_ents[j].off;
+    /* place key (new index extension) first */
+    for(kpj = sj; (*kpj & 3) == 3; kpj++);
+    cpybuf(dp, kpj, raw_ents[j].len - (kpj - sj));
+    dp += raw_ents[j].len - (kpj - sj);
+    /* then append full old index (including cp) */
+    *dp++ = (raw_ents[j].cp << 2) + 3;
+    cpybuf(dp, si, kpi - si);
+    dp += kpi - si;
+  }
+  raw_ents[low].cp = *kpi >> UNI_DUCET_LEV1_SHIFT;
+  raw_ents[low].off = rev_strs_len;
+  raw_ents[low].len = len;
+  rev_strs_len += len;
+  if(low != i)
+    movebuf(raw_ents + low + 1, raw_ents + i + 1, raw_ents_size - i - 1);
+  raw_ents_size -= i - low;
+  if(!(i = low))
+    break;
+}
+@
+
+This transformation alone is already enough to implement the regular
+expression requirements, so a property is created using the results.
+The string table is rather large (58,099 words, with no redundancy due
+to the initial cp differing for each entry), but still barely small
+enough for 16-bit offsets.
+
+<<Post-process DUCET>>=
+char rname[strlen(prop->name) + 5];
+memcpy(rname, "rev_", 4);
+strcpy(rname + 4, prop->name);
+prop_t *rprop = &parsed_props[add_prop(rname)];
+rprop->str_arr = raw_ents;
+rprop->len = raw_ents_size;
+rprop->strs = rev_strs;
+rprop->max_strs = max_rev_strs;
+rprop->strs_len = rev_strs_len;
+rprop->mt = (uint32_t *)~0; /* force addition to prop table */
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[add_prop("rev_DUCET")], gen_h, tstf);
+dump_str_tabs(&parsed_props[add_prop("rev_DUCET_CLDR")], gen_h, tstf);
 @
 
 <<FIXME>>=
-DUCET needs more support
-  default (derived value):
-    Ill-formed: replace all ill-formed sequences with U+FFFD (or assume unassigned)
-    Hangul: "simple":
-      make all Vs and Ts 1-ignorable
-      make L weight same as 1st LVT w/ that L
-  full UCA implementation?
-      - some levels may be sorted in reverse order, meaning that the
-        keys themselves are reversed, not the ordering
-CLDR options for run-time reordering
-  reorder = space, punct, symbol, currency, digit, <script_id>
+Make function to look up equiv. class:
+  - do forward lookup of key
+  - do reverse lookup
+    - support official synthetic keys
+Make function to look up range:
+  - again, forward lookup of key
+  - do reverse lookup
+    - optionally for each end, sort equal entries by cp & start there
+    - optionally for each end, instead just include all entries w/ equal key
+@
+
+<<FIXME>>=
+Make way to modify tables on the fly.  Either supply a customization
+  table separately or fully customize existing table?
+  E.g.
+    a <1 a":
+       a: 15EF.0020.0008.0041
+       ->
+       a: 15EF.0020.0002.0061 0001.0000.0000.0000
+       a": 15EF.0020.0002.0061 0002.0000.0000.0000
+       [.a.]: <old> 0001.0000.0000.0000
+Mark groups for CLDR group reorder function
+   note that locale-default reordering is overridden by kr- reordering
+   space punct symbol currency digit others/Zzzz script-name
+     script-name limited to UAX#31, table 5 except Katakana, Common, Inherited
+     Katakana always moves with Hiragana
+     Non-UAX31/t5 scripts ordered w/ previous script that is in table
+     an ordering sequence w/o space, punct, symbol, currency, and/or
+       digit has those in same order before given sequence.  All other
+       unmentioned's become "others" and are appended if "others" not
+       explicit.
+       example: {latn,digit} becomes
+                {space,punct,symbol,currency,latn,digit,others}
+  Then cldr uca function could do remapping on the fly (expensively?):
+   e.g. g .. h reorders before e in a .. j:
+      a# .. d# unmodified
+      e# .. g# - 1 += (h# - g# + 1)
+      g# .. h# -= (g# - e#)
+      i# .. j# unmodified
+         pass g#, h#, e# triplet for each reordering
+	 subseqent reorderings have same modifications as above.
+	 e.g.  (e#, j#, j#) changes to (e# + h# - g# + 1, j#, j#)
+Mark groups for logical positioning in locale reordering
+  {first|last}_{primary_|secondary_|tertiary_|non-}ignorable
+  {first|last}_{variable|trailing}
+    variable top refers to default, not user setting
 @
 
 \chapter{Character Names}
@@ -15706,8 +16146,8 @@ how to use them.
 
 The [[name]] field contains the canonical name and all known aliases
 for the property name.  The [[mtab]] and [[mtab_len]] describe the
-multi-level table for the property.  The [[rng_tab]] and
-[[rng_tab_len]] describe the sorted range table or sorted code point
+multi-level table for the property.  The [[tab]] and
+[[tab_len]] describe the sorted range table or sorted code point
 table for the property.  See the sections below for details on what
 these tables contain.  The [[type]] field determines which section
 describes the tables:
@@ -16019,17 +16459,15 @@ Properties with string values are stored in two parts: a constant
 string table, and tables which have offsets and lengths of strings
 within that table.  Multiple properties may use the same string table.
 The offset and length tables are either sorted code point arrays of
-type [[uni_str_rng_t]], or multi-level tables of 32-bit values, which
-are interpreted as (and can be cast into) [[uni_str_rng_val_t]].  The
-[[flags]] fields in these structures are sometimes used for
-property-specific purposes.
+type [[uni_str_arr_t]], or multi-level tables of 32-bit values, which
+are interpreted as (and can be cast into) [[uni_str_ptr_t]].
 
-\input{[[uni_str_rng_t]].tex} % C
-\input{[[uni_str_rng_val_t]].tex} % C
+\input{[[uni_str_arr_t]].tex} % C
+\input{[[uni_str_ptr_t]].tex} % C
 
-Note that the [[uni_str_rng_t]] data structure can also be cast to the
+Note that the [[uni_str_arr_t]] data structure can also be cast to the
 [[uni_cp_val_t]] type, whose [[val]] element can then be cast to
-the [[uni_str_rng_val_t]] type.
+the [[uni_str_ptr_t]] type.
 
 The supported string properties are listed in table
 \ref{tab:stringprop}.  Unless otherwise stated in the subsequent
@@ -16042,12 +16480,12 @@ containing all string values.  \emph{ST} may or may not be the same as
 \emph{SP}.
 \item [[uni_]]\emph{ST}[[_len]] is the length of the string table (a
 preprocessor symbol), in case it needs to be written out to a file.
-\item [[const uni_str_rng_t uni_]]\emph{SP}[[_rng[]]] is a sorted list
+\item [[const uni_str_arr_t uni_]]\emph{SP}[[_arr[]]] is a sorted list
 of code points with their associated string offsets and lengths.
-\item [[uni_]]\emph{SP}[[_rng_len]] is the length of the above array
+\item [[uni_]]\emph{SP}[[_arr_len]] is the length of the above array
 (a preprocessor symbol).
 \item [[const uint32_t uni_]]\emph{SP}[[_mtab[]]] is a multi-level
-table of 32-bit [[uni_str_rng_val_t]] values.
+table of 32-bit [[uni_str_ptr_t]] values.
 \item [[uni_]]\emph{SP}[[_mtab_len]] is the length of that table (a
 preprocessor symbol), in case it is to be written out to a file.
 \end{itemize}
@@ -16225,10 +16663,10 @@ two pseudo properties.  The canon\_decomp property contains only
 full (recursive) canonical decompositions, and the compat\_decomp
 property contains only full (recursive) compatibility decompositions
 when they differ from the canon\_decomp result.  The raw dm property
-is not recursively/fully decomposed.  The only enhancement of the dm
-property is that no dt lookup is required to determine if a
-decomposition is canonical or compatibility; the flag field is
-non-zero for compatibility decompositions.
+is not recursively/fully decomposed.  The length field cannot be used
+raw; a flag is ored into the upper bit.  This flag eliminates the need
+for a dt property lookup to determine if an entry is canonical or
+compatibility:  compatibilty decompositions have this flag set.
 
 Lookup with the multi-level tables is simplified with some
 preprocessor macros, which return the associated string's offset and
@@ -16476,7 +16914,7 @@ conditions.  The return is the number of potential words in the result
 result is [[cp]], encoded appropriately), or -2 if the condition is
 currently unknown, but may affect the result.  For a return value of
 -2, the function should be called again with a valid set of condition
- flags.  Note that the passed-in condition flags should never set
+flags.  Note that the passed-in condition flags should never set
 [[UNI_SC_FL_NOT]]; just leave a flag unset if it is not in effect.
 
 There are three functions.
