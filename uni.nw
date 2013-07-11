@@ -867,6 +867,7 @@ EXTRA_CFLAGS += -DUNI_USE_ICONV
 endif
 @
 
+\lstset{language=C}
 <<Unicode I/O local definitions>>=
 #ifdef UNI_USE_ICONV
 #include <langinfo.h>
@@ -1163,13 +1164,22 @@ int offset_of(s, n, flags)
 Nonetheless, for raw storage, functions are provided to compute the
 offset of the first word of a character, and the character offset of a
 given word offset.  No checks are made to see if the string is valid
-is intended for internally-generated strings.
+is intended for internally-generated strings.  The UTF-32 versions are
+pointless, except when creating generic code that constructs function
+names based on size.
 
 <<Unicode I/O Exports>>=
+#define uni_utf32_offset_of(b, n) (n)
+#define uni_utf32_index_of(b, n) (n)
 unsigned int uni_utf16_offset_of(const uint16_t *buf, unsigned int n);
 unsigned int uni_utf16_index_of(const uint16_t *buf, unsigned int n);
 unsigned int uni_utf8_offset_of(const uint8_t *buf, unsigned int n);
 unsigned int uni_utf8_index_of(const uint8_t *buf, unsigned int n);
+@
+
+<<C Prototypes>>=
+unsigned int uni_utf32_offset_of(const uint32_t *buf, unsigned int n);
+unsigned int uni_utf32_index_of(const uint32_t *buf, unsigned int n);
 @
 
 <<Unicode I/O functions>>=
@@ -1212,14 +1222,23 @@ unsigned int uni_utf8_index_of(const uint8_t *buf, unsigned int n)
 
 A modified version of the above index functions can be used to compute
 the length of a zero-terminated string.  Only the loop end condition
-needs to change.
+needs to change.  Unlike the above routines, a 32-bit version is
+useful as well.
 
 <<Unicode I/O Exports>>=
+unsigned int uni_utf32_strlen(const uint32_t *buf);
 unsigned int uni_utf16_strlen(const uint16_t *buf);
 unsigned int uni_utf8_strlen(const uint8_t *buf);
 @
 
 <<Unicode I/O functions>>=
+unsigned int uni_utf32_strlen(const uint32_t *buf)
+{
+  unsigned int i;
+  for(i = 0; buf[i]; i++);
+  return i;
+}
+
 unsigned int uni_utf16_strlen(const uint16_t *buf)
 {
   unsigned int i, j;
@@ -1447,97 +1466,56 @@ buffer to [[NULL]] on memory allocation errors.  The number of words
 which would have been returned, had the buffer been large enough, is
 returned. The following helpers are provided to implement this policy.
 
-<<UTF-32 buffer return parameters>>=
-uint32_t **buf, int off, unsigned int *buf_len
+<<UTF-N buffer return parameters (@sz)>>=
+uint<<@sz>>_t **buf, int off, unsigned int *buf_len
 @
 
-<<UTF-16 buffer return parameters>>=
-uint16_t **buf, int off, unsigned int *buf_len
-@
-
-<<UTF-8 buffer return parameters>>=
-uint8_t **buf, int off, unsigned int *buf_len
+<<[[uni_return_bufn]] proto (@sz)>>=
+uint32_t uni_return_buf<<@sz>>(const uint32_t *str, uint32_t len,
+                             <<UTF-N buffer return parameters [[<<@sz>>]]>>)
 @
 
 <<Unicode I/O Exports>>=
-uint32_t uni_return_buf32(const uint32_t *str, uint32_t len,
-                          <<UTF-32 buffer return parameters>>);
-uint32_t uni_return_buf16(const uint32_t *str, uint32_t len,
-                          <<UTF-16 buffer return parameters>>);
-uint32_t uni_return_buf8(const uint32_t *str, uint32_t len,
-                         <<UTF-8 buffer return parameters>>);
+<<[[uni_return_bufn]] proto [[32]]>>;
+<<[[uni_return_bufn]] proto [[16]]>>;
+<<[[uni_return_bufn]] proto [[8]]>>;
 @
 
 <<Unicode I/O functions>>=
-uint32_t uni_return_buf32(const uint32_t *str, uint32_t len,
-                          <<UTF-32 buffer return parameters>>)
-{
-  if(off < 0) {
-    unsigned int clen = buf_len ? *buf_len : 0;
-    if(clen > len)
-      clen = len;
-    if(clen)
-      memcpy(*buf, str, clen * 4);
-    return len;
-  }
-  if(!*buf)
-    *buf_len = 0; /* shouldn't be necessary */
-  else if(!*buf_len) { /* should never happen */
-    free(*buf); /* will probably corrupt memory */
-    *buf = NULL;
-  }
-  if(len + off > *buf_len) {
-    if(!*buf_len) {
-      uint32_t asize = off + len;
-      if(asize < 5)
-        asize = 5;
-      *buf = malloc(asize * 4);
-      if(!*buf)
-        return len;
-      *buf_len = asize;
-    } else {
-      while(*buf_len < len + off)
-        *buf_len *= 2;
-      uint32_t *nbuf = realloc(*buf, *buf_len * 4);
-      if(!nbuf) {
-        free(*buf);
-	*buf = NULL;
-	return len;
-      }
-      *buf = nbuf;
-    }
-  }
-  memcpy(*buf + off, str, len * 4);
-  return len;
-}
+<<[[uni_return_bufn]] [[32]]>>
+<<[[uni_return_bufn]] [[16]]>>
+<<[[uni_return_bufn]] [[8]]>>
+@
 
-uint32_t uni_return_buf16(const uint32_t *str, uint32_t len,
-                          <<UTF-16 buffer return parameters>>)
+<<[[uni_return_bufn]] (@sz)>>=
+<<[[uni_return_bufn]] proto [[<<@sz>>]]>>
 {
-  unsigned int rlen = len;
-  uint32_t i;
-  for(i = 0; i < len; i++)
-    if(str[i] > 0x10000)
-      rlen++;
+  unsigned int i, rlen;
+  /* on 32-bit with a smart enough compiler, this will translate to */
+  /* rlen = len */
+  for(i = rlen = 0; i < len; i++)
+    rlen += uni_utf<<@sz>>_enclen(str[i]);
   if(off < 0) {
     unsigned int clen = buf_len ? *buf_len : 0;
-    uint16_t *bptr;
+    uint<<@sz>>_t *bptr;
     if(clen > rlen)
       clen = rlen;
     if(!clen)
       return rlen;
     bptr = *buf;
     while(clen-- > 0) {
-      if(*str < 0x10000)
-        *bptr++ = *str++;
-      else {
-        uint16_t buf16[2];
-	uni_int_utf16_encode(buf16, *str++);
-	*bptr++ = buf16[0];
-	if(clen > 0) {
-	  *bptr++ = buf16[1];
-	  clen--;
-	}
+      if(clen >= 3) { /* room for at least 4 */
+         int csz = uni_int_utf<<@sz>>_encode(bptr, *str++);
+	 bptr += csz;
+	 clen -= csz - 1;
+      } else {
+        uint<<@sz>>_t cbuf[4];
+	int csz = uni_int_utf<<@sz>>_encode(cbuf, *str++);
+	if(csz > clen + 1)
+	  csz = clen + 1;
+	cpybuf(bptr, cbuf, csz);
+	bptr += csz;
+	clen -= csz - 1;
       }
     }
     return rlen;
@@ -1550,17 +1528,17 @@ uint32_t uni_return_buf16(const uint32_t *str, uint32_t len,
   }
   if(rlen + off > *buf_len) {
     if(!*buf_len) {
-      uint32_t asize = off + rlen;
+      unsigned int asize = off + rlen;
       if(asize < 5)
         asize = 5;
-      *buf = malloc(asize * 2);
+      *buf = malloc(asize * sizeof(**buf));
       if(!*buf)
         return rlen;
       *buf_len = asize;
     } else {
       while(*buf_len < rlen + off)
         *buf_len *= 2;
-      uint16_t *nbuf = realloc(*buf, *buf_len * 2);
+      uint<<@sz>>_t *nbuf = realloc(*buf, *buf_len * **buf);
       if(!nbuf) {
         free(*buf);
 	*buf = NULL;
@@ -1569,76 +1547,10 @@ uint32_t uni_return_buf16(const uint32_t *str, uint32_t len,
       *buf = nbuf;
     }
   }
-  uint16_t *bptr = *buf + off;
+  uint<<@sz>>_t *bptr = *buf + off;
+  /* maybe not as fast as memcpy would be for 32-bit */
   while(len-- > 0)
-    bptr += uni_int_utf16_encode(bptr, *str++);
-  return rlen;
-}
-
-uint32_t uni_return_buf8(const uint32_t *str, uint32_t len,
-                         <<UTF-8 buffer return parameters>>)
-{
-  unsigned int rlen = 0;
-  uint32_t i;
-  for(i = 0; i < len; i++)
-    rlen += uni_utf8_enclen(str[i]);
-  if(off < 0) {
-    unsigned int clen = buf_len ? *buf_len : 0;
-    uint8_t *bptr;
-    uint8_t buf8[4];
-    if(clen > rlen)
-      clen = rlen;
-    if(!clen)
-      return rlen;
-    bptr = *buf;
-    while(clen-- > 0) {
-      int len8 = uni_utf8_encode(buf8, *str++);
-      *bptr++ = buf8[0];
-      if(len8 > 1 && clen > 0) {
-        *bptr++ = buf8[1];
-	clen--;
-      }
-      if(len8 > 2 && clen > 0) {
-        *bptr++ = buf8[2];
-	clen--;
-      }
-      if(len8 > 3 && clen > 0) {
-        *bptr++ = buf8[3];
-	clen--;
-      }
-    }
-    return rlen;
-  }
-  if(!*buf)
-    *buf_len = 0; /* shouldn't be necessary */
-  else if(!*buf_len) { /* should never happen */
-    free(*buf); /* will probably corrupt memory */
-    *buf = NULL;
-  }
-  if(rlen + off > *buf_len) {
-    if(!*buf_len) {
-      uint32_t asize = off + rlen;
-      if(asize < 5)
-        asize = 5;
-      *buf = malloc(asize);
-      if(!*buf)
-        return rlen;
-      *buf_len = asize;
-    } else {
-      while(*buf_len < rlen + off)
-        *buf_len *= 2;
-      uint8_t *nbuf = realloc(*buf, *buf_len);
-      if(!nbuf) {
-        free(*buf);
-	*buf = NULL;
-	return rlen;
-      }
-      *buf = nbuf;
-    }
-  }
-  uint8_t *bptr = *buf + off;
-  while(len-- > 0)
-    bptr += uni_utf8_encode(bptr, *str++);
+    bptr += uni_int_utf<<@sz>>_encode(bptr, *str++);
   return rlen;
 }
 @
@@ -1861,81 +1773,44 @@ uni_set_op_t,%
 @
 
 The set \emph{operations} must be performed on arrays of a particular
-type.  However, C does not really support generics, so the only way to
-support more than one type is to either repeat the code or use
-preprocessor macros.  In this case, I will write the function
-definition to an include file, and include it multiple times while
-redefining the table type.  This prevents the need for a large,
-multi-chunk preprocessor macro which does not support [[#line]]
-directives.
+type.  Since C does not really support generics, and using the
+preprocessor would be impractical, the NoWeb parameterized macro
+facility is used.  Previous versions of this document wrote the
+function definition to an include file, and used the preprocessor to
+redefine types and names for four separate [[#include]]s.  That is
+probably the only way to get debugable code using the preprocessor.
 
 <<Unicode property exports for generator>>=
 #include <stdint.h>
 @
 
 <<Unicode property exports>>=
-/* uint64_t is not standard, but common */
-void setop_bit64(uint64_t *a, uint32_t a_low, uint32_t a_len,
-                 uni_set_op_t op,
-		 uint64_t *b, uint32_t b_low, uint32_t b_len,
-		 uint64_t **res, uint32_t *res_low, uint32_t *res_len,
-		 uint32_t *res_max);
-void setop_bit32(uint32_t *a, uint32_t a_low, uint32_t a_len,
-                 uni_set_op_t op,
-		 uint32_t *b, uint32_t b_low, uint32_t b_len,
-		 uint32_t **res, uint32_t *res_low, uint32_t *res_len,
-		 uint32_t *res_max);
-void setop_bit16(uint16_t *a, uint32_t a_low, uint32_t a_len,
-                 uni_set_op_t op,
-		 uint16_t *b, uint32_t b_low, uint32_t b_len,
-		 uint16_t **res, uint32_t *res_low, uint32_t *res_len,
-		 uint32_t *res_max);
-void setop_bit8(uint8_t *a, uint32_t a_low, uint32_t a_len,
-                uni_set_op_t op,
-		uint8_t *b, uint32_t b_low, uint32_t b_len,
-		uint8_t **res, uint32_t *res_low, uint32_t *res_len,
-		uint32_t *res_max);
+<<[[setop_bitn]] proto [[64]]>>; /* uint64_t is not standard, but common */
+<<[[setop_bitn]] proto [[32]]>>;
+<<[[setop_bitn]] proto [[16]]>>;
+<<[[setop_bitn]] proto [[8]]>>;
 @
 
-<<makefile.rules>>=
-uni_prop.c: setop_bitn.h
+<<[[setop_bitn]] proto(@sz)>>=
+void setop_bit<<@sz>>(uint<<@sz>>_t *a, uint32_t a_low, uint32_t a_len,
+                    uni_set_op_t op,
+		    uint<<@sz>>_t *b, uint32_t b_low, uint32_t b_len,
+		    uint<<@sz>>_t **res, uint32_t *res_low, uint32_t *res_len,
+		    uint32_t *res_max)
 @
 
 <<Unicode property functions>>=
-#define setop_src_t uint64_t
-#define setop_n 64
-#define setop_f setop_bit64
-#include "setop_bitn.h"
-#define setop_src_t uint32_t
-#define setop_n 32
-#define setop_f setop_bit32
-#include "setop_bitn.h"
-#define setop_src_t uint16_t
-#define setop_n 16
-#define setop_f setop_bit16
-#include "setop_bitn.h"
-#define setop_src_t uint8_t
-#define setop_n 8
-#define setop_f setop_bit8
-#include "setop_bitn.h"
+<<[[setop_bitn]] [[64]]>>
+<<[[setop_bitn]] [[32]]>>
+<<[[setop_bitn]] [[16]]>>
+<<[[setop_bitn]] [[8]]>>
 @
 
-<<Known Data Types>>=
-setop_src_t,%
-@
-
-<<setop_bitn.h>>=
-void setop_f(setop_src_t *a, uint32_t a_low, uint32_t a_len,
-             uni_set_op_t op,
-	     setop_src_t *b, uint32_t b_low, uint32_t b_len,
-	     setop_src_t **res, uint32_t *res_low, uint32_t *res_len,
-	     uint32_t *res_max)
+<<[[setop_bitn]](@sz)>>=
+<<[[setop_bitn]] proto [[<<@sz>>]]>>
 {
   <<Perform set operation on bit strings>>
 }
-#undef setop_src_t
-#undef setop_n
-#undef setop_f
 @
 
 First, there are few degenerate cases which do not involve [[a]]
@@ -1986,13 +1861,13 @@ if(op == UNI_SOP_NIL) {
   return;
 }
 if(op == UNI_SOP_ALL) {
-  *res_len = UNI_MAX_CP / setop_n + 1;
+  *res_len = UNI_MAX_CP / <<@sz>> + 1;
   *res_low = 0;
   if(!*res_max)
     inisize(*res, (*res_max = *res_len));
   else if(*res_max < *res_len)
     resize(*res, (*res_max = *res_len));
-  memset(*res, ~0, *res_len * setop_n / 8);
+  memset(*res, ~0, *res_len * <<@sz>> / 8);
   return;
 }
 if(op == UNI_SOP_A) {
@@ -2003,7 +1878,7 @@ if(op == UNI_SOP_A) {
   else if(*res_max < a_len)
     resize(*res, (*res_max = a_len));
   if(*res != a)
-    cpybuf(*res, a, *res_len * setop_n / 8);
+    cpybuf(*res, a, *res_len);
   return;
 }
 if(op == UNI_SOP_B) {
@@ -2014,7 +1889,7 @@ if(op == UNI_SOP_B) {
   else if(*res_max < b_len)
     resize(*res, (*res_max = b_len));
   if(*res != b)
-    cpybuf(*res, b, *res_len * setop_n / 8);
+    cpybuf(*res, b, *res_len);
   return;
 }
 @
@@ -2029,7 +1904,7 @@ calculations until the end.
 
 <<Perform set operation on bit strings>>=
 if(!a_len || b_low < a_low) {
-  setop_src_t *t = a;
+  uint<<@sz>>_t *t = a;
   a = b;
   b = t;
   a_len ^= b_len;
@@ -2042,7 +1917,7 @@ if(!a_len || b_low < a_low) {
                                        ((op & UNI_SOP_B) >> 1);
 }
 if(!b_len)
-  b_low = a_low + a_len * setop_n;
+  b_low = a_low + a_len * <<@sz>>;
 @
 
 The bit strings do not necessarily start at zero.  If neither does,
@@ -2057,7 +1932,7 @@ uint32_t i;
 int did_start = 0;
 
 if(a_low > 0 && zz_op) {
-  uint32_t need = a_low / setop_n;
+  uint32_t need = a_low / <<@sz>>;
   did_start = 1;
   *res_low = 0;
   if(!*res_max)
@@ -2088,28 +1963,27 @@ after all.  The first non-zero value also sets the start position, if
 it was not already set above.
 
 <<Perform set operation on bit strings>>=
-setop_src_t cur_a = 0, prev_a, r;
+uint<<@sz>>_t cur_a = 0, prev_a, r;
 uint32_t last_zero = 0;
-int misalign_a = did_start ? (a_low - *res_low) % setop_n : 0;
-uint32_t end = a_low + a_len * setop_n;
+int misalign_a = did_start ? (a_low - *res_low) % <<@sz>> : 0;
+uint32_t end = a_low + a_len * <<@sz>>;
 if(end < b_low)
   end = b_low;
-for(; (i = a_low) < end - setop_n + 1; a_low += setop_n, a_len--, a++) {
-#ifndef update_src
-#define update_src(x) do { \
-  prev_##x = cur_##x; \
-  cur_##x = *x; \
-  if(misalign_##x) { \
-    prev_##x |= cur_##x << misalign_##x; \
-    cur_##x >>= setop_n - misalign_##x; \
-  } else \
-    prev_##x = cur_##x; \
-} while(0)
-#endif
-  update_src(a);
+for(; (i = a_low) < end - <<@sz>> + 1; a_low += <<@sz>>, a_len--, a++) {
+  <<Obtain next aligned bits from source [[a]]>>
   r = UNI_BIT_SET_OP(prev_a, op, 0);
   <<Set res if non-zero or mark if zero>>
 }
+@
+
+<<Obtain next aligned bits from source (@which)>>=
+prev_<<@which>> = cur_<<@which>>;
+cur_<<@which>> = *<<@which>>;
+if(misalign_<<@which>>) {
+  prev_<<@which>> |= cur_<<@which>> @<< misalign_<<@which>>;
+  cur_<<@which>> >>= <<@sz>> - misalign_<<@which>>;
+} else
+  prev_<<@which>> = cur_<<@which>>;
 @
 
 <<Set res if non-zero or mark if zero>>=
@@ -2123,8 +1997,8 @@ if(!r) {
   }
   if(!*res_max)
     inisize(*res, (*res_max = 4));
-  else if(*res_max <= (i - *res_low) / setop_n) {
-    while(*res_max <= (i - *res_low) / setop_n)
+  else if(*res_max <= (i - *res_low) / <<@sz>>) {
+    while(*res_max <= (i - *res_low) / <<@sz>>)
       *res_max *= 2;
     resize(*res, *res_max);
   }
@@ -2146,20 +2020,20 @@ to be applied to the next word.  Only full words which do not contain
 [[b_low]] are processed here.
 
 <<Perform set operation on bit strings>>=
-if(misalign_a && i < b_low - setop_n - 1) {
+if(misalign_a && i < b_low - <<@sz>> - 1) {
   r = UNI_BIT_SET_OP(cur_a, op, 0);
   <<Set res if non-zero or mark if zero>>
-  i += setop_n;
+  i += <<@sz>>;
   cur_a = 0; /* a_len must be 0 */
 }
 if(!a_len) {
   misalign_a = 0; /* cur_a is aligned, and remaining 0s do not need align */
   if(did_start)
-    i -= (i - *res_low) % setop_n; /* align i with result instead of a */
+    i -= (i - *res_low) % <<@sz>>; /* align i with result instead of a */
 }
-if(i < b_low - setop_n - 1) {
-  uint32_t skip = (b_low - i) / setop_n;
-  skip *= setop_n;
+if(i < b_low - <<@sz>> - 1) {
+  uint32_t skip = (b_low - i) / <<@sz>>;
+  skip *= <<@sz>>;
   if(!zz_op) {
     if(!last_zero && did_start)
       last_zero = i - *res_low;
@@ -2180,9 +2054,9 @@ if(!did_start) {
 }
 uint32_t tot = i - *res_low + skip;
 if(!*res_max)
-  inisize(*res, (*res_max = tot > setop_n ? tot / setop_n : 4));
-else if(*res_max <= tot / setop_n) {
-  while(*res_max <= tot / setop_n)
+  inisize(*res, (*res_max = tot > <<@sz>> ? tot / <<@sz>> : 4));
+else if(*res_max <= tot / <<@sz>>) {
+  while(*res_max <= tot / <<@sz>>)
     *res_max *= 2;
   resize(*res, *res_max);
 }
@@ -2200,7 +2074,7 @@ bits remain in [[cur_a]] for this word.  If it ended earlier than
 that, [[cur_a]] is zero, so either way [[cur_a]] needs to be applied. 
 Both [[b]] and [[a]] need to be aligned to the result before use.  If
 the result has not yet started, it will start aligned with [[a]] if
-[[a]] has not yet ended (i.e., [[i]] is an integral [[setop_n]]
+[[a]] has not yet ended (i.e., [[i]] is an integral [[<<@sz>>]]
 multiple following [[a_low]]); otherwise, due to the above code, it
 will start aligned with [[b]] (i.e., [[i]] was set to [[b_low]]).
 First any full words in common with both [[a]] and [[b]] are
@@ -2210,24 +2084,24 @@ absent.
 
 <<Perform set operation on bit strings>>=
 if(b_len) {
-  uint32_t misalign_b = did_start ? (b_low - *res_low) % setop_n : 
-                                    (b_low - i) % setop_n;
-  setop_src_t cur_b = 0, prev_b;
-  for(; a_len && b_len; b++, b_len--, b_low += setop_n, i += setop_n,
-                        a++, a_len--, a_low += setop_n) {
-    update_src(b);
-    update_src(a);
+  uint32_t misalign_b = did_start ? (b_low - *res_low) % <<@sz>> : 
+                                    (b_low - i) % <<@sz>>;
+  uint<<@sz>>_t cur_b = 0, prev_b;
+  for(; a_len && b_len; b++, b_len--, b_low += <<@sz>>, i += <<@sz>>,
+                        a++, a_len--, a_low += <<@sz>>) {
+    <<Obtain next aligned bits from source [[b]]>>
+    <<Obtain next aligned bits from source [[a]]>>
     r = UNI_BIT_SET_OP(prev_a, op, prev_b);
     <<Set res if non-zero or mark if zero>>
   }
-  for(; b_len; b++, b_len--, b_low += setop_n, i += setop_n) {
-    update_src(b);
+  for(; b_len; b++, b_len--, b_low += <<@sz>>, i += <<@sz>>) {
+    <<Obtain next aligned bits from source [[b]]>>
     r = UNI_BIT_SET_OP(cur_a, op, prev_b);
     <<Set res if non-zero or mark if zero>>
     cur_a = 0;
   }
-  for(; a_len; a++, a_len--, a_low += setop_n, i += setop_n) {
-    update_src(a);
+  for(; a_len; a++, a_len--, a_low += <<@sz>>, i += <<@sz>>) {
+    <<Obtain next aligned bits from source [[a]]>>
     r = UNI_BIT_SET_OP(prev_a, op, cur_b);
     <<Set res if non-zero or mark if zero>>
     cur_b = 0;
@@ -2235,7 +2109,7 @@ if(b_len) {
   if(cur_a || cur_b) {
     r = UNI_BIT_SET_OP(cur_a, op, cur_b);
     <<Set res if non-zero or mark if zero>>
-    i += setop_n;
+    i += <<@sz>>;
   }
 }
 @
@@ -2246,10 +2120,10 @@ the upper region needs to be set the same way as the initial region.
 <<Perform set operation on bit strings>>=
 if(zz_op) {
   if(did_start)
-    i -= (i - *res_low) % setop_n; /* align i with result */
+    i -= (i - *res_low) % <<@sz>>; /* align i with result */
   if(i <= UNI_MAX_CP) {
-    uint32_t skip = (UNI_MAX_CP - i) / setop_n + 1;
-    skip *= setop_n;
+    uint32_t skip = (UNI_MAX_CP - i) / <<@sz>> + 1;
+    skip *= <<@sz>>;
     <<Set gap to all ones>>
   }
 }
@@ -2259,7 +2133,7 @@ The only thing remaining is to update the length of the result.
 
 <<Perform set operation on bit strings>>=
 if(did_start)
-  *res_len = ((last_zero ? last_zero : i) - *res_low) / setop_n;
+  *res_len = ((last_zero ? last_zero : i) - *res_low) / <<@sz>>;
 else
   *res_len = 0;
 @
@@ -2463,14 +2337,10 @@ static void uni_chrrng_invert(const uni_chrrng_t *a, uint32_t a_len,
 @
 
 For the general operation, as with ordinary bit sets, a few degenerate
-cases are handled immediately.  Any operations involving just one set
-are done immediately.  Although it would be possible to shortcut
-operations against empty (or full) sets as well, the slower generic
-routines are used instead of trying to test for those cases.  Again,
-rather than supporting a previously allocated result structure, a new
-one is always allocated.  Unlike inversion, it is very likely that
-this is necessary in order to avoid overwriting either one of the
-inputs when they are misaligned.
+cases are handled immediately.  Again, rather than supporting a
+previously allocated result structure, a new one is always allocated.
+Unlike inversion, it is very likely that this is necessary in order to
+avoid overwriting either one of the inputs when they are misaligned.
 
 The generic routine operates by finding points where either input
 changes state.  Then, the entire range where the the states where the
@@ -2484,91 +2354,19 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
 {
   uni_chrrng_t *tab;
   uint32_t tab_len = 0, max_tab = 8;
-  /* shortcut all ops that don't involve both sets */
-  if(op == UNI_SOP_NIL) {
-    inisize(tab, 1); /* so free always works */
-    *rtab = tab;
-    *r_len = 0;
-    return;
-  } else if(op == UNI_SOP_ALL) {
-    inisize(tab, 1);
-    tab[0].low = 0;
-    tab[0].high = UNI_MAX_CP;
-    *rtab = tab;
-    *r_len = 1;
-    return;
-  } else if(op == UNI_SOP_A) {
-    inisize(tab, a_len);
-    cpybuf(tab, a, a_len * sizeof(*a));
-    *rtab = tab;
-    *r_len = a_len;
-    return;
-  } else if(op == UNI_SOP_INV_A) {
-    uni_chrrng_invert(a, a_len, rtab, r_len);
-    return;
-  } else if(op == UNI_SOP_B) {
-    inisize(tab, b_len);
-    cpybuf(tab, b, b_len);
-    *rtab = tab;
-    *r_len = b_len;
-    return;
-  } else if(op == UNI_SOP_INV_B) {
-    uni_chrrng_invert(b, b_len, rtab, r_len);
-    return;
-  }
+  <<Shortcut all ops that don't involve both range table sets>>
   inisize(tab, max_tab);
   int invert = /* UNI_BIT_SET_OP(0, op, 0); */ op & 1;
   uint32_t aptr = 0, bptr = 0;
   uint32_t alow, ahigh, blow, bhigh;
+  <<Set low and high for [[a]]>>
+  <<Set low and high for [[b]]>>
   int32_t lasthigh = -1, curlow = -1, curhigh = -1;
-#define set_low_high(x) do { \
-  x##low = x##ptr < x##_len ? x[0].low : UNI_MAX_CP + 1; \
-  x##high = x##ptr < x##_len ? x[0].high : UNI_MAX_CP + 1; \
-} while(0)
-  set_low_high(a);
-  set_low_high(b);
   while(alow <= UNI_MAX_CP || blow <= UNI_MAX_CP) {
-    /* find next range where either a or b is different */
-    /* compute bit op for that range as well (into res) */
     uint32_t nextlow, nexthigh, res;
-    if(alow < blow) {
-      nextlow = alow;
-      res = UNI_BIT_SET_OP(~0, op, 0);
-      if(ahigh < blow) {
-        nexthigh = ahigh;
-	aptr++;
-	set_low_high(a);
-      } else {
-        nexthigh = blow - 1;
-	alow = blow;
-      }
-    } else if(alow > blow) {
-      nextlow = blow;
-      res = UNI_BIT_SET_OP(0, op, ~0);
-      if(bhigh < alow) {
-        nexthigh = bhigh;
-	bptr++;
-	set_low_high(b);
-      } else {
-        nexthigh = alow - 1;
-	blow = alow;
-      }
-    } else {
-      nextlow = alow;
-      res = UNI_BIT_SET_OP(~0, op, ~0);
-      nexthigh = ahigh;
-      if(ahigh <= bhigh) {
-        aptr++;
-	set_low_high(a);
-      } else
-        alow = bhigh + 1;
-      if(bhigh <= nexthigh) {
-        nexthigh = bhigh;
-	bptr++;
-	set_low_high(b);
-      } else
-        blow = nexthigh + 1;
-    }
+    <<Find next range where either [[a]] or [[b]] is different>>
+    /* into nextlow-nexthigh and compute bit op as well (into res) */
+    /* Invert the skipped range (where a=b=0) if necessary */
     if(invert && nextlow > lasthigh + 1) {
       if(curlow < 0)
         curlow = lasthigh + 1;
@@ -2576,10 +2374,12 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     }
     /* store res into result */
     if(res) {
+      /* extend or create current range */
       if(curlow < 0)
         curlow = nextlow;
       curhigh = nexthigh;
     } else if(curlow >= 0) {
+      /* store & finish current range */
       if(tab_len == max_tab)
         resize(tab, max_tab *= 2);
       tab[tab_len].low = curlow;
@@ -2588,11 +2388,13 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     }
     lasthigh = nexthigh;
   }
+  /* Invert the final range (where a=b=0) if necessary */
   if(invert && lasthigh < UNI_MAX_CP) {
     if(curlow < 0)
       curlow = lasthigh + 1;
     curhigh = UNI_MAX_CP;
   }
+  /* store & finish the current range */
   if(curlow >= 0) {	
     if(tab_len == max_tab)
       resize(tab, max_tab *= 2);
@@ -2601,6 +2403,91 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
   }
   *rtab = tab;
   *r_len = tab_len;
+}
+@
+
+<<Set low and high for (@x)>>=
+<<@x>>low = <<@x>>ptr < <<@x>>_len ? <<@x>>[0].low : UNI_MAX_CP + 1;
+<<@x>>high = <<@x>>ptr < <<@x>>_len ? <<@x>>[0].high : UNI_MAX_CP + 1;
+@
+
+<<Find next range where either [[a]] or [[b]] is different>>=
+if(alow < blow) {
+  nextlow = alow;
+  res = UNI_BIT_SET_OP(~0, op, 0);
+  if(ahigh < blow) {
+    nexthigh = ahigh;
+    aptr++;
+    <<Set low and high for [[a]]>>
+  } else {
+    nexthigh = blow - 1;
+    alow = blow;
+  }
+} else if(alow > blow) {
+  nextlow = blow;
+  res = UNI_BIT_SET_OP(0, op, ~0);
+  if(bhigh < alow) {
+    nexthigh = bhigh;
+    bptr++;
+    <<Set low and high for [[b]]>>
+  } else {
+    nexthigh = alow - 1;
+    blow = alow;
+  }
+} else { /* alow == blow */
+  nextlow = alow;
+  res = UNI_BIT_SET_OP(~0, op, ~0);
+  nexthigh = ahigh;
+  if(ahigh <= bhigh) {
+    aptr++;
+    <<Set low and high for [[a]]>>
+  } else
+    alow = bhigh + 1;
+  if(bhigh <= nexthigh) {
+    nexthigh = bhigh;
+    bptr++;
+    <<Set low and high for [[b]]>>
+  } else
+    blow = nexthigh + 1;
+}
+@
+
+Any operations involving just one set are done immediately.  Although
+it would be possible to shortcut operations against empty (or full)
+sets as well, the slower generic routines are used instead of trying
+to test for those cases.
+
+<<Shortcut all ops that don't involve both range table sets>>=
+if(op == UNI_SOP_NIL) {
+  inisize(tab, 1); /* so free always works */
+  *rtab = tab;
+  *r_len = 0;
+  return;
+} else if(op == UNI_SOP_ALL) {
+  inisize(tab, 1);
+  tab[0].low = 0;
+  tab[0].high = UNI_MAX_CP;
+  *rtab = tab;
+  *r_len = 1;
+  return;
+} else if(op == UNI_SOP_A) {
+  inisize(tab, a_len);
+  cpybuf(tab, a, a_len * sizeof(*a));
+  *rtab = tab;
+  *r_len = a_len;
+  return;
+} else if(op == UNI_SOP_INV_A) {
+  uni_chrrng_invert(a, a_len, rtab, r_len);
+  return;
+} else if(op == UNI_SOP_B) {
+  inisize(tab, b_len);
+  cpybuf(tab, b, b_len);
+  *rtab = tab;
+  *r_len = b_len;
+  return;
+} else if(op == UNI_SOP_INV_B) {
+  uni_chrrng_invert(b, b_len, rtab, r_len);
+  return;
 }
 @
 
@@ -2666,7 +2553,6 @@ lowest level; this may be specified using [[minwidth]].  By default,
 [[minwidth]] can never be lower than 4, since 32-bit words are used.
 
 <<Unicode property exports for generator>>=
-#define UNI_MAX_MULTILEV 3
 void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
                    uint32_t high, uint8_t def, uint32_t minwidth,
 		   <<Multi-level table type>> **ml, uint32_t *ml_len);
@@ -2677,6 +2563,7 @@ int multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
 @
 
 <<Unicode property functions for generator>>=
+#define UNI_MAX_MULTILEV 3
 void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
                    uint32_t high, uint8_t def, uint32_t minwidth,
 		   <<Multi-level table type>> **ml, uint32_t *ml_len)
@@ -3733,7 +3620,7 @@ int main(void)
 }
 @
 
-\lstset{language=C}
+\lstset{language=make}
 <<makefile.vars>>=
 PARSE_UCD_DEPS := parse-ucd.c $(SUPT_LIB_LOC)/libsupt.a <<Additional parse-ucd C files>>
 
@@ -4464,7 +4351,7 @@ is_uni_x(i, mtab)
 
 \lstset{language=sh}
 <<Clean temporary files>>=
-rm -f uni_*_*.gen.[co]
+rm -f uni_*.gen.[co]
 @
 
 When printing the multi-level table, comments are added to indicate
@@ -4532,7 +4419,6 @@ macros that compare directly to the limited set they contain.  These
 are:  characters which act as line terminators, and characters which
 may initiate backslash-escapes.
 
-\lstset{language=C}
 <<Unicode property exports>>=
 #define uni_is_nl(x) ((x) == '\n' || (x) == '\r' || (x) == '\v' || (x) == '\f' || \
                   (x) == 0x0085 || (x) == 0x2028 || (x) == 0x2029)
@@ -5250,6 +5136,10 @@ typedef enum {
 <<[[uni_propdesc_t]]>>
 @
 
+<<Known Data Types>>=
+uni_propdesc_t,uni_prop_type_t,%
+@
+
 <<Dump character information as C code>>=
 fprintf(gen_h, "extern const uni_propdesc_t uni_propdesc[];\n");
 open_wf(pnf, "uni_propdesc.gen.c");
@@ -5718,7 +5608,8 @@ does not guarantee that zero is the default value, and zero is stored
 more efficiently than any other value, all values are incremented by
 one and the default value is aliased to zero as well.  The default
 value itself is never stored in the table; it is supplied in the
-lookup function as well.
+lookup function as well.  The actual multi-level table data is just
+the adjusted enumeration value, one byte per entry.
 
 <<Unicode property exports for generator>>=
 uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
@@ -5795,7 +5686,9 @@ for(i = 0; i < nparsed; i++)
 There are no 16-bit and 32-bit values to store yet, but here is a good
 a place as any to write the multi-tab conversion functions.  Since
 these are not for enumerations, no special handling is provided for
-the default value:  it is always assumed to be zero.
+the default value:  it is always assumed to be zero.  Therefore the
+multi-level table data is just the raw native-endian 16-bit or 32-bit
+data.
 
 <<Unicode property exports for generator>>=
 uint32_t *rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
@@ -5970,8 +5863,10 @@ search value.  For example, 3.0 matches 1.1 as well.
 Numeric values are stored as rational numbers (fractions).  Since the
 current standard has no numbers requiring denominators over 127, the
 denominator is stored in a single byte.  The numerator needs no more
-than 19 bits, so it is stored in the remaining 3 bytes.  The 32-bit
-data type can be used to store these.
+than 19 bits, so it is stored in the remaining 3 bytes.  The generic
+32-bit data type developed in the last section can be used to store
+these, by casting the 32-bit value back and forth between the native
+fraction structure ([[uni_frac_t]]).
 
 <<[[uni_frac_t]]>>=
 typedef struct {
@@ -6005,7 +5900,7 @@ void uni_chrrng_val(uint32_t cp, const uni_chrrng_dat32_t *tab,
 
 <<Property parsed contents>>=
 uni_chrrng_dat32_t *rng_dat32;
-int rng_num; /* flag */
+int rng_num; /* flag: rng_dat32's data is actually uni_frac_t */
 @
 
 <<UCD parser local functions>>=
@@ -6364,6 +6259,7 @@ if(parsed_props[i].rng_num)
   t = UNI_PROP_TYPE_NUM;
 @
 
+\lstset{language=txt}
 <<FIXME>>=
 numeric (UAX44-LM1):
   compare as floating-point number w/ limited precision
@@ -6417,6 +6313,7 @@ into a single string table can be done during post-processing.
 However, to assist with this, multiple tables sharing the same string
 table can use the [[flags]] field to distinguish themselves.
 
+\lstset{language=C}
 <<[[prop_t]] prerequisites>>=
 typedef struct {
   uint32_t cp, off, flags: 8, len: 24;
@@ -6724,7 +6621,14 @@ static void dump_strs(prop_t *p, FILE *gen_h)
 @
 
 <<Dump character information as C code>>=
+/* ensure that each property has like-named string table */
+dmf_prop->name = "dm";
 dump_strs(dmf_prop, gen_h);
+dmf_prop->name = "dm_full";
+fputs("#define uni_canon_decomp_strs uni_dm_strs\n"
+      "#define uni_canon_decomp_strs_len uni_dm_strs_len\n"
+      "#define uni_compat_decomp_strs uni_dm_strs\n"
+      "#define uni_compat_decomp_strs_len uni_dm_strs_len\n", gen_h);
 @
 
 Now that the string offsets and lengths are correct, the plain table
@@ -6950,9 +6854,9 @@ const char *strs_name;
 @
 
 <<Parse UCD files>>=
-parsed_props[add_prop("canon_decomp")].strs_name = "dm_full";
-parsed_props[add_prop("compat_decomp")].strs_name = "dm_full";
-parsed_props[add_prop("dm")].strs_name = "dm_full";
+parsed_props[add_prop("canon_decomp")].strs_name = "dm";
+parsed_props[add_prop("compat_decomp")].strs_name = "dm";
+parsed_props[add_prop("dm")].strs_name = "dm";
 parsed_props[add_prop("canon_decomp")].mt = (uint32_t *)~0;
 parsed_props[add_prop("compat_decomp")].mt = (uint32_t *)~0;
 parsed_props[add_prop("dm")].mt = (uint32_t *)~0;
@@ -6996,16 +6900,16 @@ lookups are used.
 /* 2-step lookup: uni_find_xxx followed by uni_get_decomp */
 /* off is uint16_t; len and compat are uint8_t; compat is optional */
 #define uni_find_canon_decomp(cp, off, len) \
-  uni_x_dec(cp, uni_canon_decomp_mtab, off, len, NULL, 1, uni_dm_full_strs)
+  uni_x_dec(cp, uni_canon_decomp_mtab, off, len, NULL, 1, uni_dm_strs)
 #define uni_find_compat_decomp(cp, off, len, compat) \
-  uni_x_dec(cp, uni_compat_decomp_mtab, off, len, compat, 1, uni_dm_full_strs)
+  uni_x_dec(cp, uni_compat_decomp_mtab, off, len, compat, 1, uni_dm_strs)
 #define uni_find_dm(cp, off, len, compat) \
-  uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_full_strs)
+  uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_strs)
 #define uni_get_decomp(cp, buf, off, len) do { \
   if((off) == -1) \
     hangul_syllable_decomp(cp, buf, (len) == 3); \
   else \
-    cpybuf(buf, uni_dm_full_strs + (off), len); \
+    cpybuf(buf, uni_dm_strs + (off), len); \
 } while(0)
 @
 
@@ -7070,9 +6974,9 @@ static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
            name, nent, nent * 8, lg2(nent + 1));
     print_mtab_info(mtab, nent * 8);
     /* check integrity */
-    const uni_str_ptr_t *ms, *rs, z;
+    const uni_str_ptr_t *ms, *rs;
+    static const uni_str_ptr_t z = {0};
     uni_str_arr_t *r;
-    clearbuf(&z, 1);
     for(i = 0; i < 0x110000; i++) {
       r = bsearch(&i, rng, nent, sizeof(*rng), uni_cmp_cp);
       rs = r ? (uni_str_ptr_t *)&r->off : &z;
@@ -7641,35 +7545,38 @@ fclose(f);
 @
 
 <<Parse UCD files>>=
-#define postproc_sc(n) do { \
-  prop_t *prop = &parsed_props[prop_##n]; \
-  qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp); \
-  /* pass 1: merge */ \
-  for(i = 1; i < prop->len; i++) { \
-    raw_cp_str_t *prev = &prop->str_arr[i - 1], *cur = &prop->str_arr[i]; \
-    if(cur->cp == prev->cp) { \
-      uint32_t newstr[cur->len + prev->len]; \
-      cpybuf(newstr, prop->strs + prev->off, prev->len); \
-      cpybuf(newstr + prev->len, prop->strs + cur->off, cur->len); \
-      prev->cp = 0; \
-      add_str_rng(prop, cur->cp, cur->cp, newstr, cur->len + prev->len); \
-      cur->off = prop->str_arr[prop->len - 1].off; \
-      cur->len += prev->len; \
-      prop->len--; \
-    } \
-  } \
-  /* pass 2: remove merged */ \
-  /* doing it one at a time is inefficient, but simple and good enough */ \
-  for(i = 0; i < prop->len; i++) \
-    if(!prop->str_arr[i].cp) { \
-      movebuf(&prop->str_arr[i], &prop->str_arr[i + 1], prop->len - i); \
-      prop->len--; \
-      i--; \
-    } \
-} while(0)
-postproc_sc(lc);
-postproc_sc(uc);
-postproc_sc(tc);
+<<Postprocess simple casing for [[lc]]>>
+<<Postprocess simple casing for [[uc]]>>
+<<Postprocess simple casing for [[tc]]>>
+@
+
+<<Postprocess simple casing for (@c)>>=
+{
+  prop_t *prop = &parsed_props[prop_<<@c>>];
+  qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp);
+  /* pass 1: merge */
+  for(i = 1; i < prop->len; i++) {
+    raw_cp_str_t *prev = &prop->str_arr[i - 1], *cur = &prop->str_arr[i];
+    if(cur->cp == prev->cp) {
+      uint32_t newstr[cur->len + prev->len];
+      cpybuf(newstr, prop->strs + prev->off, prev->len);
+      cpybuf(newstr + prev->len, prop->strs + cur->off, cur->len);
+      prev->cp = 0;
+      add_str_rng(prop, cur->cp, cur->cp, newstr, cur->len + prev->len);
+      cur->off = prop->str_arr[prop->len - 1].off;
+      cur->len += prev->len;
+      prop->len--;
+    }
+  }
+  /* pass 2: remove merged */
+  /* doing it one at a time is inefficient, but simple and good enough */
+  for(i = 0; i < prop->len; i++)
+    if(!prop->str_arr[i].cp) {
+      movebuf(&prop->str_arr[i], &prop->str_arr[i + 1], prop->len - i);
+      prop->len--;
+      i--;
+    }
+}
 @
 
 <<Additional parse-ucd C files>>=
@@ -7709,18 +7616,16 @@ three supported output formats.
 /* return: -1 means no change */
 /*         -2 means condition required */
 /*         0+ == length of potential return */
-int uni_case_convert32(uint32_t cp, uint32_t cond,
-                       <<UTF-32 buffer return parameters>>,
+<<[[uni_case_convert]] proto [[32]]>>;
+<<[[uni_case_convert]] proto [[16]]>>;
+<<[[uni_case_convert]] proto [[8]]>>;
+@
+
+<<[[uni_case_convert]] proto(@sz)>>=
+int uni_case_convert<<@sz>>(uint32_t cp, uint32_t cond,
+                       <<UTF-N buffer return parameters [[<<@sz>>]]>>,
                        const uint32_t *simple, const uint32_t *special,
-		       const uint32_t *strs);
-int uni_case_convert16(uint32_t cp, uint32_t cond,
-                       <<UTF-16 buffer return parameters>>,
-                       const uint32_t *simple, const uint32_t *special,
-		       const uint32_t *strs);
-int uni_case_convert8(uint32_t cp, uint32_t cond,
-                      <<UTF-8 buffer return parameters>>,
-                      const uint32_t *simple, const uint32_t *special,
-		      const uint32_t *strs);
+		       const uint32_t *strs)
 @
 
 <<Unicode property functions>>=
@@ -7779,111 +7684,44 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
 @
 
 <<Unicode property functions>>=
-int uni_case_convert32(uint32_t cp, uint32_t cond,
-                       <<UTF-32 buffer return parameters>>,
-                       const uint32_t *simple, const uint32_t *special,
-		       const uint32_t *strs)
+<<[[uni_case_convert]] [[32]]>>
+<<[[uni_case_convert]] [[16]]>>
+<<[[uni_case_convert]] [[8]]>>
+@
+
+<<[[uni_case_convert]](@sz)>>=
+<<[[uni_case_convert]] proto [[<<@sz>>]]>>
 {
   const uint32_t *rbuf;
   int32_t ret = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
   if(ret < 0)
     return ret;
   if(!rbuf)
-    return uni_return_buf32((const uint32_t *)&ret, 1, buf, off, buf_len);
-  return uni_return_buf32(rbuf, ret, buf, off, buf_len);
+    return uni_return_buf<<@sz>>((uint32_t *)&ret, 1, buf, off, buf_len);
+  return uni_return_buf<<@sz>>(rbuf, ret, buf, off, buf_len);
 }
 @
 
-<<Unicode property exports>>=
-/* note for all 3 below: if((res = uni_xx(cp, ...)) == -1) { res = 1; *buf = cp } */
-#define uni_lc32(cp, cond, buf, off, buf_len) \
-  uni_case_convert32(cp, cond, buf, off, buf_len, \
-                     uni_slc_mtab, uni_lc_mtab, uni_lc_strs)
-#define uni_uc32(cp, cond, buf, off, buf_len) \
-  uni_case_convert32(cp, cond, buf, off, buf_len, \
-                     uni_suc_mtab, uni_uc_mtab, uni_uc_strs)
-/* don't forget: if((res = uni_tc32(cp, ...)) == -1) res = uni_uc32(cp, ...) */
-#define uni_tc32(cp, cond, buf, off, buf_len) \
-  uni_case_convert32(cp, cond, buf, off, buf_len, \
-                     uni_stc_mtab, uni_tc_mtab, uni_tc_strs)
+<<[[uni_case_convert]] support (@type)>>=
+<<[[uni_case_convert]] supportn [[32]]>>
+<<[[uni_case_convert]] supportn [[16]]>>
+<<[[uni_case_convert]] supportn [[8]]>>
 @
 
-<<C Prototypes>>=
-int uni_lc32(uint32_t cp, uint32_t cond, <<UTF-32 buffer return parameters>>);
-int uni_uc32(uint32_t cp, uint32_t cond, <<UTF-32 buffer return parameters>>);
-int uni_tc32(uint32_t cp, uint32_t cond, <<UTF-32 buffer return parameters>>);
-@
+<<[[uni_case_convert]] supportn (@sz)>>=
+int uni_<<@type>><<@sz>>(uint32_t cp, uint32_t cond, <<UTF-N buffer return parameters [[<<@sz>>]]>>);
+#define uni_<<@type>><<@sz>>(cp, cond, buf, off, buf_len) \
+  uni_case_convert<<@sz>>(cp, cond, buf, off, buf_len, \
+                     uni_s<<@type>>_mtab, uni_<<@type>>_mtab, uni_<<@type>>_strs)
 
-<<Unicode property functions>>=
-int uni_case_convert16(uint32_t cp, uint32_t cond,
-                       <<UTF-16 buffer return parameters>>,
-                       const uint32_t *simple, const uint32_t *special,
-		       const uint32_t *strs)
-{
-  const uint32_t *rbuf;
-  int32_t ret = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
-  if(ret < 0)
-    return ret;
-  if(!rbuf)
-    return uni_return_buf16((const uint32_t *)&ret, 1, buf, off, buf_len);
-  return uni_return_buf16(rbuf, ret, buf, off, buf_len);
-}
 @
 
 <<Unicode property exports>>=
-/* note for all 3 below: if((res = uni_xx(cp, ...)) == -1) { res = 1; *buf = cp } */
-#define uni_lc16(cp, cond, buf, off, buf_len) \
-  uni_case_convert16(cp, cond, buf, off, buf_len, \
-                     uni_slc_mtab, uni_lc_mtab, uni_lc_strs)
-#define uni_uc16(cp, cond, buf, off, buf_len) \
-  uni_case_convert16(cp, cond, buf, off, buf_len, \
-                     uni_suc_mtab, uni_uc_mtab, uni_uc_strs)
-/* don't forget: if((res = uni_tc16(cp, ...)) == -1) res = uni_uc16(cp, ...) */
-#define uni_tc16(cp, cond, buf, off, buf_len) \
-  uni_case_convert16(cp, cond, buf, off, buf_len, \
-                     uni_stc_mtab, uni_tc_mtab, uni_tc_strs)
-@
-
-<<C Prototypes>>=
-int uni_lc16(uint32_t cp, uint32_t cond, <<UTF-16 buffer return parameters>>);
-int uni_uc16(uint32_t cp, uint32_t cond, <<UTF-16 buffer return parameters>>);
-int uni_tc16(uint32_t cp, uint32_t cond, <<UTF-16 buffer return parameters>>);
-@
-
-<<Unicode property functions>>=
-int uni_case_convert8(uint32_t cp, uint32_t cond,
-                      <<UTF-8 buffer return parameters>>,
-		      const uint32_t *simple, const uint32_t *special,
-		      const uint32_t *strs)
-{
-  const uint32_t *rbuf;
-  int32_t ret = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
-  if(ret < 0)
-    return ret;
-  if(!rbuf)
-    return uni_return_buf8((const uint32_t *)&ret, 1, buf, off, buf_len);
-  return uni_return_buf8(rbuf, ret, buf, off, buf_len);
-}
-@
-
-<<Unicode property exports>>=
-/* note for all 3 below: if((res = uni_xx(cp, ...)) == -1) { res = 1; *buf = cp } */
-#define uni_lc8(cp, buf, buf_len, cond) \
-  uni_case_convert8(cp, buf, buf_len, uni_slc_mtab, uni_lc_mtab, uni_lc_strs, \
-                    cond)
-#define uni_uc8(cp, buf, buf_len, cond) \
-  uni_case_convert8(cp, buf, buf_len, uni_suc_mtab, uni_uc_mtab, uni_uc_strs, \
-                    cond)
-/* don't forget: if((res = uni_tc8(cp, ...)) == -1) res = uni_uc8(cp, ...) */
-#define uni_tc8(cp, buf, buf_len, cond) \
-  uni_case_convert8(cp, buf, buf_len, uni_stc_mtab, uni_tc_mtab, uni_tc_strs, \
-                    cond)
-@
-
-<<C Prototypes>>=
-int uni_lc8(uint32_t cp, uint32_t cond, <<UTF-8 buffer return parameters>>);
-int uni_uc8(uint32_t cp, uint32_t cond, <<UTF-8 buffer return parameters>>);
-int uni_tc8(uint32_t cp, uint32_t cond, <<UTF-8 buffer return parameters>>);
+/* note for all below: if((res = uni_xx(cp, ...)) == -1) { res = 1; *buf = cp } */
+<<[[uni_case_convert]] support [[lc]]>>
+<<[[uni_case_convert]] support [[uc]]>>
+/* don't forget: if((res = uni_tc(cp, ...)) == -1) res = uni_uc(cp, ...) */
+<<[[uni_case_convert]] support [[tc]]>>
 @
 
 For more case transformation fun, there is [[CaseFolding.txt]].  It
@@ -7924,7 +7762,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   }
 }
 fclose(f);
-postproc_sc(cf);
+<<Postprocess simple casing for [[cf]]>>
 @
 
 <<Dump character information as C code>>=
@@ -7937,38 +7775,28 @@ parsed_props[prop_cf].mt = (uint32_t *)~0; /* force addition to prop table */
 
 Technically, any entry which is in the S class but not in the F class
 should have no translation.  However, I believe that there is no such
-case.  Like with the case conversions, a macro is provided for cf
-property lookup.  Since there is no condition input, a special macro
+case.  Like with the case conversions, a set of macros is provided for
+cf property lookup.  Since there is no condition input, a special macro
 is provided for Turkic locales as well.
 
-<<Unicode property exports>>=
-#define uni_cf32(cp, buf, off, buf_len) \
-  uni_case_convert32(cp, 0, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
-#define uni_tcf32(cp, buf, off, buf_len) \
-  uni_case_convert32(cp, UNI_SC_FL_TR, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
-#define uni_cf16(cp, buf, off, buf_len) \
-  uni_case_convert16(cp, 0, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
-#define uni_tcf16(cp, buf, off, buf_len) \
-  uni_case_convert16(cp, UNI_SC_FL_TR, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
-#define uni_cf8(cp, buf, off, buf_len) \
-  uni_case_convert8(cp, 0, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
-#define uni_tcf8(cp, buf, off, buf_len) \
-  uni_case_convert8(cp, UNI_SC_FL_TR, buf, off, buf_len, \
-                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
+<<[[uni_case_convert]] cf support (@type@cond)>>=
+<<[[uni_case_convert]] cf supportn [[32]]>>
+<<[[uni_case_convert]] cf supportn [[16]]>>
+<<[[uni_case_convert]] cf supportn [[8]]>>
 @
 
-<<C Prototypes>>=
-int uni_cf32(uint32_t cp, <<UTF-32 buffer return parameters>>);
-int uni_tcf32(uint32_t cp, <<UTF-32 buffer return parameters>>);
-int uni_cf16(uint32_t cp, <<UTF-16 buffer return parameters>>);
-int uni_tcf16(uint32_t cp, <<UTF-16 buffer return parameters>>);
-int uni_cf8(uint32_t cp, <<UTF-8 buffer return parameters>>);
-int uni_tcf8(uint32_t cp, <<UTF-8 buffer return parameters>>);
+<<[[uni_case_convert]] cf supportn (@sz)>>=
+int uni_<<@type>><<@sz>>(uint32_t cp, <<UTF-N buffer return parameters [[<<@sz>>]]>>);
+#define uni_<<@type>><<@sz>>(cp, buf, off, buf_len) \
+  uni_case_convert<<@sz>>(cp, <<@cond>>, buf, off, buf_len, \
+                     uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
+
+@
+
+<<Unicode property exports>>=
+<<[[uni_case_convert]] cf support [[cf]][[0]]>>
+/* in turkic locales */
+<<[[uni_case_convert]] cf support [[tcf]][[UNI_SC_FL_TR]]>>
 @
 
 [[DerivedNormalizationProps.txt]] contains the final case folding
@@ -8001,6 +7829,7 @@ There are a number of combinations:  NFC\_CF, NFC\_SCF,
 NFKC\_SCF.  Whether or not any of those combinations should include
 removal of default ignorable code points is difficult to tell.
 
+\lstset{language=txt}
 <<FIXME>>=
  combine case folding and normalization here
    create string tabs NFC_CF, NFC_SCF, NFKC_SCF(?)
@@ -8018,6 +7847,7 @@ properties.
 uni_norm.o
 @
 
+\lstset{language=C}
 <<Library [[uni]] headers>>=
 #include "uni_norm.h"
 @
@@ -8073,124 +7903,121 @@ provided to do just that.
 
 /* decomp functions can operate on any number of chars, including 1 */
 /* decomp functions return final length */
-int uni_NFD_dec32(const uint32_t *ibuf, unsigned int ilen,
-                  <<UTF-32 buffer return parameters>>);
-int uni_NFD_dect32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFD_dec16(const uint16_t *ibuf, unsigned int ilen,
-                  <<UTF-16 buffer return parameters>>);
-int uni_NFD_dect16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFD_dec8(const uint8_t *ibuf, unsigned int ilen,
-                 <<UTF-8 buffer return parameters>>);
-int uni_NFD_dect8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
-int uni_NFKD_dec32(const uint32_t *ibuf, unsigned int ilen,
-                   <<UTF-32 buffer return parameters>>);
-int uni_NFKD_dect32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFKD_dec16(const uint16_t *ibuf, unsigned int ilen,
-                   <<UTF-16 buffer return parameters>>);
-int uni_NFKD_dect16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFKD_dec8(const uint8_t *ibuf, unsigned int ilen,
-                  <<UTF-8 buffer return parameters>>);
-int uni_NFKD_dect8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
+<<[[uni_X_decn]] proto [[NFD_dec]]>>
+<<[[uni_X_decn]] proto [[NFKD_dec]]>>
 /* NFKC_Casefold assumes NFD has already been run */
-int uni_NFKC_Casefold32(const uint32_t *ibuf, unsigned int ilen,
-                        <<UTF-32 buffer return parameters>>);
-int uni_NFKC_Casefoldt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC_Casefold16(const uint16_t *ibuf, unsigned int ilen,
-                        <<UTF-16 buffer return parameters>>);
-int uni_NFKC_Casefoldt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC_Casefold8(const uint8_t *ibuf, unsigned int ilen,
-                       <<UTF-8 buffer return parameters>>);
-int uni_NFKC_Casefoldt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
+<<[[uni_X_decn]] proto [[NFKC_Casefold]]>>
+@
+
+<<[[uni_X_decn]] proto (@type)>>=
+<<[[uni_X_dec]] proto [[32]]>>;
+<<[[uni_X_dect]] proto [[32]]>>;
+<<[[uni_X_dec]] proto [[16]]>>;
+<<[[uni_X_dect]] proto [[16]]>>;
+<<[[uni_X_dec]] proto [[8]]>>;
+<<[[uni_X_dect]] proto [[8]]>>;
+@
+
+<<[[uni_X_dec]] proto (@sz)>>=
+int uni_<<@type>><<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
+                 <<UTF-N buffer return parameters [[<<@sz>>]]>>)
+@
+
+<<[[uni_X_dect]] proto (@sz)>>=
+int uni_<<@type>>t<<@sz>>(<<UTF-N buffer return parameters [[<<@sz>>]]>>, unsigned int ilen)
 @
 
 <<Unicode normalization support functions>>=
-#define do_any_decn(sz) \
-  static int do_any_dec##sz(const uint##sz##_t *ibuf, unsigned int ilen, \
-                            uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                            const uint32_t *tab, const uint32_t *str) \
-  { \
-    int i; \
-    int rlen = 0; \
-    unsigned int blen = off > 0 ? ~0 : buf_len ? *buf_len : 0; \
-    uint##sz##_t *bptr = off < 0 && buf ? *buf : NULL; \
-    for(i = 0; i < ilen; i += uni_utf##sz##_nextc(ibuf + i)) { \
-      int16_t doff; \
-      uint8_t len; \
-      uint8_t compat; \
-      const uint32_t *rptr; \
-      uint32_t hbuf[3], cp = uni_int_utf##sz##_decode(ibuf + i, NULL); \
-      uni_x_dec(cp, tab, &doff, &len, &compat, 1, str); \
-      if(!len && !doff) { \
-        len = 1; \
-	rptr = &cp; \
-      } else if(doff < 0) { \
-        hangul_syllable_decomp(cp, hbuf, 1); \
-        rptr = hbuf; \
-      } else \
-        rptr = str + doff; \
-      len = uni_return_buf##sz(rptr, len, off < 0 ? &bptr : buf, off, \
-	                       off < 0 ? &blen : buf_len); \
-      rlen += len; \
-      blen -= blen > len ? len : blen; \
-      if(off >= 0) \
-        off += len; \
-      else \
-        bptr += len; \
-    } \
-    return rlen; \
+<<[[do_any_decn]] [[32]]>>
+<<[[do_any_decn]] [[16]]>>
+<<[[do_any_decn]] [[8]]>>
+@
+
+<<[[do_any_decn]] (@sz)>>=
+static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
+                          <<UTF-N buffer return parameters[[<<@sz>>]]>>,
+                          const uint32_t *tab, const uint32_t *str)
+{
+  int i;
+  int rlen = 0;
+  unsigned int blen = off > 0 ? ~0 : buf_len ? *buf_len : 0;
+  uint<<@sz>>_t *bptr = off < 0 && buf ? *buf : NULL;
+  for(i = 0; i < ilen; i += uni_utf<<@sz>>_nextc(ibuf + i)) {
+    int16_t doff;
+    uint8_t len;
+    uint8_t compat;
+    const uint32_t *rptr;
+    uint32_t hbuf[3], cp = uni_int_utf<<@sz>>_decode(ibuf + i, NULL);
+    uni_x_dec(cp, tab, &doff, &len, &compat, 1, str);
+    if(!len && !doff) {
+      len = 1;
+      rptr = &cp;
+    } else if(doff < 0) {
+      hangul_syllable_decomp(cp, hbuf, 1);
+      rptr = hbuf;
+    } else
+      rptr = str + doff;
+    len = uni_return_buf<<@sz>>(rptr, len, off < 0 ? &bptr : buf, off,
+	                     off < 0 ? &blen : buf_len);
+    rlen += len;
+    blen -= blen > len ? len : blen;
+    if(off >= 0)
+      off += len;
+    else
+      bptr += len;
   }
-do_any_decn(32)
-do_any_decn(16)
-do_any_decn(8)
+  return rlen;
+}
 @
 
 <<Unicode normalization support functions>>=
-#define do_any_dectn(sz) \
-  static int do_any_dect##sz(uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                             unsigned int ilen, \
-                             const uint32_t *tab, const uint32_t *str) \
-  { \
-    uint##sz##_t *ibuf; \
-    int ret; \
-    if(!ilen) \
-      return 0; \
-    if(off < 0 && !buf_len) /* support rval as fixed len */ \
-      buf_len = &ilen; \
-    /* technically an error if ilen > *buf_len, but no check */ \
-    inisize(ibuf, ilen); \
-    cpybuf(ibuf, off > 0 ? *buf + off : *buf, ilen); \
-    ret = do_any_dec##sz(ibuf, ilen, buf, off, buf_len, tab, str); \
-    free(ibuf); \
-    return ret; \
-  }
-do_any_dectn(32)
-do_any_dectn(16)
-do_any_dectn(8)
+<<[[do_any_dectn]] [[32]]>>
+<<[[do_any_dectn]] [[16]]>>
+<<[[do_any_dectn]] [[8]]>>
+@
+
+<<[[do_any_dectn]] (@sz)>>=
+static int do_any_dect<<@sz>>(<<UTF-N buffer return parameters [[<<@sz>>]]>>,
+                           unsigned int ilen,
+                           const uint32_t *tab, const uint32_t *str)
+{
+  uint<<@sz>>_t *ibuf;
+  int ret;
+  if(!ilen)
+    return 0;
+  if(off < 0 && !buf_len) /* support rval as fixed len */
+    buf_len = &ilen;
+  /* technically an error if ilen > *buf_len, but no check */
+  inisize(ibuf, ilen);
+  cpybuf(ibuf, off > 0 ? *buf + off : *buf, ilen);
+  ret = do_any_dec<<@sz>>(ibuf, ilen, buf, off, buf_len, tab, str);
+  free(ibuf);
+  return ret;
+}
+@
+
+<<[[uni_dec_any]] (@type@tab@str)>>=
+<<[[uni_dec_any_pair]] [[32]]>>
+<<[[uni_dec_any_pair]] [[16]]>>
+<<[[uni_dec_any_pair]] [[8]]>>
+@
+
+<<[[uni_dec_any_pair]] (@sz)>>=
+<<[[uni_X_dec]] proto [[<<@sz>>]]>>
+{
+  return do_any_dec<<@sz>>(ibuf, ilen, buf, off, buf_len, <<@tab>>, <<@str>>);
+}
+
+<<[[uni_X_dect]] proto [[<<@sz>>]]>>
+{
+  return do_any_dect<<@sz>>(buf, off, buf_len, ilen, <<@tab>>, <<@str>>);
+}
 @
 
 <<Unicode normalization support functions>>=
-#define dec_any_pair(n, sz, tab, str) \
-  int uni_##n##sz(const uint##sz##_t *ibuf, unsigned int ilen, \
-                  uint##sz##_t **buf, int off, unsigned int *buf_len) \
-  { \
-    return do_any_dec##sz(ibuf, ilen, buf, off, buf_len, tab, str); \
-  }\
-  \
-  int uni_##n##t##sz(uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                     unsigned int ilen) \
-  { \
-    return do_any_dect##sz(buf, off, buf_len, ilen, tab, str); \
-  }
-#define dec_any(n, tab, str) \
-  dec_any_pair(n, 32, tab, str) \
-  dec_any_pair(n, 16, tab, str) \
-  dec_any_pair(n, 8, tab, str)
-@
-
-<<Unicode normalization support functions>>=
-dec_any(NFKD_dec, uni_compat_decomp_mtab, uni_dm_full_strs)
-dec_any(NFD_dec, uni_canon_decomp_mtab, uni_dm_full_strs)
-dec_any(NFKC_Casefold, uni_NFKC_CF_mtab, uni_NFKC_CF_strs)
+<<[[uni_dec_any]] [[NFD_dec]][[uni_canon_decomp_mtab]][[uni_dm_strs]]>>
+<<[[uni_dec_any]] [[NFKD_dec]][[uni_compat_decomp_mtab]][[uni_dm_strs]]>>
+<<[[uni_dec_any]] [[NFKC_Casefold]][[uni_NFKC_CF_mtab]][[uni_NFKC_CF_strs]]>>
 @
 
 Canonical ordering is the second step in any normalization.  This
@@ -8215,9 +8042,19 @@ Instead, only an in-place sorter is provided.
 /* set last to non-0 if no continuations possible */
 /* returns less than ilen if more chars needed */
 /* can skip # of chars equal to return value */
-int uni_Canon_Order32(uint32_t *buf, unsigned int ilen, int last);
-int uni_Canon_Order16(uint16_t *buf, unsigned int ilen, int last);
-int uni_Canon_Order8(uint8_t *buf, unsigned int ilen, int last);
+<<[[canon_ordern]] proto [[32]]>>;
+<<[[canon_ordern]] proto [[16]]>>;
+<<[[canon_ordern]] proto [[8]]>>;
+@
+
+<<[[canon_ordern]] proto (@sz)>>=
+int uni_Canon_Order<<@sz>>(uint<<@sz>>_t *buf, unsigned int ilen, int last)
+@
+
+<<Unicode normalization support functions>>=
+<<[[canon_ordern]] [[32]]>>
+<<[[canon_ordern]] [[16]]>>
+<<[[canon_ordern]] [[8]]>>
 @
 
 <<Unicode normalization support local definitions>>=
@@ -8237,47 +8074,43 @@ static int cmpcc(const void *a, const void *b)
 }
 @
 
-<<Unicode normalization support functions>>=
-#define canon_order(sz) \
-  int uni_Canon_Order##sz(uint##sz##_t *buf, unsigned int ilen, int last) \
-  { \
-    int i; \
-    for(i = 0; i < ilen; i += uni_utf##sz##_nextc(buf + i)) { \
-      uint32_t cp = uni_int_utf##sz##_decode(buf + i, NULL); \
-      int cc = uni_ccc_of(cp); \
-      if(cc) { \
-        int ni = i + uni_utf##sz##_nextc(buf + i); \
-        int j, l; \
-        for(l = 1, j = ni; j < ilen; j += uni_utf##sz##_nextc(buf + j), l++) { \
-          uint32_t cp2 = uni_int_utf##sz##_decode(buf + j, NULL); \
-          int cc2 = uni_ccc_of(cp2); \
-          if(!cc2) \
-            break; \
-        } \
-        if(j == ilen && !last) \
-          return i; \
-        struct ccs ccbuf[l]; \
-        ccbuf[0].ccc = cc; \
-        ccbuf[0].cp = cp; \
-        ccbuf[0].opos = i; \
-        int k; \
-        for(l = 1, k = ni; k < j; k += uni_utf##sz##_nextc(buf + k), l++) { \
-          uint32_t cp2 = uni_int_utf##sz##_decode(buf + k, NULL); \
-          ccbuf[l].ccc = uni_ccc_of(cp2); \
-	  ccbuf[l].cp = cp2; \
-	  ccbuf[l].opos = k; \
-        } \
-        qsort(ccbuf, l, sizeof(*ccbuf), cmpcc); \
-        for(k = 0, j = i; k < l; k++, j += uni_utf##sz##_nextc(buf + j)) \
-          if(ccbuf[k].opos != j) \
-	    uni_int_utf##sz##_encode(buf + j, ccbuf[k].cp); \
-      } \
-    } \
-    return ilen; \
+<<[[canon_ordern]] (@sz)>>=
+<<[[canon_ordern]] proto [[<<@sz>>]]>>
+{
+  int i;
+  for(i = 0; i < ilen; i += uni_utf<<@sz>>_nextc(buf + i)) {
+    uint32_t cp = uni_int_utf<<@sz>>_decode(buf + i, NULL);
+    int cc = uni_ccc_of(cp);
+    if(cc) {
+      int ni = i + uni_utf<<@sz>>_nextc(buf + i);
+      int j, l;
+      for(l = 1, j = ni; j < ilen; j += uni_utf<<@sz>>_nextc(buf + j), l++) {
+        uint32_t cp2 = uni_int_utf<<@sz>>_decode(buf + j, NULL);
+	int cc2 = uni_ccc_of(cp2);
+	if(!cc2)
+	  break;
+      }
+      if(j == ilen && !last)
+        return i;
+      struct ccs ccbuf[l];
+      ccbuf[0].ccc = cc;
+      ccbuf[0].cp = cp;
+      ccbuf[0].opos = i;
+      int k;
+      for(l = 1, k = ni; k < j; k += uni_utf<<@sz>>_nextc(buf + k), l++) {
+        uint32_t cp2 = uni_int_utf<<@sz>>_decode(buf + k, NULL);
+	ccbuf[l].ccc = uni_ccc_of(cp2);
+	ccbuf[l].cp = cp2;
+	ccbuf[l].opos = k;
+      }
+      qsort(ccbuf, l, sizeof(*ccbuf), cmpcc);
+      for(k = 0, j = i; k < l; k++, j += uni_utf<<@sz>>_nextc(buf + j))
+        if(ccbuf[k].opos != j)
+	  uni_int_utf<<@sz>>_encode(buf + j, ccbuf[k].cp);
+    }
   }
-canon_order(32)
-canon_order(16)
-canon_order(8)
+  return ilen;
+}
 @
 
 The last step in any composition normalization is canonical
@@ -8297,92 +8130,99 @@ just like canonical ordering, only in-place transformation is supported.
 /* returns nok < ilen if more chars needed */
 /* can skip nok chars */
 /* return value is updated length */
-int uni_NFC_comp32(uint32_t *buf, unsigned int ilen, unsigned int *nok);
-int uni_NFC_comp16(uint16_t *buf, unsigned int ilen, unsigned int *nok);
-int uni_NFC_comp8(uint8_t *buf, unsigned int ilen, unsigned int *nok);
+<<[[uni_NFC_compn]] proto [[32]]>>;
+<<[[uni_NFC_compn]] proto [[16]]>>;
+<<[[uni_NFC_compn]] proto [[8]]>>;
+@
+
+<<[[uni_NFC_compn]] proto (@sz)>>=
+int uni_NFC_comp<<@sz>>(uint<<@sz>>_t *buf, unsigned int ilen, unsigned int *nok)
 @
 
 <<Unicode normalization support functions>>=
-#define uni_NFC_compn(sz) \
-  int uni_NFC_comp##sz(uint##sz##_t *buf, unsigned int ilen, unsigned int *nok) \
-  { \
-    int i, last0 = -1; \
-    for(i = 0; i < ilen; i += uni_utf##sz##_nextc(buf + i)) { \
-      uint32_t cp = uni_int_utf##sz##_decode(buf + i, NULL); \
-      int ccc = uni_ccc_of(cp); \
-      /* first char must be ccc=0 */ \
-      if(ccc) \
-        continue; \
-      int16_t off; \
-      uint8_t len; \
-      uni_find_canon_comp(cp, &off, &len); \
-      if(!len && !off) \
-        continue; /* no compositions for this char */ \
-      last0 = i; \
-      int lastccc = 0; \
-      int j; \
-      for(j = i + uni_utf##sz##_nextc(buf + i); j < ilen; j += uni_utf##sz##_nextc(buf + j)) { \
-        uint32_t cp2 = uni_int_utf##sz##_decode(buf + j, NULL); \
-        ccc = uni_ccc_of(cp2); \
-        /* second char must have no intervening equal ccc */ \
-        /* this assumes canonical ordering has been done */ \
-        if(ccc && lastccc && ccc == lastccc) \
-          continue; \
-        /* or greater ccc; this only happens if back down to 0 */ \
-        if(!ccc && lastccc) { \
-          i = j - 1; \
-          break; \
-        } \
-        lastccc = ccc; \
-        int ccp = uni_canon_comp(cp, cp2, off, len); \
-        if(ccp > 0) { \
-          /* composition replaces char 1 and deletes char 2 */ \
-	  int clen = uni_utf##sz##_enclen(ccp); \
-	  int len1 = uni_utf##sz##_nextc(buf + i), len2 = uni_utf##sz##_nextc(buf + j); \
-	  /* make room for ccp, if necessary */ \
-	  if(len1 != clen) { \
-	    /* WARNING: this may cause buffer overrun if */ \
-	    /*  clen > len1 + len2 */ \
-	    movebuf(buf + i + clen, buf + i + len1, j - i - len1); \
-	    len2 += len1 - clen; \
-	  } \
-	  uni_int_utf##sz##_encode(buf + i, ccp); \
-	  if(len2 > 0 && ilen - j - len2) \
-            movebuf(buf + j, buf + j + len2, ilen - j - len2); \
-          ilen -= len2; \
-	  /* start over with new start char */ \
-	  cp = ccp; \
-	  uni_find_canon_comp(cp, &off, &len); \
-	  if(!len && !off) \
-	    break; /* no compositions for this char */ \
-          j = i; \
-          lastccc = 0; \
-          continue; \
-        } \
-        /* if no match and hit a ccc=0, try next 1st char */ \
-        if(!ccc) { \
-          i = j + uni_utf##sz##_prevc(buf + j); \
-          break; \
-        } \
-      } \
-    } \
-    if(nok) { \
-      /* need more if we got a potential start char */ \
-      /* but don't need to look at anything before that char */ \
-      if(last0 < 0) \
-        *nok = ilen; \
-      else { \
-        int16_t off; \
-        uint8_t len; \
-        uni_find_canon_comp(uni_int_utf##sz##_decode(buf + last0, NULL), &off, &len); \
-        *nok = len || off ? last0 : ilen; \
-      } \
-    } \
-    return ilen; \
+<<[[uni_NFC_compn]] [[32]]>>
+<<[[uni_NFC_compn]] [[16]]>>
+<<[[uni_NFC_compn]] [[8]]>>
+@
+
+<<[[uni_NFC_compn]] (@sz)>>=
+<<[[uni_NFC_compn]] proto [[<<@sz>>]]>>
+{
+  int i, last0 = -1;
+  for(i = 0; i < ilen; i += uni_utf<<@sz>>_nextc(buf + i)) {
+    uint32_t cp = uni_int_utf<<@sz>>_decode(buf + i, NULL);
+    int ccc = uni_ccc_of(cp);
+    /* first char must be ccc=0 */
+    if(ccc)
+      continue;
+    int16_t off;
+    uint8_t len;
+    uni_find_canon_comp(cp, &off, &len);
+    if(!len && !off)
+      continue; /* no compositions for this char */
+    last0 = i;
+    int lastccc = 0;
+    int j;
+    for(j = i + uni_utf<<@sz>>_nextc(buf + i); j < ilen;
+        j += uni_utf<<@sz>>_nextc(buf + j)) {
+      uint32_t cp2 = uni_int_utf<<@sz>>_decode(buf + j, NULL);
+      ccc = uni_ccc_of(cp2);
+      /* second char must have no intervening equal ccc */
+      /* this assumes canonical ordering has been done */
+      if(ccc && lastccc && ccc == lastccc)
+        continue;
+      /* or greater ccc; this only happens if back down to 0 */
+      if(!ccc && lastccc) {
+        i = j - 1;
+	break;
+      }
+      lastccc = ccc;
+      int ccp = uni_canon_comp(cp, cp2, off, len);
+      if(ccp > 0) {
+        /* composition replaces char 1 and deletes char 2 */
+	int clen = uni_utf<<@sz>>_enclen(ccp);
+	int len1 = uni_utf<<@sz>>_nextc(buf + i), len2 = uni_utf<<@sz>>_nextc(buf + j);
+	/* make room for ccp, if necessary */
+	if(len1 != clen) {
+	  /* WARNING: this may cause buffer overrun if */
+	  /*  clen > len1 + len2 */
+	  movebuf(buf + i + clen, buf + i + len1, j - i - len1);
+	  len2 += len1 - clen;
+	}
+	uni_int_utf<<@sz>>_encode(buf + i, ccp);
+	if(len2 > 0 && ilen - j - len2)
+	  movebuf(buf + j, buf + j + len2, ilen - j - len2);
+        ilen -= len2;
+	/* start over with new start char */
+	cp = ccp;
+	uni_find_canon_comp(cp, &off, &len);
+	if(!len && !off)
+	  break; /* no compositions for this char */
+        j = i;
+	lastccc = 0;
+	continue;
+      }
+      /* if no match and hit a ccc=0, try next 1st char */
+      if(!ccc) {
+        i = j + uni_utf<<@sz>>_prevc(buf + j);
+	break;
+      }
+    }
   }
-uni_NFC_compn(32)
-uni_NFC_compn(16)
-uni_NFC_compn(8)
+  if(nok) {
+    /* need more if we got a potential start char */
+    /* but don't need to look at anything before that char */
+    if(last0 < 0)
+      *nok = ilen;
+    else {
+      int16_t off;
+      uint8_t len;
+      uni_find_canon_comp(uni_int_utf<<@sz>>_decode(buf + last0, NULL), &off, &len);
+      *nok = len || off ? last0 : ilen;
+    }
+  }
+  return ilen;
+}
 @
 
 The above routine may cause buffer overruns if the composition causes
@@ -8429,104 +8269,102 @@ To demonstrate proper normalization, here are some functions which do the
 full procedure, either in-place or using a separate input buffer.
 
 <<Unicode normalization support exports>>=
-int uni_NFKD32(uint32_t *ibuf, unsigned int ilen, <<UTF-32 buffer return parameters>>);
-int uni_NFKDt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFKD16(uint16_t *ibuf, unsigned int ilen, <<UTF-16 buffer return parameters>>);
-int uni_NFKDt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFKD8(uint8_t *ibuf, unsigned int ilen, <<UTF-8 buffer return parameters>>);
-int uni_NFKDt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
-int uni_NFD32(uint32_t *ibuf, unsigned int ilen, <<UTF-32 buffer return parameters>>);
-int uni_NFDt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFD16(uint16_t *ibuf, unsigned int ilen, <<UTF-16 buffer return parameters>>);
-int uni_NFDt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFD8(uint8_t *ibuf, unsigned int ilen, <<UTF-8 buffer return parameters>>);
-int uni_NFDt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
+<<[[full_dec]] proto [[NFD]]>>
+<<[[full_dec]] proto [[NFKD]]>>
+@
+
+<<[[full_dec]] proto (@type)>>=
+<<[[full_decn]] proto [[32]]>>
+<<[[full_decn]] proto [[16]]>>
+<<[[full_decn]] proto [[8]]>>
+@
+
+<<[[full_decn]] proto (@sz)>>=
+<<[[uni_dec]] proto>>;
+<<[[uni_dect]] proto>>;
+@
+
+<<[[uni_dec]] proto>>=
+int uni_<<@type>><<@sz>>(uint<<@sz>>_t *ibuf, unsigned int ilen,
+                 <<UTF-N buffer return parameters [[<<@sz>>]]>>)
+@
+
+<<[[uni_dect]] proto>>=
+int uni_<<@type>>t<<@sz>>(<<UTF-N buffer return parameters [[<<@sz>>]]>>,
+                    unsigned int ilen)
 @
 
 <<Unicode normalization support functions>>=
-#define full_decn(nm, sz) \
-  int uni_##nm##sz(uint##sz##_t *ibuf, unsigned int ilen, \
-                   uint##sz##_t **buf, int off, unsigned int *buf_len) \
-  { \
-    if(!ilen) \
-      return 0; \
-    if(!buf_len || !*buf_len) \
-      return -1; /* length query not supported */ \
-    int ret = uni_##nm##_dec##sz(ibuf, ilen, buf, off, buf_len); \
-    if(!*buf || (off < 0 && ret > *buf_len)) \
-      return -1; /* not enough space */ \
-    return uni_Canon_Order##sz(*buf, ret, 1); \
-  } \
-  int uni_##nm##t##sz(uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                      unsigned int ilen) \
-  { \
-    uint##sz##_t *ibuf; \
-    if(!ilen) \
-      return 0; \
-    if(!buf_len) \
-      return -1; /* length query not supported */ \
-    inisize(ibuf, ilen); \
-    cpybuf(ibuf, off > 0 ? *buf + off : *buf, ilen); \
-    int ret = uni_##nm##_dec##sz(ibuf, ilen, buf, off, buf_len); \
-    free(ibuf); \
-    if(!*buf || (off < 0 && ret > *buf_len)) \
-      return -1; /* not enough space */ \
-    return uni_Canon_Order##sz(*buf, ret, 1); \
-  }
-#define full_dec(nm) \
-  full_decn(nm, 32) \
-  full_decn(nm, 16) \
-  full_decn(nm, 8)
-full_dec(NFKD)
-full_dec(NFD)
+<<[[full_dec]] [[NFKD]]>>
+<<[[full_dec]] [[NFD]]>>
 @
 
+<<[[full_dec]] (@type)>>=
+<<[[full_decn]] [[32]]>>
+<<[[full_decn]] [[16]]>>
+<<[[full_decn]] [[8]]>>
+@
+
+<<[[full_decn]] (@sz)>>=
+<<[[uni_dec]] proto>>
+{
+  if(!ilen)
+    return 0;
+  if(!buf_len || !*buf_len)
+    return -1; /* length query not supported */
+  int ret = uni_<<@type>>_dec<<@sz>>(ibuf, ilen, buf, off, buf_len);
+  if(!*buf || (off < 0 && ret > *buf_len))
+    return -1; /* not enough space */
+  return uni_Canon_Order<<@sz>>(*buf, ret, 1);
+}
+<<[[uni_dect]] proto>>
+{
+  uint<<@sz>>_t *ibuf;
+  if(!ilen)
+    return 0;
+  if(!buf_len)
+    return -1; /* length query not supported */
+  inisize(ibuf, ilen);
+  cpybuf(ibuf, off > 0 ? *buf + off : *buf, ilen);
+  int ret = uni_<<@type>>_dec<<@sz>>(ibuf, ilen, buf, off, buf_len);
+  free(ibuf);
+  if(!*buf || (off < 0 && ret > *buf_len))
+    return -1; /* not enough space */
+  return uni_Canon_Order<<@sz>>(*buf, ret, 1);
+}
+@
 
 <<Unicode normalization support exports>>=
-int uni_NFKC32(uint32_t *ibuf, unsigned int ilen, <<UTF-32 buffer return parameters>>);
-int uni_NFKCt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC16(uint16_t *ibuf, unsigned int ilen, <<UTF-16 buffer return parameters>>);
-int uni_NFKCt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC8(uint8_t *ibuf, unsigned int ilen, <<UTF-8 buffer return parameters>>);
-int uni_NFKCt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
-int uni_NFC32(uint32_t *ibuf, unsigned int ilen, <<UTF-32 buffer return parameters>>);
-int uni_NFCt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFC16(uint16_t *ibuf, unsigned int ilen, <<UTF-16 buffer return parameters>>);
-int uni_NFCt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFC8(uint8_t *ibuf, unsigned int ilen, <<UTF-8 buffer return parameters>>);
-int uni_NFCt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC_CF32(uint32_t *ibuf, unsigned int ilen, <<UTF-32 buffer return parameters>>);
-int uni_NFKC_CFt32(<<UTF-32 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC_CF16(uint16_t *ibuf, unsigned int ilen, <<UTF-16 buffer return parameters>>);
-int uni_NFKC_CFt16(<<UTF-16 buffer return parameters>>, unsigned int ilen);
-int uni_NFKC_CF8(uint8_t *ibuf, unsigned int ilen, <<UTF-8 buffer return parameters>>);
-int uni_NFKC_CFt8(<<UTF-8 buffer return parameters>>, unsigned int ilen);
+<<[[full_dec]] proto [[NFC]]>>
+<<[[full_dec]] proto [[NFKC]]>>
 @
 
 <<Unicode normalization support functions>>=
-#define full_compn(nm, dec, sz) \
-  int uni_##nm##sz(uint##sz##_t *ibuf, unsigned int ilen, \
-                   uint##sz##_t **buf, int off, unsigned int *buf_len) \
-  { \
-    int ret = uni_##dec##sz(ibuf, ilen, buf, off, buf_len); \
-    if(ret <= 0) \
-      return ret; \
-    return uni_NFC_comp##sz(*buf, ret, NULL); \
-  } \
-  int uni_##nm##t##sz(uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                      unsigned int ilen) \
-  { \
-    int ret = uni_##dec##t##sz(buf, off, buf_len, ilen); \
-    if(ret <= 0) \
-      return ret; \
-    return uni_NFC_comp##sz(*buf, ret, NULL); \
-  }
-#define full_comp(nm, dec) \
-  full_compn(nm, dec, 32) \
-  full_compn(nm, dec, 16) \
-  full_compn(nm, dec, 8)
-full_comp(NFKC, NFKD)
-full_comp(NFC, NFD)
+<<[[full_comp]] [[NFKC]] [[NFKD]]>>
+<<[[full_comp]] [[NFC]] [[NFD]]>>
+@
+
+<<[[full_comp]] (@type@dec)>>=
+<<[[full_compn]] [[32]]>>
+<<[[full_compn]] [[16]]>>
+<<[[full_compn]] [[8]]>>
+@
+
+<<[[full_compn]] (@sz)>>=
+<<[[uni_dec]] proto>>
+{
+  int ret = uni_<<@dec>><<@sz>>(ibuf, ilen, buf, off, buf_len);
+  if(ret <= 0)
+    return ret;
+  return uni_NFC_comp<<@sz>>(*buf, ret, NULL);
+}
+<<[[uni_dect]] proto>>
+{
+  int ret = uni_<<@dec>>t<<@sz>>(buf, off, buf_len, ilen);
+  if(ret <= 0)
+    return ret;
+  return uni_NFC_comp<<@sz>>(*buf, ret, NULL);
+}
 @
 
 Note that there is no in-place [[NFKC_Casefold]] function, so both
@@ -8535,27 +8373,31 @@ difference is whether or not a buffer is allocated for the
 decomposition phase.  This should probably be fixed to be less
 expensive.
 
+<<Unicode normalization support exports>>=
+<<[[full_dec]] proto [[NFKC_CF]]>>
+@
+
 <<Unicode normalization support functions>>=
-#define nfkc_cfn(sz) \
-  int uni_NFKC_CF##sz(uint##sz##_t *ibuf, unsigned int ilen, \
-                      uint##sz##_t **buf, int off, unsigned int *buf_len) \
-  { \
-    int ret = uni_NFD##sz(ibuf, ilen, buf, off, buf_len); \
-    if(ret <= 0) \
-      return ret; \
-    return uni_NFKC_Casefoldt##sz(buf, off, buf_len, ret); \
-  } \
-  int uni_NFKC_CFt##sz(uint##sz##_t **buf, int off, unsigned int *buf_len, \
-                       unsigned int ilen) \
-  { \
-    int ret = uni_NFDt##sz(buf, off, buf_len, ilen); \
-    if(ret <= 0) \
-      return ret; \
-    return uni_NFKC_Casefoldt##sz(buf, off, buf_len, ret); \
-  }
-nfkc_cfn(32)
-nfkc_cfn(16)
-nfkc_cfn(8)
+<<[[nfkc_cfn]] [[NFKC_CF]] [[32]]>>
+<<[[nfkc_cfn]] [[NFKC_CF]] [[16]]>>
+<<[[nfkc_cfn]] [[NFKC_CF]] [[8]]>>
+@
+
+<<[[nfkc_cfn]] (@type@sz)>>=
+<<[[uni_dec]] proto>>
+{
+  int ret = uni_NFD<<@sz>>(ibuf, ilen, buf, off, buf_len);
+  if(ret <= 0)
+    return ret;
+  return uni_NFKC_Casefoldt<<@sz>>(buf, off, buf_len, ret);
+}
+<<[[uni_dect]] proto>>
+{
+  int ret = uni_NFDt<<@sz>>(buf, off, buf_len, ilen);
+  if(ret <= 0)
+    return ret;
+  return uni_NFKC_Casefoldt<<@sz>>(buf, off, buf_len, ret);
+}
 @
 
 \subsection{Generic Normalized Unicode Input}
@@ -9042,6 +8884,7 @@ str_to_enum(&parsed_props[prop_Name_Alias], NULL);
 #endif
 @
 
+\lstset{language=txt}
 <<FIXME>>=
 dump names & name aliases
 add name lookup function
@@ -9060,6 +8903,7 @@ Their fields are formatted differently, with U+ prefixes on every code
 point.  Of these properties, only cjkCompatibilityVariant has an
 official property name entry.
 
+\lstset{language=C}
 <<UCD parser local definitions>>=
 #define add_hstr(n, v) do { \
   if(prop_##n < 0) \
@@ -9725,12 +9569,21 @@ prop->mt = (uint32_t *)~0; /* force addition to prop table */
 In order to compensate for some of the compression above, a special
 lookup function is provided.  It is intended for piece-wise lookup of
 a full string's key sequence.  This is \emph{not} a key string as
-defined by the UCA.  However, it is the set of keys to be considered,
-in the order that they are to be considered.  The only work needed to
-convert this to a UCA key string is to apply the variable key rule and
-split the keys by level.  The returned format is exactly the same as
-is stored, except that no blank key strings are returned, and level
-four is always present.
+defined by the UCA.  It is ordered by level first, and then key
+element sequence, and includes zeroes at some levels.  The only thing
+needed to convert this to a UCA key is to reorder the results by key
+element sequence first, and then by level, and to remove zeroes.
+
+In order to make it piece-wise, only one character is passed in at a
+time, along with a running state.  Either a key element is returned,
+or not.  Either the next character must be passed in next, or nothing.
+It makes no sense for nothing to be returned, and no new character to
+be required from the caller, so only three cases are consisdered:
+returning a value, and requiring a new input next time ([[OK]]),
+returning a value, and requiring no new input ([[AGAIN]]), and
+returning no value, and requiring new input next time ([[NONE]]).  At
+the end of input (flagged with a special character, [[END]]), the
+final returned value is indicated by [[OK]] or [[NONE]].
 
 Since this function directly references some large property tables, it
 is stored in a separate object file.
@@ -9799,7 +9652,58 @@ struct uni_ducet_lookup_state_t {
 int uni_DUCET_lookup(uint32_t c, uint32_t *lev123, uint32_t *lev4,
                      uni_ducet_lookup_state_t **state)
 {
+  if(!*state && c == UNI_DUCET_LOOKUP_END)
+    return UNI_DUCET_LOOKUP_NONE;
+  <<Initialize single DUCET element lookup>>
   <<Look up and return a single key element from DUCET>>
+}
+@
+
+Rather than just look up raw values form the DUCET, some other
+optional UCA-related processing may be done.  To select the processing
+options, a separate structure and function are provided to set the
+options.   The main reason for providing a separate function is to
+ensure that options do not change mid-lookup.
+
+<<[[uni_uca_opts_t]]>>=
+typedef struct {
+  <<Unicode UCA function options>>
+} uni_uca_opts_t;
+@
+
+<<Known Data Types>>=
+uni_uca_opts_t,%
+@
+
+<<Unicode property exports>>=
+<<[[uni_uca_opts_t]]>>
+/* set options for DUCET lookups; call before lookup() */
+void uni_DUCET_lookup_opts(uni_ducet_lookup_state_t **state,
+                           const uni_uca_opts_t *opts);
+@
+
+<<DUCET lookup functions>>=
+void uni_DUCET_lookup_opts(uni_ducet_lookup_state_t **state,
+                           const uni_uca_opts_t *opts)
+{
+  if(*state)
+    return; /* error */
+  inisize(*state, 1);
+  clearbuf(*state, 1);
+  uni_ducet_lookup_state_t *st = *state;
+  if(opts) {
+    <<Copy DUCET lookup options from [[opts]] to [[st]]>>
+  }
+  <<Set default DUCET lookup options>>
+}
+@
+
+<<Initialize single DUCET element lookup>>=
+/* if(!state) exit(1); */
+uni_ducet_lookup_state_t *st = *state;
+if(!st) {
+  uni_DUCET_lookup_opts(state, NULL);
+  st = *state;
 }
 @
 
@@ -9812,56 +9716,362 @@ with a parameter that should only be specified on the first call, a
 separate function is provided to set the tables in the state
 parameter.
 
+<<Unicode UCA function options>>=
+const uint32_t *tab, *strs;
+@
+
 <<DUCET lookup state members>>=
 const uint32_t *tab, *strs;
 @
 
-<<Unicode property exports>>=
-/* set table for DUCET lookups; call before lookup() */
-void uni_DUCET_lookup_tab(uni_ducet_lookup_state_t **state,
-                          const uint32_t *tab, const uint32_t *strs);
+<<Copy DUCET lookup options from [[opts]] to [[st]]>>=
+st->tab = opts->tab;
+st->strs = opts->strs;
 @
 
-<<DUCET lookup functions>>=
-void uni_DUCET_lookup_tab(uni_ducet_lookup_state_t **state,
-                          const uint32_t *tab, const uint32_t *strs)
-{
-  if(!*state) {
-    inisize(*state, 1);
-    clearbuf(*state, 1);
-  }
-  (*state)->tab = tab;
-  (*state)->strs = strs;
-}
-@
-
-<<Look up and return a single key element from DUCET>>=
-/* if(!state) exit(1); */
-if(!*state) {
-  inisize(*state, 1);
-  clearbuf(*state, 1);
-}
-uni_ducet_lookup_state_t *st = *state;
+<<Set default DUCET lookup options>>=
 if(!st->tab) {
   st->tab = uni_DUCET_mtab;
   st->strs = uni_DUCET_strs;
 }
 @
 
+One other easily implemented option is to select the comparison
+strength, which is a level number above which other levels are zeroed
+out.  This may reduce the number of returned elements as well, by
+increasing the number of all-zero elements.  The first three levels
+are most easily zeored using a mask, so that is stored in the state as
+well.  In order to avoid constantly referring to a pointed-to value,
+the return value is built in [[l123]] and [[l4]] rather than
+[[*lev123]] and [[*lev4]].
+
+<<Unicode UCA function options>>=
+uint8_t max_level;
+@
+
+<<DUCET lookup state members>>=
+uint32_t mask123;
+uint8_t max_level;
+@
+
+<<Copy DUCET lookup options from [[opts]] to [[st]]>>=
+st->max_level = opts->max_level;
+@
+
+<<Set default DUCET lookup options>>=
+if(!st->max_level)
+  st->max_level = 3;
+if(st->max_level == 1)
+  st->mask123 = UNI_DUCET_LEV1_MASK;
+else if(st->max_level == 2)
+  st->mask123 = UNI_DUCET_LEV1_MASK | UNI_DUCET_LEV2_MASK;
+else
+  st->mask123 = ~3;
+@
+
+<<Initialize single DUCET element lookup>>=
+uint32_t l123, l4;
+@
+
+<<Mangle DUCET return value>>=
+l123 &= st->mask123;
+if(st->max_level < 4)
+  l4 = 0;
+@
+
+Another option which immediately modifies results is the variable key
+element processing.  Doing this requires the table's variable top and
+a processing mode setting.  While the UCA apparently uses shifted mode
+by default, this routine sets the default to minimal processing, which
+is done with the non-ignorable mode.  The fact that non-ignorable is
+the default mode for CLDR is irrelevant.
+
+<<Unicode UCA function options>>=
+uint8_t var_mode;
+uint32_t var_top;
+@
+
+<<DUCET lookup state members>>=
+uint8_t var_mode;
+uint32_t var_top;
+int in_var;
+@
+
+<<Copy DUCET lookup options from [[opts]] to [[st]]>>=
+st->var_mode = opts->var_mode;
+/* to allow direct <= comparison w/ lev123 */
+if(opts->var_top)
+  st->var_top = (opts->var_top << 16) | 0xffff;
+@
+
+<<Set default DUCET lookup options>>=
+if(!st->var_top)
+  /* to allow direct <= comparison w/ lev123 */
+  st->var_top = (uni_DUCET_var_top << 16) | 0xffff;
+@
+
+<<Unicode property exports>>=
+<<DUCET variable modes>>
+@
+
+<<DUCET variable modes>>=
+#define UNI_DUCET_VAR_MODE_NON_IGNORABLE 0 /* the default; not UCA def */
+#define UNI_DUCET_VAR_MODE_BLANKED       1
+#define UNI_DUCET_VAR_MODE_SHIFTED       2 /* the UCA def; must be explicit */
+#define UNI_DUCET_VAR_MODE_IGNORE_SP     3
+#define UNI_DUCET_VAR_MODE_SHIFT_TRIMMED 4
+@
+
+<<Initialize single DUCET element lookup>>=
+uint8_t var_mode = st->var_mode;
+int shifted = var_mode >= UNI_DUCET_VAR_MODE_SHIFTED,
+    blanked = var_mode == UNI_DUCET_VAR_MODE_BLANKED;
+uint32_t var_top = st->var_top;
+@
+
+<<Mangle DUCET return value>>=
+/* UCA variable mode modifies variable entry & anything following */
+/* plus some other random ignorables */
+if(shifted) {
+  if(!l123)
+    l4 = 0;
+  else if(!(l123 & UNI_DUCET_LEV1_MASK)) {
+    if(st->in_var)
+      l4 = l123 = 0;
+    else
+      l4 = 0xffff;
+  } else {
+    st->in_var = 0;
+    l4 = 0xffff;
+  }
+} else if(blanked && st->in_var) {
+  if(!(l123 & UNI_DUCET_LEV1_MASK))
+    l123 = l4 = 0;
+  else
+    st->in_var = 0;
+}
+/* due to modification of var_top above: */
+/*    same as lev1 <= var_top && lev1 > 0 */
+if(var_mode > 0 && l123 <= var_top && l123 > 0xffff) {
+  st->in_var = 1;
+  switch(var_mode) {
+    /* UNI_DUCET_VAR_MODE_NON_IGNORABLE does nothing */
+    case UNI_DUCET_VAR_MODE_BLANKED:
+      l123 = l4 = 0;
+      break;
+    case UNI_DUCET_VAR_MODE_SHIFTED:
+      l4 = l123 >> UNI_DUCET_LEV1_SHIFT;
+      /* !!! Undocumented CLDR behavior (required to pass test): !!! */
+      /* UCA says lev1 > 0 and lev1 <= var_top is variable */
+      /*  but CLDR defines one entry with lev1 == 1, but it is not var */
+      /*  yet in shifted mode, it sets lev4 == lev1 as above */
+      /*  GRRRR.... */
+      /*  at least UCA data files never use lev1 < 0x0200, so */
+      /*  just testing for 1 is safe */
+      /* who knows what IgnoreSP and Trimmed are supposed to work like */
+      if(l4 > 1)
+        l123 = 0;
+      else
+        st->in_var = 0;
+      break;
+    case UNI_DUCET_VAR_MODE_IGNORE_SP:
+      if((uni_gc_trans[U_gc_P] & (1 << uni_gc_of(c))) ||
+         is_uni_WSpace(c)) {
+        l4 = l123 >> UNI_DUCET_LEV1_SHIFT;
+	/* undocumented behavior copied from SHIFTED */
+	if(l4 > 1)
+	  l123 = 0;
+	else
+	  st->in_var = 0;
+      } else
+        st->in_var = 0;
+      break;
+    case UNI_DUCET_VAR_MODE_SHIFT_TRIMMED:
+      l4 = l123 >> UNI_DUCET_LEV1_SHIFT;
+      /* undocumented behavior copied from SHIFTED */
+      if(l4 > 1)
+        l123 = 0;
+      else
+        st->in_var = 0;
+      break;
+  }
+}
+@
+
+Stripping trailing level 4 [[0xFFFF]] values, as required for
+shift-trimmed mode, requires delaying any [[0xFFFF]] output until
+either a non-[[0xFFFF]] output is found, or the final value is being
+returned.  That could be best accomplished by the caller, by simply
+accumulating the entire result and trimming the trailing [[0xFFFF]]
+values.  However, it may be difficult to document that this mode, and
+only this mode, is only partially implemented.  So, levels 1--3 of any
+output whose level 4 is [[0xFFFF]] are saved in an expandable buffer.
+Once a non-[[0xFFFF]] level 4 is encountered, all accumulated entries
+need to be output before the key elements with a non-[[0xFFFF]] level
+4, followed by that key element.  Once the end is encountered, all
+accumulated entries need to be output, but with a level 4 of zero.
+For the former case, levels 1--3 of the non-[[0xFFFF]] element can be
+saved in place of the first saved element to be output, but level 4
+needs to be saved separately.
+
+Note that the caller can still prevent this accumulation by using
+shifted mode, and trimming manually.
+
+<<DUCET lookup state members>>=
+uint32_t *l4_ffff;
+unsigned int l4_ffff_len, l4_ffff_max, l4_ffff_ptr;
+uint32_t non_ffff_l4;
+@
+
+<<Free DUCET lookup state members>>=
+if(st->l4_ffff)
+  free(st->l4_ffff);
+@
+
+<<Mangle DUCET return value>>=
+if(var_mode == UNI_DUCET_VAR_MODE_SHIFT_TRIMMED) {
+  if(l4 == 0xffff) {
+    if(!st->l4_ffff_max)
+      inisize(st->l4_ffff, st->l4_ffff_max = 10);
+    if(st->l4_ffff_len == st->l4_ffff_max)
+      resize(st->l4_ffff, st->l4_ffff_max *= 2);
+    st->l4_ffff[st->l4_ffff_len++] = l123;
+    <<Skip [[l4_ffff]] member>>
+  } else if(st->l4_ffff_len) {
+    uint32_t l123s = l123;
+    l123 = st->l4_ffff[0];
+    st->l4_ffff[0] = l123s;
+    st->non_ffff_l4 = l4;
+    l4 = 0xffff;
+    st->l4_ffff_ptr = 1;
+    <<Return [[l4_ffff]] members>>
+  }
+}
+@
+
+<<Check for [[l4_ffff]] members>>=
+if(st->l4_ffff_ptr) {
+  <<Maybe check for [[l4_ffff]] members at end>>
+  if(st->l4_ffff_ptr < st->l4_ffff_len) {
+    l123 = st->l4_ffff[st->l4_ffff_ptr++];
+    l4 = 0xffff;
+    <<Return [[l4_ffff]] members>>
+  } else {
+    l123 = st->l4_ffff[0];
+    l4 = st->non_ffff_l4;
+    st->l4_ffff_len = st->l4_ffff_ptr = 0;
+    <<Return post-[[l4_ffff]] members>>
+  }
+}
+@
+
+<<Check for [[l4_ffff]] members at end>>=
+while(st->l4_ffff_len) {
+  l123 = st->l4_ffff[st->l4_ffff_ptr++];
+  l4 = 0;
+  if(st->l4_ffff_ptr == st->l4_ffff_len) {
+    st->l4_ffff_ptr = st->l4_ffff_len = 0;
+    <<Return last [[l4_ffff]] member>>
+  } else if(l123) {
+    <<Return [[l4_ffff]] members at end>>
+  }
+}
+@
+
+There is one other UCA parameter: reversed level 2.  That is, level 2
+values are returned in reverse order.  To do this, the entire string
+would have be be accumulated before generating the first output.  Since
+some routines may be more efficient if results are returned one at a
+time, this could be a problem.  Instead, it is the responsibility of
+the caller to implement this option.
+
+There are additional CLDR-specific parameters which could affect the
+results of this function.  These may be implemented at a future date.
+Adding shift mode processing does not affect complexity much, but
+adding DUCET reordering, additional pseudo-levels, numeric
+accumulation and parsing, and other CLDR options will make this
+function very complex.
+
+\lstset{language=txt}
+<<FIXME>>=
+  Unimplemented CLDR options:
+    caseLevel=on/off: add level "2.5" "case level" (even if 2 not present)
+      l2.5 == LOWEST ? 1 : upper_first ? (UPPER ? 2 : MIXED ? 3 : 4) :
+                                         (UPPER ? 4 : MIXED ? 3 : 2)
+         or 0 if sorting by l1 and l1 = 0
+	 or 0 if sorting by l2+ and l2 = 0
+      for DUCET_CLDR members:
+        LOWEST if U+FFFE
+        UPPER if l3 == 08-0C, 0E, 11-12, 1D
+	UNCASED otherwise
+      for locale customizations of single char could take old l3.  for
+      multi-char locale customizations, canonically decompose & compute
+      for each char:
+        UNCASED if gc == Lm
+	LOWER if Lowercase or Changes_When_Uppercased or "exception":
+	   sc=Hira or sc=Kata and na="*SMALL*" and dm=""
+	   U+2129
+	UPPER if Uppercase or Changes_When_Uppercased or "exception":
+	   sc=Hira or sc=Kata and na!="*SMALL*" and na!="*ITERATION*" and dm=""
+	   U+2118 U+213A U+2141-U+2144 U+1F150-U+1F169 U+1F170-U+1F18A
+	MIXED if gc == Lt "or both (a) and (b)" meaning probably
+	                  "or both Lowercase and Uppercase"
+	UNCASED otherwise
+	note on LOWER/UPPER exceptions above:  the additional code points
+	are not given in a rule or a data file anywhere, but must be
+	lifted directly from tr35-##.html.  They are merely described as
+	"characters xxcase in form".  Not only that, but they are
+	presented as characters rather than numeric code points, so good
+	luck figuring them out from printed copies..
+      then for original char, combine all.  If all but UNCASED are same,
+      use that; otherwise MIXED
+    caseFirst=upper/lower/off: force upper/lower case reordering
+      when caseLevel=on, see above.  Otherwise, l2.5 is prepended to
+      the l3 value, by shifting left 5 and oring with l3 (I think; it's
+      hard to say what "ct" means:  it could mean what I said, or it
+      could mean that t is multiplied by c) if l2 is non-0.  If l3
+      is 0, it stays 0.  If l2 is 0 (and l3 non-0), 4 is prepended
+      instead of l2.5. 
+    hiraganaQuaternary=on/off: use FFFE instead of FFFF for shifted Hiragana
+      Trivial, but requires sc property table (maybe)
+        3041-3096, 309D-309F, 1B001, 1F200
+    numeric=on/off: replace digit strings with numeric value at l1
+      My guess: order them all at same pos as 0 and add 2nd key w/ 
+      only primary set to 15 bits at a time, in big-endian order,
+      setting bit 0.
+    reorder=<set>{,<set>}: reorder major groups
+      Need to know where major groups were to reorder them
+    collation=<type>
+      standard, ducet, locale-defined collation types
+        - apparently same as "standard" if unspecified for locale
+    locale tailoring (really a superset of collation=)
+@
+
 Some operations, such as looking up multi-character collation
-elements, requires at least one character of lookahead.  In fact, the
+elements, require at least one character of lookahead.  In fact, the
 reordering requirement requires arbitrary lookahead.  To support this,
 a buffer may be filled with lookahead characters.  Any time a NONE
 return would happen, if there are buffer characters, the routine
 should instead restart itself.  Any time an OK return would happen, an
-AGAIN should be returned instead.
+AGAIN should be returned instead.  Any time an AGAIN return would
+happen, the character consumed from the buffer is reinserted, so that
+the next time the function is called, that character is consumed again
+instead of the next character in the buffer.  If there are no buffered
+characters, this is not necessary as no character will be consumed.
 
+This is also the appropriate place to mask out the unneeded levels of
+the return value, and to alter the return code as needed.  An OK
+return is treated as a NONE return, and an AGAIN return loops without
+returning a value.
+
+\lstset{language=C}
 <<DUCET lookup state members>>=
 uint32_t *bt;
 int32_t btp, num_bt, max_bt;
 @
 
 <<Look up and return a single key element from DUCET>>=
+<<Check for [[l4_ffff]] members>>
 restart:
   if(st->num_bt) {
     if(st->btp >= 0)
@@ -9900,6 +10110,23 @@ static void add_bt_buf(const uint32_t *buf, uint32_t len,
 }
 @
 
+<<Skip [[l4_ffff]] member>>=
+<<Return no DUCET values>>
+@
+
+<<Return post-[[l4_ffff]] members>>=
+*lev123 = l123;
+*lev4 = l4;
+/* assume that non-default state needed AGAIN */
+return st->state ? UNI_DUCET_LOOKUP_AGAIN : UNI_DUCET_LOOKUP_OK;
+@
+
+<<Return [[l4_ffff]] members>>=
+*lev123 = l123;
+*lev4 = l4;
+return UNI_DUCET_LOOKUP_AGAIN;
+@
+
 <<Return no DUCET values>>=
 if(st->num_bt)
   goto restart;
@@ -9908,6 +10135,12 @@ else
 @
 
 <<Return one DUCET value>>=
+<<Mangle DUCET return value>>
+if(!l123 && !l4) {
+  <<Return no DUCET values>>
+}
+*lev123 = l123;
+*lev4 = l4;
 if(st->num_bt)
   return UNI_DUCET_LOOKUP_AGAIN;
 else
@@ -9917,6 +10150,11 @@ else
 <<Return more than one DUCET value>>=
 if(st->num_bt)
   st->btp--;
+<<Mangle DUCET return value>>
+if(!l123 && !l4)
+  goto restart;
+*lev123 = l123;
+*lev4 = l4;
 return UNI_DUCET_LOOKUP_AGAIN;
 @
 
@@ -9947,14 +10185,49 @@ switch(st->state) {
 @
 
 The first thing to do is check for end-of-string.  At end-of string,
-the state is freed, and nothing is returned.
+the state is freed, and nothing is returned, unless there are
+accumulated [[l4_ffff]] members.
+
+<<DUCET lookup state members>>=
+int eoi;
+@
 
 <<Look up in DUCET given no state>>=
-if(c == UNI_DUCET_LOOKUP_END) {
+if(st->eoi || c == UNI_DUCET_LOOKUP_END) {
+  <<Check for [[l4_ffff]] members at end>>
   <<Free DUCET lookup state members>>
   free(st);
   *state = NULL;
   return UNI_DUCET_LOOKUP_NONE; /* can't have any more bt */
+}
+@
+
+<<Return last [[l4_ffff]] member>>=
+if(l123 || l4) {
+  *lev123 = l123;
+  *lev4 = l4;
+  <<Free DUCET lookup state members>>
+  free(st);
+  *state = NULL;
+  return UNI_DUCET_LOOKUP_OK;
+} else {
+  <<Free DUCET lookup state members>>
+  free(st);
+  *state = NULL;
+  return UNI_DUCET_LOOKUP_NONE;
+}
+@
+
+<<Return [[l4_ffff]] members at end>>=
+st->eoi = 1;
+*lev123 = l123;
+*lev4 = l4;
+return UNI_DUCET_LOOKUP_AGAIN;
+@
+
+<<Maybe check for [[l4_ffff]] members at end>>=
+if(st->eoi) {
+  <<Check for [[l4_ffff]] members at end>>
 }
 @
 
@@ -9966,15 +10239,7 @@ enough and yet small enough (12 ranges/300 bytes) that conversion
 would not save much, but the blk checks are just single ranges each
 (and the blk table is much larger, at 220 ranges/8032 bytes).  This
 assumes that the ranges will never change in the future, which is
-actually a pretty safe bet.%
-\footnote{The standard does not specify how to deal with Hangul
-syllables.  It provides several recommendations, but none of the
-recommendations come with a usable weight range.  If I knew the DUCET
-better, I could probably pick some, but for now they are just treated
-as regular synthetic entries.  That's too bad, because the Simple and
-Terminator methods really are pretty simple, but I have no idea what to
-choose for the non-zero weights.  The Data method is impractical for a
-generic library, as it adjusts weight based on the data to collate.}
+actually a pretty safe bet.
 
 The UCA standard gives no hints on how to set the secondary value;
 presumably any non-zero number will work, because the primaries will
@@ -9985,10 +10250,29 @@ get the default (0002) assigned to them.
 
 For the fourth level, the UCA standard states that any non-zero value
 should be used on the first key element, and zero on the second.
-However, actual DUCET values which refer to synthesized values (via
+However, actual DUCET values which duplicate synthesized values (due to
 decomposition) show a non-zero level four on the second key element as
 well, and in fact both use the code point.  For consistency, that is
 what is generated.
+
+Note that while the standard states that FCD form data can be
+processed without normalization, this does not cover the implicit
+canonical compositions; i.e., the Hangul syllable compositions.  For
+this reason, if a lookup fails for such a decomposable character, the
+first character of decomposition is processed instead, and any
+remaining characters from decomposition are pushed onto the
+backtracking buffer.%
+\footnote{<sigh> CLDR has additional problems with this.
+Specifically, U+0F73 decomposes to U+0F71 U+0F72.  U+0F73 is a starter
+(ccc=0), and the other two are non-starters (ccc>0).  This means that
+the latter two will be reordered to combine with U+0FB3, but U+0F73
+will not.  Having the string in FCD form makes no difference; UCA
+simply disallows moving starters around.  I don't know if this is a
+bug in the UCD (maybe U+0F73 shouldn't be a starter, since it
+decomposes into two non-starters) or a bug in the claim that the UCA
+can be applied as-is (maybe it needs changes to support FCD) or a bug
+in the CLDR DUCET or what.}
+
 
 <<DUCET lookup state members>>=
 uni_str_ptr_t v;
@@ -9998,13 +10282,24 @@ uint32_t c;
 <<Look up in DUCET given no state>>=
 const uni_str_ptr_t *v;
 multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+if(!v || (!v->off && !v->len)) {
+  uint32_t hbuf[3];
+  int hlen = hangul_syllable_decomp(c, hbuf, 1);
+  if(hlen > 0) {
+    c = hbuf[0];
+    multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+    add_bt(hbuf[1], st);
+    if(hlen > 2)
+      add_bt(hbuf[2], st);
+  }
+}
 if(v && (v->off || v->len)) {
   st->v = *v;
   <<Process DUCET initial lookup>>
 } else {
   st->c = c;
   st->state = DUCET_lookup_synth;
-  *lev123 = ((c >> 15) << 16) + (0x0020 << 7) + (0x0002 << 2);
+  l123 = ((c >> 15) << 16) + (0x0020 << 7) + (0x0002 << 2);
   if(is_uni_UIdeo(c)) {
 #if 0
     uni_blk_t blk = uni_blk_of(c);
@@ -10012,12 +10307,12 @@ if(v && (v->off || v->len)) {
 #else
     if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3300 && c <= 0x33FF))
 #endif
-      *lev123 += 0xFB40 << 16;
+      l123 += 0xFB40 << 16;
     else
-      *lev123 += 0xFB80 << 16;
+      l123 += 0xFB80 << 16;
   } else
-    *lev123 += 0xFBC0 << 16;
-  *lev4 = c; /* actual value does not matter, as long as it's non-0 */
+    l123 += 0xFBC0 << 16;
+  l4 = c; /* actual value does not matter, as long as it's non-0 */
   <<Return more than one DUCET value>>
 }
 @
@@ -10028,8 +10323,8 @@ if(v && (v->off || v->len)) {
 
 <<Look up in DUCET given state>>=
 case DUCET_lookup_synth:
-  *lev123 = ((st->c & 0x7fff) << 16) | 0x80000000;
-  *lev4 = st->c;
+  l123 = ((st->c & 0x7fff) << 16) | 0x80000000;
+  l4 = st->c;
   st->state = 0;
   <<Return one DUCET value>>
 @
@@ -10184,14 +10479,17 @@ static void ducet_adjust_search(uint32_t c, int32_t l,
 }
 @
 
-When mismatch occurs, however, it is not guaranteed that this will
+When a mismatch occurs, however, it is not guaranteed that this will
 never match.  There are two cases where a future character might still
 cause a match.  If a longer string is required for a match due to a
 DUCET which does not have entries for all intervening-length strings
 (the standard DUCET does not), [[h]] always points just below at least
 one such string.  If more data is required because a reordering might
-cause a match, the ccc of c and any future characters must be non-zero
-and not match the ccc of any potential candidates for reordering.
+cause a match, the ccc of [[c]] and any future characters must be
+non-zero and not match the ccc of any potential candidates for
+reordering.%
+\footnote{But see above:  maybe what should be checked is start-ccc
+and end-ccc rather than ccc.}
 
 <<Process index extension search results>>=
 else {
@@ -10270,7 +10568,10 @@ The second case requires checking the ccc of all subsequent
 characters; if a zero is detected, no further reordering is possible.
 Otherwise, as long as a character does not match the ccc of one of the
 previously accumulated characters, it is looked up and if it matches,
-a reordering can take place.
+a reordering can take place.%
+\footnote{But see above:  maybe what should be checked is start-ccc
+rather than ccc.}
+
 
 By the time the decision is made, at least one character, and possibly
 more, have been accumulated.  A buffer (separate from [[bt]]) needs to
@@ -10406,7 +10707,7 @@ uint32_t multi_ret_len;
 <<Return blank single-character index DUCET result>>=
 const uni_str_ptr_t *v;
 multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
-st->multi_ret = uni_dm_full_strs + v->off;
+st->multi_ret = uni_dm_strs + v->off;
 st->multi_ret_len = v->len;
 <<Return DUCET entry for next decomp character>>
 @
@@ -10432,16 +10733,16 @@ str = st->strs + v->off;
 @
 
 <<Return DUCET value for [[str]]/[[c]]>>=
-*lev123 = *str & ~3;
+l123 = *str & ~3;
 switch(*str & 3) {
   case 0:
-    *lev4 = 0;
+    l4 = 0;
     break;
   case 1:
-    *lev4 = c;
+    l4 = c;
     break;
   default:
-    *lev4 = *++str >> 2;
+    l4 = *++str >> 2;
     break;
 }
 @
@@ -10506,104 +10807,77 @@ levels for each character, or by storing the results of the lookup in
 dynamic arrays, to be processed in later passes.  The only entries
 which do not need to be stored are all-zero entries.  A simple lookup
 function is provided to do the lookups, and return the results as well
-as the number of entries in each level (if requested).  By passing in
-a maximum level number, entries which are ignorable to that level can
-be skipped.  By passing in the variable top and variable mode, the
-UCA variable entry modifications can be made as well.
-
-There are additional CLDR-specific parameters which affect the results
-of this function.  These may be implemented at a future date.  Adding
-shift mode processing does not affect complexity much, but adding
-reordering, additional pseudo-levels, numeric accumulation and
-parsing, and other CLDR options will make this function very complex.
-
-<<[[uni_uca_opts_t]]>>=
-typedef struct {
-  <<Unicode UCA function options>>
-} uni_uca_opts_t;
-@
-
-<<Unicode UCA function options>>=
-const uint32_t *tab, *strs;
-uint32_t vartop;
-uint8_t level, var_mode;
-@
+as the number of entries in each level (if requested).  While it would
+be possible to implement level 2 reversal and literal string appends
+(the as-yet unimplemented UCA options) in this function, they are left
+for an even higher level function.
 
 <<Unicode property exports>>=
-<<DUCET variable modes>>
+/* negative slen indicates zero termination */
+<<[[uni_str_ducet]] proto [[32]]>>;
+<<[[uni_str_ducet]] proto [[16]]>>;
+<<[[uni_str_ducet]] proto [[8]]>>;
 @
 
-<<DUCET variable modes>>=
-#define UNI_DUCET_VAR_MODE_NON_IGNORABLE 0 /* the default; not UCA def */
-#define UNI_DUCET_VAR_MODE_BLANKED       1
-#define UNI_DUCET_VAR_MODE_SHIFTED       2 /* the UCA def; must be explicit */
-#define UNI_DUCET_VAR_MODE_IGNORE_SP     3
-#define UNI_DUCET_VAR_MODE_SHIFT_TRIMMED 4
-@
-
-<<Unicode property exports>>=
-<<[[uni_uca_opts_t]]>>
-uint32_t *uni_str_ducet32(const uint32_t *str, unsigned int slen,
-                          const uni_uca_opts_t *opts, int *rlen, int *llen);
-uint32_t *uni_str_ducet16(const uint16_t *str, unsigned int slen,
-                          const uni_uca_opts_t *opts, int *rlen, int *llen);
-uint32_t *uni_str_ducet8(const uint8_t *str, unsigned int slen,
-                         const uni_uca_opts_t *opts, int *rlen, int *llen);
+<<[[uni_str_ducet]] proto (@sz)>>=
+uint32_t *uni_str_ducet<<@sz>>(const uint<<@sz>>_t *str, int slen,
+                          const uni_uca_opts_t *opts, unsigned int *rlen,
+			  unsigned int *llen)
 @
 
 <<DUCET lookup functions>>=
-/* since macros are impractical, a callback is used to read the input */
-static uint32_t *uni_str_ducetn(const void *str, unsigned int slen,
-                                uint32_t (*strget)(const void **str,
-			                           unsigned int *slen),
-                                const uni_uca_opts_t *opts, int *rlen, int *llen)
+<<[[uni_str_ducet]] [[32]]>>
+<<[[uni_str_ducet]] [[16]]>>
+<<[[uni_str_ducet]] [[8]]>>
+@
+
+<<[[uni_str_ducet]] (@sz)>>=
+<<[[uni_str_ducet]] proto [[<<@sz>>]]>>
 {
   uint32_t *res, res_max, nres = 0;
   uni_ducet_lookup_state_t *st = NULL;
-  uint32_t mask123;
-  int lev = opts ? opts->level : 3;
-  <<Globals for DUCET shift mode adjustment>>
+  int use_lev4 = opts && opts->max_level > 3 ? 1 : 0;
+  int ret = UNI_DUCET_LOOKUP_OK;
 
   if(!str || !slen) {
     *rlen = 0;
     return NULL;
   }
   inisize(res, (res_max = 10));
-  if(opts && opts->tab && opts->strs)
-    uni_DUCET_lookup_tab(&st, opts->tab, opts->strs);
-  if(!lev)
-    lev = 3;
-  if(lev > 4)
-    lev = 4;
-  mask123 = UNI_DUCET_LEV1_MASK;
-  if(lev > 1)
-    mask123 |= UNI_DUCET_LEV2_MASK;
-  if(lev > 2)
-    mask123 |= UNI_DUCET_LEV3_MASK;
-  <<Prepare for DUCET shift mode adjustment>>
+  if(opts)
+    uni_DUCET_lookup_opts(&st, opts);
   if(llen)
     llen[0] = llen[1] = llen[2] = llen[3] = 0;
   while(1) {
     uint32_t lev123, lev4;
-    unsigned int oslen = slen;
-    const void *ostr = str;
-    uint32_t cp = slen ? strget(&str, &slen) : UNI_DUCET_LOOKUP_END;
-    int ret = uni_DUCET_lookup(cp, &lev123, &lev4, &st);
-    if(ret == UNI_DUCET_LOOKUP_NONE) {
-      if(oslen)
-        continue;
-      else
-        break;
+    uint32_t cp;
+    if(!slen)
+      cp = UNI_DUCET_LOOKUP_END;
+    else if(ret == UNI_DUCET_LOOKUP_AGAIN)
+      cp = 0; /* any old random value */
+    else {
+      int clen;
+      cp = uni_int_utf<<@sz>>_decode(str, &clen);
+      str += clen;
+      if(slen > 0)
+        slen -= clen; /* underflow if slen was wrong, but I don't care */
+      else if(!cp) {
+        cp = UNI_DUCET_LOOKUP_END;
+	slen = 0;
+      }
     }
-    <<Adjust DUCET entries based on shift mode>>
-    lev123 &= mask123;
-    if(lev < 4)
-      lev4 = 0;
+    ret = uni_DUCET_lookup(cp, &lev123, &lev4, &st);
+    if(ret == UNI_DUCET_LOOKUP_NONE) {
+      if(cp == UNI_DUCET_LOOKUP_END)
+        break;
+      else
+        continue;
+    }
     if(lev123 || lev4) {
       if(nres >= res_max - 1)
         resize(res, (res_max *= 2));
       res[nres++] = lev123;
-      if(lev >= 4)
+      if(use_lev4)
         res[nres++] = lev4;
       if(llen) {
         if(lev123 & UNI_DUCET_LEV1_MASK)
@@ -10616,492 +10890,283 @@ static uint32_t *uni_str_ducetn(const void *str, unsigned int slen,
           llen[3]++;
       }
     }
-    if(ret == UNI_DUCET_LOOKUP_OK) {
-      if(!oslen)
-        break;
-    } else {
-      str = ostr;
-      slen = oslen;
-    }
+    if(ret == UNI_DUCET_LOOKUP_OK && cp == UNI_DUCET_LOOKUP_END)
+      break;
   }
-  <<Finish adjusting DUCET entries based on shift mode>>
   *rlen = nres;
   return res;
 }
 @
 
-<<DUCET lookup functions>>=
-#define def_uni_str_ducetn(sz) \
-  static uint32_t strget##sz(const void **str, unsigned int *slen) \
-  { \
-    int clen; \
-    uint32_t ret = uni_int_utf##sz##_decode((const uint##sz##_t *)*str, &clen); \
-    (*(uint##sz##_t **)str) += clen; \
-    *slen -= clen; \
-    return ret; \
-  } \
-  uint32_t *uni_str_ducet##sz(const uint##sz##_t *str, unsigned int slen, \
-                              const uni_uca_opts_t *opts, int *rlen, int *llen) \
-  { \
-    return uni_str_ducetn(str, slen, strget##sz, opts, rlen, llen); \
-  }
-def_uni_str_ducetn(32) /* &clen is always true; <sigh> */
-def_uni_str_ducetn(16)
-def_uni_str_ducetn(8)
-@
-
-<<Globals for DUCET shift mode adjustment>>=
-uint8_t var_mode = opts ? opts->var_mode : 0; /* not the UCA default! */
-int shifted = var_mode >= UNI_DUCET_VAR_MODE_SHIFTED,
-    blanked = var_mode == UNI_DUCET_VAR_MODE_BLANKED;
-uint32_t vartop = opts && opts->vartop ? opts->vartop : uni_DUCET_var_top;
-int in_var = 0;
-int first_ffff = -1, last_ffff = -1;
-@
-
-<<Prepare for DUCET shift mode adjustment>>=
-vartop = (vartop << 16) | 0xffff; /* for direct <= comparison */
-@
-
-<<Adjust DUCET entries based on shift mode>>=
-/* UCA variable mode modifies variable entry & anything following */
-/* plus some other random ignorables */
-if(shifted) {
-  if(!lev123)
-    lev4 = 0;
-  else if(!(lev123 & UNI_DUCET_LEV1_MASK)) {
-    if(in_var)
-      lev4 = lev123 = 0;
-    else
-      lev4 = 0xffff;
-  } else {
-    in_var = 0;
-    lev4 = 0xffff;
-  }
-} else if(blanked && in_var) {
-  if(!(lev123 & UNI_DUCET_LEV1_MASK))
-    lev123 = lev4 = 0;
-  else
-    in_var = 0;
-}
-/* due to modification of vartop above: */
-/*    same as lev1 <= vartop && lev1 > 0 */
-if(lev123 <= vartop && lev123 > 0xffff) {
-  in_var = 1;
-  switch(var_mode) {
-    /* UNI_DUCET_VAR_MODE_NON_IGNORABLE does nothing */
-    case UNI_DUCET_VAR_MODE_BLANKED:
-      lev123 = lev4 = 0;
-      break;
-    case UNI_DUCET_VAR_MODE_SHIFTED:
-      lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
-      /* !!! Undocumented CLDR behavior (required to pass test): !!! */
-      /* UCA says lev1 > 0 and lev1 <= vartop is variable */
-      /*  but CLDR defines one entry with lev1 == 1, but it is not var */
-      /*  yet in shifted mode, it sets lev4 == lev1 as above */
-      /*  GRRRR.... */
-      /*  at least UCA data files never use lev1 < 0x0200, so */
-      /*  just testing for 1 is safe */
-      /* who knows what IgnoreSP and Trimmed are supposed to work like */
-      if(lev4 > 1)
-        lev123 = 0;
-      else
-        in_var = 0;
-      break;
-    case UNI_DUCET_VAR_MODE_IGNORE_SP:
-      if((uni_gc_trans[U_gc_P] & (1 << uni_gc_of(cp))) ||
-         is_uni_WSpace(cp)) {
-        lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
-	lev123 = 0;
-      } else
-        in_var = 0;
-      break;
-    case UNI_DUCET_VAR_MODE_SHIFT_TRIMMED:
-      lev4 = lev123 >> UNI_DUCET_LEV1_SHIFT;
-      lev123 = 0;
-      break;
-  }
-}
-if(lev > 3 && lev4 == 0xffff) {
-  if(last_ffff < 0 || last_ffff + 2 != nres)
-    first_ffff = nres;
-  last_ffff = nres;
-}
-@
-
-<<Finish adjusting DUCET entries based on shift mode>>=
-if(last_ffff >= 0 && last_ffff == nres - 2 &&
-   var_mode == UNI_DUCET_VAR_MODE_SHIFT_TRIMMED) {
-  int i;
-  for(i = first_ffff; i <= last_ffff; i += 2)
-    res[i + 1] = 0;
-  while(nres > first_ffff && !res[nres - 2])
-    nres--;
-}
-@
-
-<<FIXME>>=
-  Unimplemented CLDR options:
-    caseLevel=on/off: add level "2.5" "case level" (even if 2 not present)
-      l2.5 == LOWEST ? 1 : upper_first ? (UPPER ? 2 : MIXED ? 3 : 4) :
-                                         (UPPER ? 4 : MIXED ? 3 : 2)
-         or 0 if sorting by l1 and l1 = 0
-	 or 0 if sorting by l2+ and l2 = 0
-      for DUCET_CLDR members:
-        LOWEST if U+FFFE
-        UPPER if l3 == 08-0C, 0E, 11-12, 1D
-	UNCASED otherwise
-      for locale customizations of single char could take old l3.  for
-      multi-char locale customizations, canonically decompose & compute
-      for each char:
-        UNCASED if gc == Lm
-	LOWER if Lowercase or Changes_When_Uppercased or "exception":
-	   sc=Hira or sc=Kata and na="*SMALL*" and dm=""
-	   U+2129
-	UPPER if Uppercase or Changes_When_Uppercased or "exception":
-	   sc=Hira or sc=Kata and na!="*SMALL*" and na!="*ITERATION*" and dm=""
-	   U+2118 U+213A U+2141-U+2144 U+1F150-U+1F169 U+1F170-U+1F18A
-	MIXED if gc == Lt "or both (a) and (b)" meaning probably
-	                  "or both Lowercase and Uppercase"
-	UNCASED otherwise
-	note on LOWER/UPPER exceptions above:  the additional code points
-	are not given in a rule or a data file anywhere, but must be
-	lifted directly from tr35-##.html.  They are merely described as
-	"characters xxcase in form".  Not only that, but they are
-	presented as characters rather than numeric code points, so good
-	luck figuring them out from printed copies..
-      then for original char, combine all.  If all but UNCASED are same,
-      use that; otherwise MIXED
-    caseFirst=upper/lower/off: force upper/lower case reordering
-      when caseLevel=on, see above.  Otherwise, l2.5 is prepended to
-      the l3 value, by shifting left 5 and oring with l3 (I think; it's
-      hard to say what "ct" means:  it could mean what I said, or it
-      could mean that t is multiplied by c) if l2 is non-0.  If l3
-      is 0, it stays 0.  If l2 is 0 (and l3 non-0), 4 is prepended
-      instead of l2.5. 
-    hiraganaQuaternary=on/off: use FFFE instead of FFFF for shifted Hiragana
-      Trivial, but requires sc property table (maybe)
-        3041-3096, 309D-309F, 1B001, 1F200
-    numeric=on/off: replace digit strings with numeric value at l1
-      My guess: order them all at same pos as 0 and add 2nd key w/ 
-      only primary set to 15 bits at a time, in big-endian order,
-      setting bit 0.
-    reorder=<set>{,<set>}: reorder major groups
-      Need to know where major groups were to reorder them
-    collation=<type>
-      standard, ducet, locale-defined collation types
-        - apparently same as "standard" if unspecified for locale
-    locale tailoring (really a superset of collation=)
-@
-
-Given the lookup function, it is possible to create simple UCA
-wrappers for key creation and string comparison.  To create the UCA
-key, the counted lengths are used to size an array and determine the
-offset of each level; the array is then filled by scanning the raw
-DUCET return one entry at a time, and filling in any present levels.
-The returned key string is zero-terminated rather than returning the
-actual key length. Levels which are guaranteed to be less than 32 bits
-are packed as multiple keys per word while still keeping the key
-properly ordered.
-
-One option for creating keys is adding the literal text after the key
-in order to make a more deterministic sort; this is added as an option
-for UCA functions.  If this option is present, the key has the literal
-text appended, even if it contains zeroes.  If this is the case, it is
-impossible to determine the length of the array.  While it would be
-possible to replace zeroes and ones with ones followed by one or two
-to indicate the original value plus one, it is assumed the caller is
-smart enough to do that himself.  Zero, one, and two are all
-completely ignorable in UCA, so this only affects the appended string.
-The UCA string could be made shorter on average by using UTF-8 or
-UTF-16, but no re-encoding is performed.
-
-Another option for creating keys is to reverse the order of level 2.
-This is provided as an option for UCA functions, as well.  This just
-involves storing the level 2 data starting at the end rather than the
-beginning of its assigned storage area.
+The above result could be considered the UCA key, albeit in a
+completely different format than recommended by the UCA.  However, the
+options need to be passed along with it, in order to determine if
+level 4 is present or not, and also to implement any UCA options that
+were deferred to a higher level.  A function is provided to perform
+the key comparison, but it only adds one UCA option:  reversal of
+level 2.  The final option, literal string comparison, is deferred to
+an even higher level.
 
 <<Unicode UCA function options>>=
-uint8_t do_literal, reverse_lev2;
+uint8_t reverse_lev2;
 @
 
 <<Unicode property exports>>=
-uint32_t *uni_str_uca_key32(const uint32_t *str, unsigned int slen,
-                            const uni_uca_opts_t *opts);
-uint32_t *uni_str_uca_key16(const uint16_t *str, unsigned int slen,
-                            const uni_uca_opts_t *opts);
-uint32_t *uni_str_uca_key8(const uint8_t *str, unsigned int slen,
-                           const uni_uca_opts_t *opts);
+int uni_uca_ducet_cmp(const uint32_t *key1, unsigned int len1,
+                      const uint32_t *key2, unsigned int len2,
+		      const uni_uca_opts_t *opts);
 @
 
 <<DUCET lookup functions>>=
-/* again, macros are impractical, so use callbacks */
-static uint32_t *uni_str_uca_keyn(const void *str, unsigned int slen,
-                                  uint32_t (*strget)(const void **str,
-			                             unsigned int *slen),
-                                  const uni_uca_opts_t *opts)
+static int uni_uca_ducet_cmp123(uint32_t mask,
+                                const uint32_t *key1, unsigned int len1,
+                                const uint32_t *key2, unsigned int len2,
+				int l4, int rev)
 {
-  uint32_t *raw;
-  int raw_len;
-  int len[4], off[4];
-  uint32_t *key, keylen;
-  int i, i1, i2, i3, i4;
-  int do_literal = opts && opts->do_literal;
-  int do_rev2 = opts && opts->reverse_lev2;
-  int lev = opts ? opts->level : 3;
+  uint32_t k1, k2;
 
-  if(lev > 4)
-    do_literal = 1;
-  else if(lev < 1)
-    lev = 3;
-  raw = uni_str_ducetn(str, slen, strget, opts, &raw_len, len);
-  if(!raw_len) {
-    if(!do_literal)
-      slen = 0;
-    inisize(key, slen + 1);
-    i = 0;
-    while(slen > 0)
-      key[i++] = strget(&str, &slen);
-    key[i] = 0;
-    return key;
-  }
-  /* 0 == 16 bits, 1 == 9 bits, 2 == 5 bits */
-  /*  -> 2 per word, 3 per word, 6 per word */
-  keylen = len[0] / 2 + 1;
-  if(lev > 1)
-    keylen += len[1] / 3 + 1;
-  if(lev > 2)
-    keylen += len[2] / 6 + 1;
-  if(lev > 3)
-    keylen += len[3] + 1;
-  if(do_literal)
-    keylen += slen + 1;
-  inisize(key, keylen + 1);
-  off[0] = len[0] / 2 + 1;
-  key[off[0] - 1] = lev > 1 || do_literal;
-  if(lev > 1) {
-    off[1] = off[0] + len[1] / 3 + 1;
-    key[off[1] - 1] = lev > 2 || do_literal;
-  } else {
-    key[off[0]] = 0;
-    off[1] = off[0];
-  }
-  if(lev > 2) {
-    off[2] = off[1] + len[2] / 6 + 1;
-    key[off[2] - 1] = lev > 3 || do_literal;
-  } else {
-    key[off[1]] = 0;
-    off[2] = off[1];
-  }
-  if(lev > 3) {
-    off[3] = off[2] + len[3] + 1;
-    key[off[3] - 1] = do_literal ? 2 : 0; /* 2 instead of 1 for fffe */
-  } else {
-    key[off[2]] = 0;
-    off[3] = off[2];
-  }
-  for(i = i1 = i2 = i3 = i4 = 0; i < raw_len; i++) {
-    if(raw[i] & UNI_DUCET_LEV1_MASK) {
-      if(i1 % 2)
-        key[i1 / 2] |= raw[i] >> UNI_DUCET_LEV1_SHIFT;
-      else
-        key[i1 / 2] = raw[i] & UNI_DUCET_LEV1_MASK;
-      i1++;
+  while(1) {
+    while(len1 > 0 && !(k1 = *key1 & mask)) {
+      key1 += 1 + l4;
+      len1 -= 1 + l4;
     }
-    if(raw[i] & UNI_DUCET_LEV2_MASK) {
-      uint32_t l2 = (raw[i] & UNI_DUCET_LEV2_MASK) >> UNI_DUCET_LEV2_SHIFT;
-      uint32_t i2r = do_rev2 ? len[1] - i2 - 1 : i2;
-      if(i2r % 3)
-        key[off[0] + i2r / 3] |= l2 << 9 * (2 - i2r % 3);
-      else
-        key[off[0] + i2r / 3] = l2 << 18;
-      i2++;
+    while(len2 > 0 && !(k2 = *key2 & mask)) {
+      key2 += 1 + l4;
+      len2 -= 1 + l4;
     }
-    if(raw[i] & UNI_DUCET_LEV3_MASK) {
-      uint32_t l3 = (raw[i] & UNI_DUCET_LEV3_MASK) >> UNI_DUCET_LEV3_SHIFT;
-      if(i3 % 6)
-        key[off[1] + i3 / 6] |= l3 << 5 * (5 - i3 % 6);
-      else
-        key[off[1] + i3 / 6] = l3 << 25;
-      i3++;
-    }
-    if(lev > 3 && raw[++i]) {
-      key[off[2] + i4] = raw[i];
-      i4++;
-    }
+    if(!len2)
+      return len1 > 0;
+    if(!len1)
+      return -1;
+    if(k1 < k2)
+      return -1;
+    if(k2 < k1)
+      return 1;
+    key1 += 1 + l4;
+    key2 += 1 + l4;
+    len1 -= 1 + l4;
+    len2 -= 1 + l4;
   }
-  free(raw);
-  if(do_literal) {
-    i = 0;
-    while(slen > 0)
-      key[off[3] + i++] = strget(&str, &slen);
-    key[off[3] + i] = 0;
-  }
-  return key;
+}
+
+int uni_uca_ducet_cmp(const uint32_t *key1, unsigned int len1,
+                      const uint32_t *key2, unsigned int len2,
+		      const uni_uca_opts_t *opts)
+{
+  int lev = opts && opts->max_level ? opts->max_level : 3;
+  int l4 = lev > 3;
+  int c;
+  c = uni_uca_ducet_cmp123(UNI_DUCET_LEV1_MASK, key1, len1, key2, len2, l4, 0);
+  if(c || lev == 1)
+    return c;
+  c = uni_uca_ducet_cmp123(UNI_DUCET_LEV2_MASK, key1, len1, key2, len2, l4,
+                           opts && opts->reverse_lev2);
+  if(c || lev == 2)
+    return c;
+  c = uni_uca_ducet_cmp123(UNI_DUCET_LEV3_MASK, key1, len1, key2, len2, l4, 0);
+  if(c || lev == 3)
+    return c;
+  c = uni_uca_ducet_cmp123(~0, key1 + 1, len1, key2 + 1, len2, 1, 0);
+  return c;
 }
 @
 
-<<DUCET lookup functions>>=
-#define def_uni_str_uca_keyn(sz) \
-  uint32_t *uni_str_uca_key##sz(const uint##sz##_t *str, unsigned int slen, \
-                                const uni_uca_opts_t *opts) \
-  { \
-    return uni_str_uca_keyn(str, slen, strget##sz, opts); \
-  }
-def_uni_str_uca_keyn(32)
-def_uni_str_uca_keyn(16)
-def_uni_str_uca_keyn(8)
+Implementing the final step when literal comparison is to be made is
+supported by a simple [[strcmp]]-like function.  Conversion to valid NFD
+form is expected to have been done before the call.  The string length
+can either be negative, indicating zero termination, or positive,
+indicating an absolute length.
+
+<<Unicode I/O Exports>>=
+/* "int"ernal strcmp; assumes a & b are valid UTF */
+<<[[uni_int_utf_strcmp]] proto [[32]]>>;
+<<[[uni_int_utf_strcmp]] proto [[16]]>>;
+<<[[uni_int_utf_strcmp]] proto [[8]]>>;
 @
 
-For string comparison, the raw keys are looked up, and scanned once
-per level.
+<<[[uni_int_utf_strcmp]] proto (@sz)>>=
+int uni_int_utf<<@sz>>_strcmp(const uint<<@sz>>_t *a, int alen, const uint<<@sz>>_t *b, int blen)
+@
+
+<<Unicode I/O functions>>=
+<<[[uni_int_utf_strcmp]] [[32]]>>
+<<[[uni_int_utf_strcmp]] [[16]]>>
+<<[[uni_int_utf_strcmp]] [[8]]>>
+@
+
+<<[[uni_int_utf_strcmp]] (@sz)>>=
+<<[[uni_int_utf_strcmp]] proto [[<<@sz>>]]>>
+{
+  while(alen && blen) {
+    int aclen, bclen;
+    if(alen < 0 && !*a)
+      return blen < 0 && !*b ? 0 : -1;
+    if(blen < 0 && !*b)
+      return 1;
+    uint32_t ac = uni_int_utf<<@sz>>_decode(a, &aclen);
+    uint32_t bc = uni_int_utf<<@sz>>_decode(b, &bclen);
+    if(ac < bc)
+      return -1;
+    if(ac > bc)
+      return 1;
+    a += aclen;
+    b += bclen;
+    alen -= aclen; /* underflows if alen was wrong, but don't care */
+    blen -= bclen; /* likewise with blen */
+  }
+  return alen > 0 || (alen < 0 && *a) ? 1 :
+         blen > 0 || (blen < 0 && *b) ? -1 : 0;
+}
+@
+
+Another option would be to support [[memcmp]], [[strcmp]] or something
+similar, by building a key more like the UCA format.  This might make
+storing keys for later use much easier.  However, other than storage
+efficiency, I see no advantage, and will not implement this.
+
+For direct UCA string comparison, the above functions could be
+combined by generating both keys, comparing them, and freeing them.
+However, direct string comparison can also be performed by only
+storing levels 2-4, and aborting the comparison if a level 1 mismatch
+occurs.  The original string pointers need to be retained as well, in
+case a literal comparison needs to be made for the last step.  In
+order to avoid passing the literal comparison flag separately, this is
+added to the options structure.  While the standard indicates that
+literal comparison is selected with [[max_level]] of 5 or higher, in
+fact the test data suggests that literal comparison should be possible
+with lower levels as well.  If [[max_level]] is 5 or higher, or the
+explicit [[literal]] flag is set, literal comparison will be made.
+
+<<Unicode UCA function options>>=
+int8_t do_literal;
+@
 
 <<Unicode property exports>>=
-int uni_uca_strcmp32(const uint32_t *stra, unsigned int lena,
-                     const uint32_t *strb, unsigned int lenb,
-                     const uni_uca_opts_t *opts);
-int uni_uca_strcmp16(const uint16_t *stra, unsigned int lena,
-                     const uint16_t *strb, unsigned int lenb,
-                     const uni_uca_opts_t *opts);
-int uni_uca_strcmp8(const uint8_t *stra, unsigned int lena,
-                    const uint8_t *strb, unsigned int lenb,
-                    const uni_uca_opts_t *opts);
+<<[[uni_uca_strcmp]] proto [[32]]>>;
+<<[[uni_uca_strcmp]] proto [[16]]>>;
+<<[[uni_uca_strcmp]] proto [[8]]>>;
+@
+
+<<[[uni_uca_strcmp]] proto (@sz)>>=
+int uni_uca_strcmp<<@sz>>(const uint<<@sz>>_t *a, int alen,
+                     const uint<<@sz>>_t *b, int blen,
+                     const uni_uca_opts_t *opts)
 @
 
 <<DUCET lookup functions>>=
-<<DUCET strcmp support>>
-/* again, macros are impractical, so use callbacks */
-static int uni_uca_strcmpn(const void *stra, unsigned int lena,
-                           const void *strb, unsigned int lenb,
-		           uint32_t (*strget)(const void **str,
-			                      unsigned int *slen),
-		           const uni_uca_opts_t *opts)
+<<[[uni_uca_strcmp]] [[32]]>>
+<<[[uni_uca_strcmp]] [[16]]>>
+<<[[uni_uca_strcmp]] [[8]]>>
+@
+
+<<[[uni_uca_strcmp]] (@sz)>>=
+<<[[uni_uca_strcmp]] proto [[<<@sz>>]]>>
 {
-  uint32_t *rawa, *rawb;
-  int raw_lena, raw_lenb;
+  const uint<<@sz>>_t *rawa = a, *rawb = b;
+  int raw_alen = alen, raw_blen = blen;
+  uint32_t *duca, *ducb;
+  unsigned int max_duca = 0, max_ducb = 0, duc_lena = 0, duc_lenb = 0;
   int do_literal = opts && opts->do_literal;
-  int lev = opts ? opts->level : 3;
+  int lev = opts && opts->max_level ? opts->max_level : 3;
+  uni_ducet_lookup_state_t *sta = NULL, *stb = NULL;
+  int has_l4 = lev > 3;
 
   if(lev > 4) {
     do_literal = 1;
     lev = 4;
-  } else if(lev < 1)
-    lev = 3;
-  /* FIXME: do comparison duing read, and abort if mismatch at l1 */
-  /*        and retain running l2/l3/l4/literal comparison */
-  /*        i.e., do not allocate key arrays at all */
-  /*        probably requires rewrite of uni_str_ducetn to be state */
-  /*        machine similar to lookup_tab */
-  rawa = uni_str_ducetn(stra, lena, strget, opts, &raw_lena, NULL);
-  rawb = uni_str_ducetn(strb, lenb, strget, opts, &raw_lenb, NULL);
-  if(!raw_lena && !raw_lenb)
-    return do_literal ? uni_strcmp_raw(stra, lena, strb, lenb, strget) : 0;
-  if(!raw_lena) {
-    free(rawb);
-    return -1;
   }
-  if(!raw_lenb) {
-    free(rawa);
-    return 1;
+  if(opts) {
+    uni_DUCET_lookup_opts(&sta, opts);
+    uni_DUCET_lookup_opts(&stb, opts);
   }
-  int skip = lev > 3 ? 2 : 1;
-  int c;
-  if((c = uni_ducet_strcmp_raw(rawa, raw_lena, rawb, raw_lenb,
-                               UNI_DUCET_LEV1_MASK, skip))) {
-    free(rawa);
-    free(rawb);
-    return c;
-  }
-  if(lev > 1 &&
-     (c = uni_ducet_strcmp_raw(rawa, raw_lena, rawb, raw_lenb,
-                               UNI_DUCET_LEV2_MASK, skip))) {
-    free(rawa);
-    free(rawb);
-    return c;
-  }
-  if(lev > 2 &&
-     (c = uni_ducet_strcmp_raw(rawa, raw_lena, rawb, raw_lenb,
-                               UNI_DUCET_LEV3_MASK, skip))) {
-    free(rawa);
-    free(rawb);
-    return c;
-  }
-  if(lev > 3 &&
-     (c = uni_ducet_strcmp_raw(rawa + 1, raw_lena, rawb + 1, raw_lenb, ~0, 2))) {
-    free(rawa);
-    free(rawb);
-    return c;
-  }
-  free(rawa);
-  free(rawb);
-  return do_literal ? uni_strcmp_raw(stra, lena, strb, lenb, strget) : 0;
-}
-@
+  uint32_t lev123a, lev123b, lev4a, lev4b;
+  int reta = UNI_DUCET_LOOKUP_OK, retb = UNI_DUCET_LOOKUP_OK;
 
-<<DUCET lookup functions>>=
-#define def_uni_uca_strcmpn(sz) \
-  int uni_uca_strcmp##sz(const uint##sz##_t *stra, unsigned int lena, \
-                         const uint##sz##_t *strb, unsigned int lenb, \
-                         const uni_uca_opts_t *opts) \
-  { \
-    return uni_uca_strcmpn(stra, lena, strb, lenb, strget##sz, opts); \
-  }
-def_uni_uca_strcmpn(32)
-def_uni_uca_strcmpn(16)
-def_uni_uca_strcmpn(8)
-@
-
-<<DUCET strcmp support>>=
-static int uni_strcmp_raw(const void *stra, unsigned int lena,
-                          const void *strb, unsigned int lenb,
-			  uint32_t (*strget)(const void **str,
-			                     unsigned int *slen))
-{
-  while(lena && lenb) {
-    uint32_t a = strget(&stra, &lena), b = strget(&strb, &lenb);
-    if(a > b)
-      return 1;
-    if(b > a)
-      return -1;
-  }
-  if(lena)
-    return 1;
-  if(lenb)
-    return -1;
-  return 0;
-}
-@
-
-<<DUCET strcmp support>>=
-static int uni_ducet_strcmp_raw(const uint32_t *rawa, unsigned int lena,
-                                const uint32_t *rawb, unsigned int lenb,
-				uint32_t mask, int skip)
-{
+  <<Get next key element for string [[a]]>>
+  <<Get next key element for string [[b]]>>
+  if(reta == UNI_DUCET_LOOKUP_NONE && retb == UNI_DUCET_LOOKUP_NONE)
+    return do_literal ? uni_int_utf<<@sz>>_strcmp(rawa, raw_alen, rawb, raw_blen) : 0;
+  inisize(duca, max_duca = 10);
+  inisize(ducb, max_ducb = 10);
   while(1) {
-    uint32_t a, b;
-    while(lena > 0 && !(a = (*rawa & mask))) {
-      rawa += skip;
-      lena -= skip;
+    <<Scan to next non-zero level 1 in string [[a]]>>
+    <<Scan to next non-zero level 1 in string [[b]]>>
+    if(reta == UNI_DUCET_LOOKUP_NONE && retb == UNI_DUCET_LOOKUP_NONE) {
+      int c = 0;
+      if(lev > 1)
+        c = uni_uca_ducet_cmp123(UNI_DUCET_LEV2_MASK, duca, duc_lena,
+                                                      ducb, duc_lenb, has_l4,
+						      opts && opts->reverse_lev2);
+      if(lev > 2 && !c)
+        c = uni_uca_ducet_cmp123(UNI_DUCET_LEV3_MASK, duca, duc_lena,
+                                                      ducb, duc_lenb, has_l4, 0);
+      if(lev > 3 && !c)
+        c = uni_uca_ducet_cmp123(~0, duca + 1, duc_lena,
+                                     ducb + 1, duc_lenb, 1, 0);
+      free(duca);
+      free(ducb);
+      return c ? c : do_literal ? uni_int_utf<<@sz>>_strcmp(rawa, raw_alen,
+                                                          rawb, raw_blen) : 0;
     }
-    while(lenb > 0 && !(b = (*rawb & mask))) {
-      rawb += skip;
-      lenb -= skip;
+    if(reta == UNI_DUCET_LOOKUP_NONE) {
+      free(duca);
+      free(ducb);
+      return -1;
     }
-    if(!lena && !lenb)
-      return 0;
-    if(!lenb)
+    if(retb == UNI_DUCET_LOOKUP_NONE) {
+      free(duca);
+      free(ducb);
       return 1;
-    if(!lena)
-      return -1;
-    if(a > b)
-      return 1;
-    if(b > a)
-      return -1;
-    rawa += skip;
-    lena -= skip;
-    rawb += skip;
-    lenb -= skip;
+    }
+    uint32_t l1a = lev123a & UNI_DUCET_LEV1_MASK,
+             l1b = lev123b & UNI_DUCET_LEV1_MASK;
+    if(l1a != l1b) {
+      free(duca);
+      free(ducb);
+      return l1a < l1b ? -1 : 1;
+    }
+    lev123a &= ~UNI_DUCET_LEV1_MASK;
+    lev123b &= ~UNI_DUCET_LEV1_MASK;
   }
+}
+@
+
+<<Scan to next non-zero level 1 in string (@ab)>>=
+while(ret<<@ab>> != UNI_DUCET_LOOKUP_NONE && !(lev123<<@ab>> & UNI_DUCET_LEV1_MASK)) {
+  /* save l2+ keys obtained so far if non-zero */
+  if(lev4<<@ab>> || lev123<<@ab>> & ~(UNI_DUCET_LEV1_MASK | 3)) {
+    if(duc_len<<@ab>> >= max_duc<<@ab>> - 1)
+      resize(duc<<@ab>>, max_duc<<@ab>> *= 2);
+    duc<<@ab>>[duc_len<<@ab>>++] = lev123<<@ab>>;
+    if(has_l4)
+      duc<<@ab>>[duc_len<<@ab>>++] = lev4<<@ab>>;
+  }
+  <<Get next key element for string [[<<@ab>>]]>>
+}
+@
+
+<<Get next key element for string (@ab)>>=
+while(1) {
+  uint32_t cp;
+  if(!<<@ab>>len)
+    cp = UNI_DUCET_LOOKUP_END;
+  else if(ret<<@ab>> == UNI_DUCET_LOOKUP_AGAIN)
+    cp = 0; /* any old random value */
+  else {
+    int clen;
+    cp = uni_int_utf<<@sz>>_decode(<<@ab>>, &clen);
+    <<@ab>> += clen;
+    if(<<@ab>>len > 0)
+      <<@ab>>len -= clen; /* underflow if <<@ab>>len wrong, but don't care */
+    else if(!cp) {
+      cp = UNI_DUCET_LOOKUP_END;
+      <<@ab>>len = 0;
+    }
+  }
+  ret<<@ab>> = uni_DUCET_lookup(cp, &lev123<<@ab>>, &lev4<<@ab>>, &st<<@ab>>);
+  /* only ever return NONE if this was the last */
+  if(ret<<@ab>> != UNI_DUCET_LOOKUP_NONE || cp == UNI_DUCET_LOOKUP_END)
+    break;
 }
 @
 
@@ -11111,8 +11176,8 @@ lookups and a sort.  However, most strings are already close enough to
 being normalized that the DUCET lookup would work anyway.  In
 particular, the standard allows a so-called Fast C or D form (FCD)
 test.  This requires only the ccc of the first and last character of
-each full decomposition.  Since this property is not provided directly
-in any other way, it is generated here.
+each full canonical decomposition.  Since this property is not
+provided directly in any other way, it is generated here.
 
 <<Property parsed contents>>=
 uni_chrrng_dat16_t *rng_dat16;
@@ -11336,32 +11401,37 @@ FCD algorithm is copied directly from the technical note, and is
 therefore full-string only.
 
 <<Unicode normalization support exports>>=
-int uni_is_FCD32(const uint32_t *str, unsigned int len);
-int uni_is_FCD16(const uint16_t *str, unsigned int len);
-int uni_is_FCD8(const uint8_t *str, unsigned int len);
+int uni_is_FCD32(const uint32_t *str, int len);
+int uni_is_FCD16(const uint16_t *str, int len);
+int uni_is_FCD8(const uint8_t *str, int len);
 @
 
 <<Unicode normalization support functions>>=
-#define uni_is_FCDn(sz) \
-  int uni_is_FCD##sz(const uint##sz##_t *str, unsigned int len) \
-  { \
-    uint8_t prev = 0, curs; \
- \
-    while(len > 0) { \
-      uint16_t both = uni_FCD_of(uni_int_utf##sz##_decode(str, NULL)); \
-      curs = both >> 8; \
-      if(curs && curs < prev) \
-        return 0; \
-      prev = both & 0xff; \
-      int clen = uni_utf##sz##_nextc(str); \
-      len -= clen; \
-      str += clen; \
-    } \
-    return 1; \
+<<[[uni_is_FCDn]] [[32]]>>
+<<[[uni_is_FCDn]] [[16]]>>
+<<[[uni_is_FCDn]] [[8]]>>
+@
+
+<<[[uni_is_FCDn]] (@sz)>>=
+int uni_is_FCD<<@sz>>(const uint<<@sz>>_t *str, int len)
+{
+  uint8_t prev = 0, curs;
+
+  while(len) {
+    int clen;
+    uint32_t cp = uni_int_utf<<@sz>>_decode(str, &clen);
+    if(len < 0 && !cp)
+      break;
+    uint16_t both = uni_FCD_of(cp);
+    curs = both >> 8;
+    if(curs && curs < prev)
+      return 0;
+    prev = both & 0xff;
+    len -= clen; /* underflow if clen incorrect, but I don't care */
+    str += clen;
   }
-uni_is_FCDn(32)
-uni_is_FCDn(16)
-uni_is_FCDn(8)
+  return 1;
+}
 @
 
 To test collation, the CollationTest files are used.  As with the
@@ -11390,9 +11460,11 @@ tstuca \
 #include "mfgets.h"
 #include "mallocdef.h"
 
+<<UCA test support>>
+
 int main(int argc, const char **argv)
 {
-  int do_cldr = 0, do_shift = 0;
+  int do_cldr = 0, do_shift = 0, pr_keys = 0;
   while(argc-- > 1) {
     if(**++argv == '-') {
       const char *s = *argv;
@@ -11401,6 +11473,8 @@ int main(int argc, const char **argv)
 	  do_cldr = 1;
 	else if(*s == 's')
 	  do_shift = 1;
+	else if(*s == 'v')
+	  pr_keys = 1;
       }
     }
   }
@@ -11416,23 +11490,25 @@ clearbuf(&opts, 1);
 if(do_cldr) {
   opts.tab = uni_DUCET_CLDR_mtab;
   opts.strs = uni_DUCET_CLDR_strs;
-  opts.vartop = uni_DUCET_CLDR_var_top;
+  opts.var_top = uni_DUCET_CLDR_var_top;
 }
 if(do_shift) {
   opts.var_mode = UNI_DUCET_VAR_MODE_SHIFTED;
-  opts.level = 4;
+  opts.max_level = 4;
 } else {
   opts.var_mode = UNI_DUCET_VAR_MODE_NON_IGNORABLE;
-  opts.level = 3; /* undocumented requirement, apparently */
+  opts.max_level = 3; /* undocumented requirement, apparently */
 }
 opts.do_literal = 1;
 char *lbuf = NULL, *s;
 unsigned int lbuflen, llen;
-uint32_t *buf, *key;
-unsigned int buf_len, max_buf;
-uint32_t *prev_key = NULL, *prev_buf = NULL, prev_buf_len = 0;
+uint32_t *buf, *key, *fcd;
+unsigned int buf_len, max_buf, key_len, fcd_len;
+uint32_t *prev_key = NULL, *prev_buf = NULL;
+unsigned int prev_buf_len = 0, prev_key_len = 0;
+unsigned int i;
 inisize(buf, (max_buf = 10));
-#if 1
+#if 1 /* ensure key in comment matches generated key */
 char *kbuf;
 unsigned int kbuflen;
 inisize(kbuf, (kbuflen = 800)); /* just make it big enough rather than resizing */
@@ -11452,79 +11528,46 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
     buf[buf_len++] = strtol(s, &s, 16);
   }
   tot++;
-  if(uni_is_FCD32(buf, buf_len))
+  if(uni_is_FCD32(buf, buf_len)) {
     fcd_saved++;
-#if 0 /* needs to be NFD for literal append */
-  else
-#endif
-    buf_len = uni_NFDt32(&buf, 0, &max_buf, buf_len);
-  key = uni_str_uca_key32(buf, buf_len, &opts);
-#if 1
-  s = kbuf;
-  uint32_t *kp = key;
-  *s++ = '[';
-  /* lev 1 */
-  while(*kp & 0xffff0000) {
-    s += sprintf(s, "%04X ", (int)(*kp >> 16));
-    if(!(*kp & 0xffff))
-      break;
-    s += sprintf(s, "%04X ", (int)(*kp & 0xffff));
-    kp++;
-  }
-  kp++;
-  *s++ = '|';
-  *s++ = ' ';
-  /* lev 2 */
-  while(*kp & 0x7FC0000) {
-    s += sprintf(s, "%04X ", (int)(*kp >> 18));
-    if(!(*kp & 0x3FE00))
-      break;
-    s += sprintf(s, "%04X ", (int)((*kp >> 9) & 0x1ff));
-    if(!(*kp & 0x1ff))
-      break;
-    s += sprintf(s, "%04X ", (int)(*kp & 0x1ff));
-    kp++;
-  }
-  kp++;
-  *s++ = '|';
-  *s++ = ' ';
-  /* lev 3 */
-  while(*kp & (0x1f << 25)) {
-    int i;
-    for(i = 5; i >= 0; i--) {
-      uint32_t v = (*kp >> 5 * i) & 0x1f;
-      if(!v)
-        break;
-      s += sprintf(s, "%04X ", (int)v);
-    }
-    if(i >= 0)
-      break;
-    kp++;
-  }
-  kp++;
-  if(opts.level > 3) {
-    *s++ = '|';
-    *s++ = ' ';
-    /* lev 4 */
-    while(*kp && *kp != 2)
-      s += sprintf(s, "%04X ", (int)*kp++);
-    kp++;
-  }
-  fputs(kbuf, stdout);
+    fcd = uni_str_ducet32(buf, buf_len, &opts, &fcd_len, NULL);
+  } else
+    fcd = NULL;
+  /* needs to be NFD for literal append */
+  buf_len = uni_NFDt32(&buf, 0, &max_buf, buf_len);
+  key = uni_str_ducet32(buf, buf_len, &opts, &key_len, NULL);
+  if(fcd && (fcd_len != key_len || memcmp(fcd, key, fcd_len * 4))) {
+    fprintf(stderr, "key/fcd mismatch\n%s\n", lbuf);
+    s = build_kbuf1234(kbuf, fcd, fcd_len, opts.max_level > 3);
+    strcpy(s, "]\n");
+    fputs(kbuf, stderr);
+    s = build_kbuf1234(kbuf, key, key_len, opts.max_level > 3);
+    strcpy(s, "]\n");
+    fputs(kbuf, stderr);
+    /* CLDR data does not conform! */
+    if(!do_cldr)
+      exit(1);
+  } else
+    free(fcd);
+#if 1 /* build string to match text in comment */
+  s = build_kbuf1234(kbuf, key, key_len, opts.max_level > 3);
+  if(pr_keys)
+    fputs(kbuf, stdout);
   /* literal */
-  fputs("| ", stdout);
-  while(*kp)
-    printf("%04X ", (int)*kp++);
-  puts("]");
   strcpy(s, "|]"); /* error in data file: assumes lit level is empty */
+  if(pr_keys) {
+    fputs("| ", stdout);
+    for(i = 0; i < buf_len; i++)
+      printf("%04X ", (int)buf[i]);
+    puts("]");
+  }
   /* comment in test file has UCA key at end of line, formatted as above */
   {
-    uint32_t i;
     s = strrchr(lbuf, '[');
     strrchr(s, ']')[1] = 0;
     if(strcmp(s, kbuf)) {
       fputs("comment mismatch\n", stderr);
-      for(i = 0; key[i]; i++)
+      for(i = 0; i < key_len; i++)
         fprintf(stderr, "%08X ", key[i]);
       fprintf(stderr, "%s %s\n%s", kbuf, s, lbuf);
       exit(1);
@@ -11533,11 +11576,10 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
 #endif
   if(prev_key) {
     /* note: can't use memcmp except on big-endian machines */
-    uint32_t i;
-    for(i = 0; prev_key[i] && key[i]; i++)
-      if(prev_key[i] != key[i])
-        break;
-    if(prev_key[i] > key[i]) {
+    int c = uni_uca_ducet_cmp(prev_key, prev_key_len, key, key_len, &opts);
+    if(!c)
+      c = uni_int_utf32_strcmp(prev_buf, prev_buf_len, buf, buf_len);
+    if(c > 0) {
       fflush(stdout);
       fprintf(stderr, "keys are out of order at %s\n", lbuf);
       exit(1);
@@ -11555,19 +11597,72 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
   prev_buf_len = buf_len;
   cpybuf(prev_buf, buf, buf_len);
 }
-if(prev_key)
+if(prev_key) {
   free(prev_key);
+  free(prev_buf);
+}
 printf("%u keys generated; could have skipped NFD on %u tests\n",
        tot, fcd_saved);
 @
 
+<<UCA test support>>=
+static char *build_kbuf1234(char *s, const uint32_t *key, unsigned int key_len,
+                            int has_l4)
+{
+  unsigned int i;
+
+  *s++ = '[';
+  /* lev 1 */
+  for(i = 0; i < key_len; i++) {
+    uint32_t l1 = (key[i] & UNI_DUCET_LEV1_MASK) >> UNI_DUCET_LEV1_SHIFT;
+    if(l1)
+      s += sprintf(s, "%04X ", (int)l1);
+    if(has_l4)
+      i++;
+  }
+  *s++ = '|';
+  *s++ = ' ';
+  /* lev 2 */
+  for(i = 0; i < key_len; i++) {
+    uint32_t l2 = (key[i] & UNI_DUCET_LEV2_MASK) >> UNI_DUCET_LEV2_SHIFT;
+    if(l2)
+      s += sprintf(s, "%04X ", (int)l2);
+    if(has_l4)
+      i++;
+  }
+  *s++ = '|';
+  *s++ = ' ';
+  /* lev 3 */
+  for(i = 0; i < key_len; i++) {
+    uint32_t l3 = (key[i] & UNI_DUCET_LEV3_MASK) >> UNI_DUCET_LEV3_SHIFT;
+    if(l3)
+      s += sprintf(s, "%04X ", (int)l3);
+    if(has_l4)
+      i++;
+  }
+  if(has_l4) {
+    *s++ = '|';
+    *s++ = ' ';
+    /* lev 4 */
+    for(i = 1; i < key_len; i += 2) {
+      uint32_t l4 = key[i];
+      if(l4)
+        s += sprintf(s, "%04X ", (int)l4);
+    }
+  }
+  return s;
+}
+@
+
 Since the standard tests only test Shifted and Non-ignorable variable
 weighting options, a sample program to exercise the other options is
-provided.  There is no standard test data; it must be run and checked
-manually.  There is a table titled ``Comparison of Variable Ordering''
-in the standard; it is a good start.  This is not the way to sort a
-file.  However, it is sufficient for running a small bit of text
-through its paces.
+provided.  It takes the numeric variable treatment type as its first
+argument (zero if not present), and if a second argument is present,
+the search keys are printed as well.  There is no standard test data;
+it must be run and checked manually.  There is a table titled
+``Comparison of Variable Ordering'' in the standard; it is a good
+start.  This is not the way to sort a file.  However, it is sufficient
+for running a small bit of text through its paces.
 
 <<C Test Support Executables>>=
 tstucavar \
@@ -11587,17 +11682,17 @@ struct ustr {
 
 static int uca_cmp(const void *_a, const void *_b)
 {
-  struct ustr *a = _a, *b = _b;
-  return uni_uca_strcmp(a->str, a->len, b->str, b->len, &opts);
+  const struct ustr *a = _a, *b = _b;
+  return uni_uca_strcmp32(a->str, a->len, b->str, b->len, &opts);
 }
 
 int main(int argc, const char **argv)
 {
   clearbuf(&opts, 1);
-  opts.level = 5;
+  opts.max_level = 5;
   if(argc > 1)
     opts.var_mode = atoi(argv[1]);
-  struct ustr *input;
+  int pr_keys = argc > 2;
   char *lbuf = NULL, *s;
   unsigned int lbuflen, llen;
   uint32_t *buf32, buf32len, buf32max;
@@ -11612,7 +11707,7 @@ int main(int argc, const char **argv)
       continue;
     for(s = lbuf, buf32len = 0; *s; buf32len++) {
       int len;
-      uint32_t c = uni_utf8_decode(s, &len);
+      uint32_t c = uni_utf8_decode((uint8_t *)s, &len);
       if(c == '\n')
         break;
       if(buf32len == buf32max)
@@ -11627,8 +11722,27 @@ int main(int argc, const char **argv)
     cpybuf(strs[nstrs].str, buf32, buf32len);
     nstrs++;
   }
-  qsort(strs, nstrs, sizeof(*strs), uca_cmp);
   int i;
+  if(pr_keys)
+    for(i = 0; i < nstrs; i++) {
+      uint32_t *key;
+      unsigned int key_len, j;
+      uni_utf8_fputs(strs[i].str, strs[i].len, stdout);
+      key = uni_str_ducet32(strs[i].str, strs[i].len, &opts, &key_len, NULL);
+      for(j = 0; j < key_len; j += 2)
+        printf(" %04X", (key[j] & UNI_DUCET_LEV1_MASK) >> UNI_DUCET_LEV1_SHIFT);
+      putchar('|');
+      for(j = 0; j < key_len; j += 2)
+        printf(" %04X", (key[j] & UNI_DUCET_LEV2_MASK) >> UNI_DUCET_LEV2_SHIFT);
+      putchar('|');
+      for(j = 0; j < key_len; j += 2)
+        printf(" %04X", (key[j] & UNI_DUCET_LEV3_MASK) >> UNI_DUCET_LEV3_SHIFT);
+      putchar('|');
+      for(j = 0; j < key_len; j += 2)
+        printf(" %04X", key[j + 1]);
+      putchar('\n');
+    }
+  qsort(strs, nstrs, sizeof(*strs), uca_cmp);
   for(i = 0; i < nstrs; i++) {
     uni_utf8_fputs(strs[i].str, strs[i].len, stdout);
     putchar('\n');
@@ -11636,6 +11750,109 @@ int main(int argc, const char **argv)
   return 0;
 }
 @
+
+The following script generates a table very similar to the one in the
+standard.  It takes one or more text files for input, and prints the
+table with a blank line between files.  Hidden in this document are
+two root chunks: [[<<varord1.txt>>]] and [[<<varord2.txt>>]].  These
+correspond to the table in the standard.  The output after running
+these two through the script should look like [[<<varordout.txt>>]],
+another hidden root chunk.  The reason these are hidden is that there
+are some hard-to-render characters in these files, and I do not wish
+to deal with that right now.
+
+\lstset{language=make}
+<<Test Support Scripts>>=
+tstucavartab \
+@
+
+<<Plain Build Files>>=
+varord1.txt varord2.txt varordout.txt \
+@
+
+<<makefile.vars>>=
+varordout.txt: NOTANGLE_OPTS=-t8
+
+@
+
+<<makefile.rules>>=
+test: varord1.txt varord2.txt varordout.txt
+@
+
+\lstset{language=sh}
+<<tstucavartab>>=
+#!/bin/sh
+
+t="non-Ign Blanked Shifted IgnSP Shft-Tr"
+i=0
+p=
+
+for tt in $t; do
+  (
+    echo $tt
+    for x; do
+      ./tstucavar $i < $x
+      echo
+    done
+  ) > out$$$i
+  p="$p out$$$i"
+  i=$((i+1))
+done
+eval "paste $p"
+eval "rm $p"
+@
+
+<<Additional Tests>>=
+./tstucavartab varord[12].txt | diff - varordout.txt
+@
+
+\begin{rawhtml}
+<!-->
+\end{rawhtml}
+\iffalse
+<<varord1.txt>>=
+de luge
+de Luge
+de-luge
+de-Luge
+de‐luge
+de‐Luge
+death
+deluge
+deLuge
+demark
+@
+
+<<varord2.txt>>=
+☠happy
+☠sad
+♡happy
+♡sad
+@
+
+<<varordout.txt>>=
+non-Ign	Blanked	Shifted	IgnSP	Shft-Tr
+de luge	death	death	death	death
+de Luge	de luge	de luge	de luge	deluge
+de-luge	de-luge	de-luge	de-luge	de luge
+de-Luge	deluge	de‐luge	de‐luge	de-luge
+de‐luge	de‐luge	deluge	deluge	de‐luge
+de‐Luge	de Luge	de Luge	de Luge	deLuge
+death	de-Luge	de-Luge	de-Luge	de Luge
+deluge	deLuge	de‐Luge	de‐Luge	de-Luge
+deLuge	de‐Luge	deLuge	deLuge	de‐Luge
+demark	demark	demark	demark	demark
+				
+☠happy	☠happy	☠happy	☠happy	☠happy
+☠sad	♡happy	♡happy	☠sad	♡happy
+♡happy	☠sad	☠sad	♡happy	☠sad
+♡sad	♡sad	♡sad	♡sad	♡sad
+				
+@
+\fi
+\begin{rawhtml}
+<-->
+\end{rawhtml}
 
 While implementation of the UCA algorithm with the raw tables was not
 difficult, there are a few desirable functions which cannot be
@@ -11670,6 +11887,7 @@ collation elements.
 Similar to the UCA, the sort compares each level separately, ignoring
 zeroes.  The first level to mismatch determines the order.
 
+\lstset{language=C}
 <<DUCET parser globals>>=
 <<DUCET lookup format defs>>
 
@@ -11872,6 +12090,7 @@ dump_str_tabs(&parsed_props[add_prop("rev_DUCET")], gen_h, tstf);
 dump_str_tabs(&parsed_props[add_prop("rev_DUCET_CLDR")], gen_h, tstf);
 @
 
+\lstset{language=txt}
 <<FIXME>>=
 Make function to look up equiv. class:
   - do forward lookup of key
@@ -12030,7 +12249,7 @@ const char *str_for(uint32_t no, int *len);
 #endif /* UNI_STRS_H */
 @
 
-<<uni_strs.c>>=
+<<uni_strs.cx>>=
 <<Common C Header>>
 #include "uni_strs.h"
 // static_proto
@@ -12448,7 +12667,7 @@ mkstrs \
 @
 
 \lstset{language=C}
-<<mkstrs.c>>=
+<<mkstrs.cx>>=
 <<Common C Header>>
 #include "uni_strs.h"
 
@@ -13333,7 +13552,7 @@ mkstrs-hash: mkstrs-hash.c
 @
 
 \lstset{language=C}
-<<mkstrs-hash.c>>=
+<<mkstrs-hash.cx>>=
 <<Common C Header>>
 #include "uni_strs.h"
 @
@@ -13345,7 +13564,7 @@ additional storage kept is a count of how many entries were added to
 each slot, so that an estimate of table badness can be printed on
 completion.
 
-<<mkstrs-hash.c>>=
+<<mkstrs-hash.cx>>=
 uint32_t strhash[HTAB_SIZE], hdepth[HTAB_SIZE];
 @
 
@@ -13356,7 +13575,7 @@ from the previous stage, and prints the hash table entry.  When done
 with that, it dumps the hash table itself, as well as any statistics
 it accumulated.
 
-<<mkstrs-hash.c>>=
+<<mkstrs-hash.cx>>=
 int main(void)
 {
   <<Print hash entries>>
@@ -13629,11 +13848,11 @@ int uni_range_of(int cp)
 Now enough pieces are together to create some routines for character
 name lookup.
 
-<<Library [[uni]] headers>>=
-#include "uni_charname.h"
-@
+%@<<Library [[uni]] headers>>=
+%#include "uni_charname.h"
+%@
 
-<<uni_charname.h>>=
+<<uni_charname.hx>>=
 <<Common C Warning>>
 #ifndef CHARNAMES_H
 #define CHARNAMES_H
@@ -13648,7 +13867,7 @@ name lookup.
 %uni_charname.o
 %@
 
-<<uni_charname.c>>=
+<<uni_charname.cx>>=
 <<Common C Header>>
 #include "uni_charname.h"
 
@@ -13731,6 +13950,7 @@ than 128 characters are accepted (the actual maximum is around 83).
 If the transformed name still can't be looked up, it needs to be
 looked up as a range.
 
+\lstset{language=C}
 <<Look up code point of Unicode character [[name]]/[[len]]>>=
 if(len > 128)
   return -1;
@@ -14740,6 +14960,7 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
 }
 @
 
+\lstset{language=txt}
 <<FIXME>>=
 "unknown" codes:
   $language - und
@@ -14771,6 +14992,7 @@ variant translations:
 The extensions supported by the CLDR are listed in the common/bcp47
 data files.
 
+\lstset{language=C}
 <<UCD parser local definitions>>=
 #include <dirent.h>
 @
@@ -14876,6 +15098,7 @@ chdir(cwd);
 chdir(CLDR_LOC);
 @
 
+\lstset{language=txt}
 <<FIXME>>=
  Implement locale name paraser:
    extract lang, script, territory, variant(s)
@@ -14895,6 +15118,7 @@ are effectively merged into a single tree.  For alias lookups and data
 merging, all available xml files are read in and keyed by their
 primary identity.
 
+\lstset{language=C}
 <<UCD parser local functions>>=
 static void parse_ldml(const char *name)
 {
@@ -15288,6 +15512,7 @@ else if(xml_isname(n, "references")) {
 }
 @
 
+\lstset{language=txt}
 <<FIXME>>=
 implement
 
@@ -15351,10 +15576,11 @@ for regex:
 
 Here is a master driver to call some of the above code for testing.
 
-<<C Test Support Executables>>=
+<<xC Test Support Executables>>=
 tst \
 @
 
+\lstset{language=C}
 <<tst.c>>=
 <<Common C Header>>
 #include "uni_all.h"
@@ -15498,7 +15724,7 @@ character through the [[tst]] program.  This does not guarantee that
 the lists themselves are OK, or that bad names will not trigger false
 positives, but it's better than nothing.
 
-<<Test Scripts>>=
+<<xTest Scripts>>=
 tstchars \
 @
 
@@ -15550,7 +15776,7 @@ hashcheck: uni_strs.o strs.gen
 	$(CC) -o $@ $(CFLAGS) $(LDFLAGS) $(EXTRA_CFLAGS) -DHASHCHECK uni_strs.c
 @
 
-<<C Test Executables>>=
+<<xC Test Executables>>=
 hashcheck \
 @
 
@@ -15676,8 +15902,12 @@ behavior is undefined if the UTF-8 or UTF-16 encoding is not valid up
 to (but not necessarily including) the desired offset/index.  These
 functions are expensive in that they scan the string from the
 beginning for every call; use the macros above for small index
-adjustments.
+adjustments.  The 32-bit versions are dummy functions that return
+[[n]], since offset and index are always identical.  They are mainly
+for writing generic code using macros.
 
+% uni_utf32_offset_of prototype
+% uni_utf32_index_of prototype
 % uni_utf16_offset_of prototype
 % uni_utf16_index_of prototype
 % uni_utf8_offset_of prototype
@@ -15688,6 +15918,7 @@ To determine the length of a string of fixed word length, the
 length as the offset.  To determine the length of a zero-terminated
 string, the following functions are provided.
 
+% uni_utf32_strlen prototype
 % uni_utf16_strlen prototype
 % uni_utf8_strlen prototype
 
@@ -15731,6 +15962,19 @@ use the [[nextc]] macros above.
 % uni_utf8_enclen prototype
 % uni_utf16_enclen prototype
 % uni_utf32_enclen prototype
+
+To directly compare two strings in a valid UTF format, [[memcmp]] can
+be used, given the computed length.  For convenience, the following
+functions can be used instead.  Note that these do not use the Unicode
+Collation Algorithm or perform any locale-specific transformations;
+they simple compare code point values.  Each string length may be
+positive to indicate the number of words in the string (not
+necessarily the number of characters), and it may be negative to
+indicate zero termination.
+
+% uni_int_utf32_strcmp prototype
+% uni_int_utf16_strcmp prototype
+% uni_int_utf8_strcmp prototype
 
 To transform UTF-32 data to and from UTF-32BE and UTF-32LE, the
 following functions are used.  The endianness is specified by
@@ -15985,7 +16229,9 @@ optimized binary searches.
 \input{[[uni_chrrng_dat16_t]].tex} % C
 \input{[[uni_chrrng_dat32_t]].tex} % C
 % uni_cmprng_dat16 prototype
+% uni_chrrng_dat16 prototype
 % uni_cmprng_dat32 prototype
+% uni_chrrng_dat32 prototype
 
 A special variant of the 32-bit type above interprets the 32-bit value
 as a rational number with a 24-bit signed numerator and an 8-bit
@@ -16124,33 +16370,40 @@ multiply code point values by 4 when using [[multi_tab_lookup]].
 
 \section{All Properties}
 
-All currently supported properties are provided via
-[[const uni_propdesc_t uni_propdesc[]]].  Each entry describes a
-property, and points to its data.  This array's length is given by the
-preprocessor symbol [[uni_propdesc_len]].  It is intended to be
-used to scan for desired properties, find property names and their
-aliases, and generate data based on that.  However, there is no harm
-in using it if you intend to support every single property, anyway.
-Including a reference to this array, or the associated
-[[uni_propdesc_valueof]] array, will defeat the static linking
-property of this library, pulling every single property's data in.
+Information on all currently supported properties are provided by
+several arrays.  They are intended to be used to scan for desired
+properties, find property names and their aliases, and generate data
+based on that.  However, there is no harm in using it if you intended
+to support every single property, anyway.  Including a reference to
+any of these symbols will likely defeat the static linking property of
+this library, pulling every single property's data in.
 
-Looking up a property by name is done using the
-[[const uni_valueof_t uni_propdesc_valueof[]]] and
-[[const uni_valueof_t uni_propdesc_valueof_approx[]]] arrays.  The
-lengths of these two arrays are
-[[uni_propdesc_valueof_len]] and [[uni_propdesc_valueof_approx_len]],
-respectively.  See Enumeration Properties (section \ref{sec:enum}) for
-details on the [[uni_alias_t]] and [[uni_valueof_t]] structures, and
-how to use them.
+\begin{itemize}
+\item [[const uni_propdesc_t uni_propdesc[]]] is an array whose length
+is given by the preprocessor symbol [[uni_propdesc_len]].  Each entry
+describes a property, and points to its data.  See below for a
+description of the elements' data structure.
+\item [[uni_propdesc_valueof]] is an array whose length is given by
+the preprocessor symbol [[uni_propdesc_valueof_len]].  It is a sorted
+array of names for lookup of properties by name rather than sequence
+number.  See Enumeration Properties (section \ref{sec:enum}) for
+details on the structure and how to use it.
+\item [[uni_propdesc_valueof_approx]] is an array whose length is
+given by the preprocessor symbol [[uni_propdesc_valueof_approx_len]].
+Its usage is similar to the previous item; see Enumeration Properties
+(section \ref{sec:enum}) for details.
+\end{itemize}
+
 
 The [[name]] field contains the canonical name and all known aliases
-for the property name.  The [[mtab]] and [[mtab_len]] describe the
-multi-level table for the property.  The [[tab]] and
-[[tab_len]] describe the sorted range table or sorted code point
-table for the property.  See the sections below for details on what
-these tables contain.  The [[type]] field determines which section
-describes the tables:
+for the property name; see Enumeration Properties (section
+\ref{sec:enum}) for details on the [[uni_alias_t]] structure and how
+to use it..  The [[mtab]] and [[mtab_len]] fields describe the
+multi-level table for the property.  The [[tab]] and [[tab_len]]
+fields describe the sorted range table or sorted code point table for
+the property.  See the sections below for details on what these tables
+contain.  The [[type]] field determines which section describes the
+tables:
 
 \begin{itemize}
 \item [[UNI_PROP_TYPE_BOOL]]: Boolean Properties
@@ -16302,6 +16555,13 @@ is not found, strips off a leading ``is''.
 
 % uni_x_valueof_approx prototype
 
+It performs its function by first stripping the name; manual stripping
+can be done with the following function.  After stripping, the name
+can be looked up directly using [[cmp_valueof]] twice:  first without
+further modification, and second after striping any leading ``is''.
+
+% uni_name_strip prototype
+
 The list of supported enumeration properties is in table
 \ref{tab:enumprop}.  For each enumerated property \emph{EP}, the
 following symbols are defined:
@@ -16346,6 +16606,8 @@ array of ranges.  The default value is not provided here.
 array (a preprocessor symbol).
 \item [[uint32_t *uni_]]\emph{EP}[[_mtab]] is a multi-level table whose
 byte-length values correspond to the enumeration literal values.
+\item [[uni_]]\emph{EP}[[_mtab_len]] is the size of the multi-level
+table (in words), in case the table is to transferred or written out.
 \item [[int uni_]]\emph{EP}[[_of]] is a preprocessor macro which
 returns the enumeration value for any code point.  The canonical
 default is returned when the table has no entry.  Internally, the
@@ -16414,7 +16676,7 @@ range table.
 table with the same data.
 \item [[uni_]]\emph{NP}[[_mtab_len]] is the length of that table (a
 preprocessor symbol), in case it is to be written out to a file.
-\item [[void uni_]]\emph{NP}[[_of(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)]]
+\item [[void uni_]]\emph{NP}[[_of(uint32_t cp, int32_t *num, uint8_t *denom)]]
 is a simple wrapper lookup function that uses the multi-level table to
 retrieve the numerator and denominator.
 \end{itemize}
@@ -16469,16 +16731,24 @@ Note that the [[uni_str_arr_t]] data structure can also be cast to the
 [[uni_cp_val_t]] type, whose [[val]] element can then be cast to
 the [[uni_str_ptr_t]] type.
 
+Searching the multi-level table for a string can be done generically
+using the following function; it is used internally by the
+per-property lookup functions.  The returned pointer is always valid;
+a lookup failure is detected by checking the offset and length.  If
+both are zero, then a lookup failure occurred.  Zero-length strings
+have non-zero offsets to avoid looking like a failure.
+
+% uni_x_str_of prototype
+
 The supported string properties are listed in table
 \ref{tab:stringprop}.  Unless otherwise stated in the subsequent
 sections, for each string property \emph{SP}, the following symbols
 are defined:
 
 \begin{itemize}
-\item [[const uint32_t uni_]]\emph{ST}[[_strs[]]] is a string table
-containing all string values.  \emph{ST} may or may not be the same as
-\emph{SP}.
-\item [[uni_]]\emph{ST}[[_len]] is the length of the string table (a
+\item [[const uint32_t uni_]]\emph{SP}[[_strs[]]] is a string table
+containing all string values.
+\item [[uni_]]\emph{SP}[[_strs_len]] is the length of the string table (a
 preprocessor symbol), in case it needs to be written out to a file.
 \item [[const uni_str_arr_t uni_]]\emph{SP}[[_arr[]]] is a sorted list
 of code points with their associated string offsets and lengths.
@@ -16488,6 +16758,12 @@ of code points with their associated string offsets and lengths.
 table of 32-bit [[uni_str_ptr_t]] values.
 \item [[uni_]]\emph{SP}[[_mtab_len]] is the length of that table (a
 preprocessor symbol), in case it is to be written out to a file.
+\item [[const uni_str_ptr_t *uni_]]\emph{SP}[[_of(uint32_t cp)]]
+is a simple wrapper lookup function that uses the multi-level table to
+retrieve string information as an offset and length in the string
+table.  A zero-length string is distinguished from a missed lookup by
+the offset field:  only missed lookups have both offset and length of
+zero.
 \end{itemize}
 
 For static linking, the string table, sorted code point table, and
@@ -16583,17 +16859,17 @@ one input character.
 % uni_NFKC_CF8 prototype
 % uni_NFKC_CFt8 prototype
 
-To support the normalization functions above, canonical ordering must be
-performed.  The following function takes a buffer ([[buf]]) of a given
-length ([[ilen]]), and sorts the characters in-place.  It will never
-need to expand the length of the array.  However, it may need more
-characters to fully sort the input.  The [[last]] parameter indicates
-that the function must assume there are no more characters available.
-Otherwise, it will return the full length of the input if no more
-characters are needed, or less than the full length if more are
-needed.  If more are needed, the return value indicates the number of
-characters which have already been sorted; these can safely be removed
-before the next pass.
+Most normalization procedures above perform canonical ordering.  This
+can also be done outside of those functions.  The following function
+takes a buffer ([[buf]]) of a given length ([[ilen]]), and sorts the
+characters in-place.  It will never need to expand the length of the
+array.  However, it may need more characters to fully sort the input.
+The [[last]] parameter indicates that the function must assume there
+are no more characters available. Otherwise, it will return the full
+length of the input if no more characters are needed, or less than the
+full length if more are needed.  If more are needed, the return value
+indicates the number of characters which have already been sorted;
+these can safely be removed before the next pass.
 
 % uni_Canon_Order32 prototype
 % uni_Canon_Order16 prototype
@@ -16635,10 +16911,13 @@ character of any potential canonical decomposition as its low byte.
 See Unicode Technical Note \#5 for details on the algorithm.  Also see
 that technical note for a brief description of what it means for a
 transformation to be canonically closed.  The only property currently
-guaranteed to meet this requirement is the DUCET.  The UCA is not
-always guaranteed to meet this requirement; if the literal text is to
-be appended to the key, then the literal text must be in NFD form
-first.
+claiming to meet this requirement is the DUCET.%
+\footnote{However, the supplied CLDR tests have several cases where
+passing FCD is not enough to produce a valid sort key.  This may be a
+bug in either the UCA or the UCD.}
+The UCA is not always guaranteed to meet this requirement; if the
+literal text is to be appended to the key, then the literal text must
+be in NFD form first.
 
 \subsection{Decomposition}
 
@@ -16646,33 +16925,41 @@ The raw decomposition data is not meant to be used directly.  Instead,
 the following wrapper functions are provided.  They perform just the
 decomposition step for the decomposition normal forms; canonical
 ordering needs to be performed manually afterwards.  Like the full
-normalization functions, they modify buffers in-place, so enough room
-for the output (maximum 18 times the size of the input) needs to be
-provided.  The return value is the length after transformation.
+normalization functions, they come in two varieties:  ones which
+modify ("t"ransform) the input, and those which generate output
+separately.  The return value is the length after transformation.
 
 % uni_NFD_dec32 prototype
+% uni_NFD_dect32 prototype
 % uni_NFD_dec16 prototype
+% uni_NFD_dect16 prototype
 % uni_NFD_dec8 prototype
+% uni_NFD_dect8 prototype
 % uni_NFKD_dec32 prototype
+% uni_NFKD_dect32 prototype
 % uni_NFKD_dec16 prototype
+% uni_NFKD_dect16 prototype
 % uni_NFKD_dec8 prototype
+% uni_NFKD_dect8 prototype
 
-Raw decomposition data is stored in [[uni_dm_full_strs]] (i.e.,
-\emph{ST} is dm\_full).  This includes the raw dm property, as well as
-two pseudo properties.  The canon\_decomp property contains only
-full (recursive) canonical decompositions, and the compat\_decomp
-property contains only full (recursive) compatibility decompositions
-when they differ from the canon\_decomp result.  The raw dm property
-is not recursively/fully decomposed.  The length field cannot be used
-raw; a flag is ored into the upper bit.  This flag eliminates the need
-for a dt property lookup to determine if an entry is canonical or
-compatibility:  compatibilty decompositions have this flag set.
+Raw decomposition data is stored in [[uni_dm_strs]].  This includes
+the raw dm property, as well as two pseudo properties.  The
+canon\_decomp property contains only full (recursive) canonical
+decompositions, and the compat\_decomp property contains only full
+(recursive) compatibility decompositions when they differ from the
+canon\_decomp result.  The raw dm property is not recursively/fully
+decomposed.  The length field cannot be used raw; a flag is ored into
+the upper bit.  This flag eliminates the need for a dt property lookup
+to determine if an entry is canonical or compatibility: compatibilty
+decompositions have this flag set.
 
 Lookup with the multi-level tables is simplified with some
 preprocessor macros, which return the associated string's offset and
 length.  For the compatibility lookups, an optional pointer to a flag
 ([[compat]]) can be used to check if the returned decomposition was
-not canonical.
+not canonical.  Unlike the other string properties, the
+[[uni_]]\emph{SP}[[_of]] function is not supported for these
+properties, in order to force usage of these functions.
 
 % uni_find_canon_decomp prototype
 % uni_find_compat_decomp prototype
@@ -16774,75 +17061,73 @@ variable uni\_\emph{property}\_var\_top, which is the default variable
 top parameter for that table.  As with the normalization tables, raw
 lookup is not encouraged.
 
-To find the Unicode Collation Algorithm key string for a Unicode
-string [[str]] of length [[slen]], the following function is provided.
-It is meant to be called on normalized (NFD) strings, although there
-are special exceptions where full normalization is not needed.  See
-the standard for details.  The [[opts]] parameter may be [[NULL]], or
-it may point to a structure which is zeroed out except for selected
-parameter settings.  The return value is a zero-terminated array of
-32-bit words, which is allocated using [[malloc]].
-
-Note that the key consists of 32-bit words.  Keys cannot be compared
-using [[memcmp]] unless the underlying architecture is big-endian.  If
-a key is required to be byte-comparable, either use [[htonl]] on each
-word, or use one of the various proposals in the UCA standard.  Note
-also that zero bytes are likely present within the key, so [[strcmp]]
-is not even a candidate.
-
-% uni_str_uca_key32 prototype
-% uni_str_uca_key16 prototype
-% uni_str_uca_key8 prototype
-
-The [[tab]] and [[strs]] parameters must be set together, and specify
-the static data for the DUCET.  By default, the standard Unicode DUCET
-is used.  Normally, the [[vartop]] parameter would be set at the same
-time; by default it is the standard Unicode DUCET's variable top.
-
-The [[level]] parameter is the maximum significant key level; by
-default, it is 3.  If it is larger than 4, [[do_literal]] is implied.
-The [[do_literal]] parameter, if non-zero, appends the literal input
-string to the key.  Note that although the non-literal portions of the
-key will never contain a zero word, no check is made that the input
-string has the same property.  In order to retain the zero termination
-property of the sort key, zeroes in the input string should be
-converted to non-zeroes.  For example, both zeroes and ones could be
-converted to ones, followed by one or two depending on the original
-value.  This will not affect the sort order, as zeroes, ones, and twos
-are all fully ignorable.
-
-The behavior of variable weights is controlled by the [[var_mode]]
-parameter, whose values correspond to the standard methods.  The
-second level, if enabled, may be returned in reverse order using the
-[[reverse_lev2]] flag.
-
-\input{[[uni_uca_opts_t]].tex} % C
-
-\input{DUCET variable modes.tex} % C
-
 To perform a straight string comparison without fully generating keys,
-use the following function.  Once again, the [[opts]] parameter may be
-NULL or a set of collation options.
+use the following functions.  The [[opts]] parameter may be NULL, or
+it may be a set of collation options.  Each string's length may be
+either a positive number, indicating absolute length in words, or a
+negative number, indicating that the string is zero-terminated.
 
 % uni_uca_strcmp32 prototype
 % uni_uca_strcmp16 prototype
 % uni_uca_strcmp8 prototype
 
-To perform raw DUCET lookups for strings, use the following function.
-The return value is an array allocated using [[malloc]] of length
-[[*rlen]].  If [[llen]] is non-NULL, it must be an array of length 4,
-and the number of non-zero values at each of the four levels is stored
-into that array, in order.  This performs all steps of the UCA except
-for ordering the values by level, then code point rather than
-vice-versa.  The format of the returned array is either one or two
-32-bit words per DUCET entry.  If the level is greater than three, it
-uses two words; otherwise, it uses one.  The first word is a
-combination of the first three levels, using masks and shifts as
-defined below.  The second word, if present, is the fourth level.
+Collation options are set by the following structure.  The defaults
+are selected by zeroing the options structure out first.
+
+\input{[[uni_uca_opts_t]].tex} % C
+
+The [[tab]] and [[strs]] options must be set together, and specify
+the static data for the DUCET.  By default, the standard Unicode DUCET
+is used.  Normally, the [[var_top]] option would be set at the same
+time; by default it is the standard Unicode DUCET's variable top.
+
+The [[max_level]] option is the maximum significant key level; by
+default, it is 3.  The second level, if enabled, may be returned in
+reverse order using the [[reverse_lev2]] flag. If it is larger than 4,
+[[do_literal]] is implied. The [[do_literal]] option, if non-zero,
+appends the literal input string to the key.  The UCA requires that
+the string be in NFD form for this to work.
+
+Keys whose primary component is non-zero and equal to or less than
+[[var_top]] are variable weight keys.  The behavior of variable
+weights is controlled by the [[var_mode]] parameter, whose values
+correspond to the standard methods.
+
+\input{DUCET variable modes.tex} % C
+
+There is no function to directly generate something like the UCA sort
+key.  Users wishing to store these keys are encouraged to encode them
+in a more efficient manner for comparison.  However, the raw keys may
+be looked up and compared as if they were UCA sort keys.  To retrieve
+the sort key for a string, use the following functions.  The string
+length is negative for zero-terminated strings, or positive for
+strings with an absolute length.  The function returns a sort key
+allocated with [[malloc]], whose length is return in [[*rlen]].  If
+[[llen]] is non-[[NULL]], it points to a 4-element array into which to
+place the number of non-zero elements at each level of the key.
+Remember that the string input should be at least FCD form.
 
 % uni_str_ducet32 prototype
 % uni_str_ducet16 prototype
 % uni_str_ducet8 prototype
+
+To compare the keys returned by the above function, use the following
+functions.  Pass in the same options as passed into the key creation
+routine; passing different options for different keys or different
+options for keys and comparison will result in undefined behavior.
+This combination of functions respects all the same options
+as the string comparison routines, except for the [[do_literal]]
+option.  To obtain the effect of this option, use something equivalent
+to [[uni_int_utf32_strcmp]] on the normalized strings if
+[[uni_uca_ducet_cmp]] returns zero.
+
+% uni_uca_ducet_cmp prototype
+
+Alternately, the keys can be directly examined.  Each key element is
+returned as one or two 32-bit integers.  The first contains a
+combination of the first three levels using shifts and masks.  If
+[[max_level]] was larger than three when the key was created, a second
+word for each key element is the fourth level.
 
 \input{DUCET lookup format defs.tex} % C
 
@@ -16869,14 +17154,17 @@ lookup returns ([[c]] is [[UNI_DUCET_LOOKUP_END]] and the return value
 was not [[UNI_DUCET_LOOKUP_AGAIN]]), the structure is automatically freed
 and reset to [[NULL]].  It should never be freed manually.
 
+Note that the [[SHIFT_TRIMMED]] variable weight processing method can
+be implemented more cheaply in an outer function by using [[SHIFTED]]
+instead, and trimming after the entire key has been built.
+
 % uni_DUCET_lookup prototype
 
-The initial state can also be used to set one parameter:  the table to
-use for lookups.  To do this, call this function first, with a
-non-[[NULL]] [[tab]] and [[strs]].  This will allocate a new state for
-use with the lookup function.
+The initial state can also be used to set options.  Currently, the
+[[reverse_lev2]] and [[do_literal]] options are not supported.  The
+options may only be set once; any further attempts will be ignored.
 
-% uni_DUCET_lookup_tab prototype
+% uni_DUCET_lookup_opts prototype
 
 \subsection{Case Conversion}
 
@@ -16961,13 +17249,21 @@ using a wrapper macro as well:
 % uni_tcf16 prototype
 % uni_tcf8 prototype
 
+Note that the cf and tcf properties are actually the same, and are
+stored and treated the same way as the other case properties.  The
+wrapper functions above filter the low-level cf property based on the
+desired locale information.
+
 The only other case conversion string property is NFKC\_CF, which is a
-plain string property.  However, for convenience, a lookup function
+plain string property.  However, for convenience, lookup functions
 similar to the decomposition functions is provided as well.
 
 % uni_NFKC_Casefold32 prototype
+% uni_NFKC_Casefoldt32 prototype
 % uni_NFKC_Casefold16 prototype
+% uni_NFKC_Casefoldt16 prototype
 % uni_NFKC_Casefold8 prototype
+% uni_NFKC_Casefoldt8 prototype
 
 \subsection{Other String Properties}
 
@@ -16980,6 +17276,7 @@ string is [[U_sc_Arab]], and the second is [[U_sc_Syrc]].
 
 % End-doc Users-Guide
 
+\lstset{language=txt}
 <<FIXME>>=
 Document:
   const uni_chrrng_dat8_t uni_range_rng[]
@@ -16987,21 +17284,34 @@ Document:
   const uint32_t uni_range_mtab[]
   uni_range_mtab_len
   uni_range_invalid
+  CLDR name lookups:
+    CLDR_{language,territory,script,variant,currency,tzid,altList,
+          casing,apend,calendar,collationType,format,numberSystem}
+  enums w/o names:
+    DUCET_dt
+  strings:
+    DUCET_dm, rev_DUCET, rev_DUCET_CLDR
+  other:
+    uni_DUCET_var_top, uni_DUCET_CLDR_var_top
+  functions:
+    uni_return_buf{32,16,8}
 @
 
 \end{document}
 
 notes:
   page 99: Named Unicode Algorithms
+   implemented:
     Canonical Ordering
     Canonical Composition
     Normalization
     Hangul Syllable Composition
     Hangul Syllable Decomposition
     Hangul Syllable Name Generation
+    Unicode Collation Algorithm (UCA)
+   not implemented:
     Default Case Conversion
     Default Case Detection
-    Bidirectional Algorithm (UBA)
     Line Breaking Algorithm
     Character Segmentation
     Word Segmentation
@@ -17012,5 +17322,8 @@ notes:
     Pattern Syntax Determination
     Identifier Normalization
     Identifer Case Folding
+   won't implement:
+    Bidirectional Algorithm (UBA)
+      but should probably do it anyway, to ensure that data files are
+      usable
     Standard Compression Scheme for Unicode
-    Unicode Collation Algorithm (UCA)
