@@ -15,7 +15,7 @@
 
 \title{Unicode Support Routines}
 \author{Thomas J. Moore}
-\date{Version 1.0\\Revision \RCSRevision\\\RCSDate}
+\date{Version 0.\RCSRevision\\\RCSDate}
 \maketitle
 
 \begin{rawhtml}
@@ -228,6 +228,7 @@ uni_io.o
 
 #include <stdint.h> /* for basic data types */
 #include <stdio.h> /* it's I/O, right? */
+
 <<Unicode I/O Exports>>
 #endif
 @
@@ -257,12 +258,9 @@ EXTRA_CFLAGS += -D_BSD_SOURCE
 
 \lstset{language=C}
 <<Unicode I/O Exports>>=
+int uni_utf32_enclen(uint32_t cp);
 #define uni_utf32_enclen(cp) 1
 int uni_utf32_encode(uint32_t *buf, uint32_t cp, int bige);
-@
-
-<<C Prototypes>>=
-int uni_utf32_enclen(uint32_t cp);
 @
 
 <<Unicode I/O functions>>=
@@ -330,14 +328,11 @@ requiring 21 bits, but since the extensions start at 10000, the
 maximum etension is 10FFFF$-$10000 = FFFFF, requiring 20 bits.
 
 <<Unicode I/O Exports>>=
+int uni_utf16_enclen(uint32_t cp);
 #define uni_utf16_enclen(cp) (1 + ((cp) >= 0x10000))
 /* make sure at least 2 words avail in buf, or use enclen */
 /* returns # of words written */
 int uni_utf16_encode(uint16_t *buf, uint32_t cp, int bige);
-@
-
-<<C Prototypes>>=
-int uni_utf16_enclen(uint32_t cp);
 @
 
 <<Unicode I/O functions>>=
@@ -501,15 +496,12 @@ the first byte is the total number of bytes in the sequence.
 
 <<Unicode I/O Exports>>=
 /* warning: cp is evaluated multiple times */
+int uni_utf8_enclen(uint32_t cp);
 #define uni_utf8_enclen(cp) \
   (1 + ((cp) >= 0x80) + ((cp) >= 0x800) + ((cp) >= 0x10000))
 /* make sure at least 4 bytes avail in buf, or use enclen */
 /* returns # of bytes written */
 int uni_utf8_encode(uint8_t *buf, uint32_t cp);
-@
-
-<<C Prototypes>>=
-int uni_utf8_enclen(uint32_t cp);
 @
 
 <<Unicode I/O functions>>=
@@ -846,7 +838,7 @@ used.%
 \footnote{The C99 library provides something similar in the
 [[mbstowcs]] function, but the POSIX [[iconv]] function is commonly
 available (perhaps even as a third party library), and could be
-provided as wrapper around [[mbstowcs]] if all else fails.  Unlike
+provided as a wrapper around [[mbstowcs]] if all else fails.  Unlike
 [[mbstowcs]], the type of the output can always be set to Unicode
 encodings, and the input type can be controlled more easily as well.}
 This function should be in the standard C library, but may be provided
@@ -1169,17 +1161,14 @@ pointless, except when creating generic code that constructs function
 names based on size.
 
 <<Unicode I/O Exports>>=
+unsigned int uni_utf32_offset_of(const uint32_t *buf, unsigned int n);
 #define uni_utf32_offset_of(b, n) (n)
+unsigned int uni_utf32_index_of(const uint32_t *buf, unsigned int n);
 #define uni_utf32_index_of(b, n) (n)
 unsigned int uni_utf16_offset_of(const uint16_t *buf, unsigned int n);
 unsigned int uni_utf16_index_of(const uint16_t *buf, unsigned int n);
 unsigned int uni_utf8_offset_of(const uint8_t *buf, unsigned int n);
 unsigned int uni_utf8_index_of(const uint8_t *buf, unsigned int n);
-@
-
-<<C Prototypes>>=
-unsigned int uni_utf32_offset_of(const uint32_t *buf, unsigned int n);
-unsigned int uni_utf32_index_of(const uint32_t *buf, unsigned int n);
 @
 
 <<Unicode I/O functions>>=
@@ -1271,30 +1260,27 @@ chosen destination.  For consistency, UTF-32 functions are provided as
 well.
 
 <<Unicode I/O Exports>>=
+int uni_utf32_startc(const uint32_t *buf);
 #define uni_utf32_startc(buf) 0
+int uni_utf32_nextc(const uint32_t *buf);
 #define uni_utf32_nextc(buf) 1
+int uni_utf32_prevc(const uint32_t *buf);
 #define uni_utf32_prevc(buf) -1
+int uni_utf16_startc(const uint16_t *buf);
 #define uni_utf16_startc(buf) (*(buf) >= 0xdc00 && *(buf) < 0xe000 ? -1 : 0)
+int uni_utf16_nextc(const uint16_t *buf);
 #define uni_utf16_nextc(buf) (*(buf) < 0xd800 || *(buf) >= 0xdc00 ? 1 : 2)
+int uni_utf16_prevc(const uint16_t *buf);
 #define uni_utf16_prevc(buf) ((buf)[-1] < 0xd800 || (buf)[-1] >= 0xe000 ? -1 : -2)
+int uni_utf8_startc(const uint8_t *buf);
 #define uni_utf8_startc(buf) (*(buf) < 0x80 || (*(buf) & 0x40) ? 0 : \
                                ((buf)[-1] & 0x40) ? -1 : \
 			       ((buf)[-2] & 0x40) ? -2 : -3)
+int uni_utf8_nextc(const uint8_t *buf);
 #define uni_utf8_nextc(buf) (*(buf) < 0x80 ? 1 : !(*(buf) & 0x20) ? 2 : \
                               !(*(buf) & 0x10) ? 3 : 4)
-#define uni_utf8_prevc(buf) (uni_utf8_startc((buf) - 1) - 1)
-@
-
-<<C Prototypes>>=
-int uni_utf32_startc(const uint32_t *buf);
-int uni_utf32_nextc(const uint32_t *buf);
-int uni_utf32_prevc(const uint32_t *buf);
-int uni_utf16_startc(const uint16_t *buf);
-int uni_utf16_nextc(const uint16_t *buf);
-int uni_utf16_prevc(const uint16_t *buf);
-int uni_utf8_startc(const uint8_t *buf);
-int uni_utf8_nextc(const uint8_t *buf);
 int uni_utf8_prevc(const uint8_t *buf);
+#define uni_utf8_prevc(buf) (uni_utf8_startc((buf) - 1) - 1)
 @
 
 There is some performance benefit to decoding UTF-16 and UTF-8 without
@@ -1369,16 +1355,13 @@ consistency, UTF-8 and UTF-32 versions of these functions are
 provided, as well.
 
 <<Unicode I/O Exports>>=
+int uni_int_utf32_encode(uint32_t *buf, uint32_t cp);
+#define uni_int_utf32_encode(buf, cp) ((*(buf) = cp), 1)
 /* make sure at least 2 words avail in buf */
 /* returns # of words written */
 int uni_int_utf16_encode(uint16_t *buf, uint32_t cp);
-#define uni_int_utf32_encode(buf, cp) ((*(buf) = cp), 1)
-#define uni_int_utf8_encode uni_utf8_encode
-@
-
-<<C Prototypes>>=
-int uni_int_utf32_encode(uint32_t *buf, uint32_t cp);
 int uni_int_utf8_encode(uint8_t *buf, uint32_t cp);
+#define uni_int_utf8_encode uni_utf8_encode
 @
 
 <<Unicode I/O functions>>=
@@ -1408,12 +1391,12 @@ static uint32_t uni_int_utf32_decode(const uint32_t *s, int *nread)
     *nread = 1;
   return *s;
 }
+uint32_t uni_int_utf8_decode(const uint8_t *s, int *nread);
 #define uni_int_utf8_decode uni_valid_utf8_decode
 @
 
 <<C Prototypes>>=
 uint32_t uni_int_utf32_decode(const uint32_t *s, int *nread);
-uint32_t uni_int_utf8_decode(const uint8_t *s, int *nread);
 @
 
 <<Unicode I/O functions>>=
@@ -1785,29 +1768,29 @@ probably the only way to get debugable code using the preprocessor.
 @
 
 <<Unicode property exports>>=
-<<[[setop_bitn]] proto [[64]]>>; /* uint64_t is not standard, but common */
-<<[[setop_bitn]] proto [[32]]>>;
-<<[[setop_bitn]] proto [[16]]>>;
-<<[[setop_bitn]] proto [[8]]>>;
+<<[[uni_setop_bitn]] proto [[64]]>>; /* uint64_t is not standard, but common */
+<<[[uni_setop_bitn]] proto [[32]]>>;
+<<[[uni_setop_bitn]] proto [[16]]>>;
+<<[[uni_setop_bitn]] proto [[8]]>>;
 @
 
-<<[[setop_bitn]] proto(@sz)>>=
-void setop_bit<<@sz>>(uint<<@sz>>_t *a, uint32_t a_low, uint32_t a_len,
-                    uni_set_op_t op,
-		    uint<<@sz>>_t *b, uint32_t b_low, uint32_t b_len,
-		    uint<<@sz>>_t **res, uint32_t *res_low, uint32_t *res_len,
-		    uint32_t *res_max)
+<<[[uni_setop_bitn]] proto(@sz)>>=
+void uni_setop_bit<<@sz>>(uint<<@sz>>_t *a, uint32_t a_low, uint32_t a_len,
+                        uni_set_op_t op,
+		        uint<<@sz>>_t *b, uint32_t b_low, uint32_t b_len,
+		        uint<<@sz>>_t **res, uint32_t *res_low, uint32_t *res_len,
+		        uint32_t *res_max)
 @
 
 <<Unicode property functions>>=
-<<[[setop_bitn]] [[64]]>>
-<<[[setop_bitn]] [[32]]>>
-<<[[setop_bitn]] [[16]]>>
-<<[[setop_bitn]] [[8]]>>
+<<[[uni_setop_bitn]] [[64]]>>
+<<[[uni_setop_bitn]] [[32]]>>
+<<[[uni_setop_bitn]] [[16]]>>
+<<[[uni_setop_bitn]] [[8]]>>
 @
 
-<<[[setop_bitn]](@sz)>>=
-<<[[setop_bitn]] proto [[<<@sz>>]]>>
+<<[[uni_setop_bitn]](@sz)>>=
+<<[[uni_setop_bitn]] proto [[<<@sz>>]]>>
 {
   <<Perform set operation on bit strings>>
 }
@@ -2254,7 +2237,7 @@ typedef struct {
 <<Unicode property exports for generator>>=
 <<[[uni_chrrng_t]]>>
 int uni_cmprng(const void *a, const void *b); /* for qsort/bsearch */
-int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
+int uni_is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len);
 @
 
 <<Known Data Types>>=
@@ -2274,7 +2257,7 @@ int uni_cmprng(const void *a, const void *b)
         return 0;
 }
 
-int is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
+int uni_is_cp_chrrng(uint32_t cp, const uni_chrrng_t *tab, uint32_t tab_len)
 {
 #if 0
   uni_chrrng_t cr = {cp, cp};
@@ -2553,28 +2536,28 @@ lowest level; this may be specified using [[minwidth]].  By default,
 [[minwidth]] can never be lower than 4, since 32-bit words are used.
 
 <<Unicode property exports for generator>>=
-void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
-                   uint32_t high, uint8_t def, uint32_t minwidth,
-		   <<Multi-level table type>> **ml, uint32_t *ml_len);
+void uni_bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
+                       uint32_t high, uint8_t def, uint32_t minwidth,
+		       <<Multi-level table type>> **ml, uint32_t *ml_len);
 /* return: 0 == all 0, ~0 == all 1, 1 == *ret is ptr to data */
 /* *ret is also set to NULL for 0 and ~0 returns */
-int multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
-                     const uint8_t **ret, uint8_t def);
+int uni_multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
+                         const uint8_t **ret, uint8_t def);
 @
 
 <<Unicode property functions for generator>>=
 #define UNI_MAX_MULTILEV 3
-void bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
-                   uint32_t high, uint8_t def, uint32_t minwidth,
-		   <<Multi-level table type>> **ml, uint32_t *ml_len)
+void uni_bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
+                       uint32_t high, uint8_t def, uint32_t minwidth,
+		       <<Multi-level table type>> **ml, uint32_t *ml_len)
 {
   <<Split [[bits]] into multi-level table [[*ml]]>>
 }
 @
 
 <<Unicode property functions>>=
-int multi_tab_lookup(const <<Multi-level table type>>*dat, uint32_t val,
-                     const uint8_t **ret, uint8_t def)
+int uni_multi_tab_lookup(const <<Multi-level table type>>*dat, uint32_t val,
+                         const uint8_t **ret, uint8_t def)
 {
   <<Find multi-level table entry [[val]]>>
 }
@@ -3167,13 +3150,13 @@ A bigger speed gain could probably be had by optimizing the bit tester
 loop.
 
 <<Unicode property exports>>=
-void multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
-                        uint32_t *rlen);
+void uni_multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
+                            uint32_t *rlen);
 @
 
 <<Unicode property functions>>=
-void multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
-                        uint32_t *rlen)
+void uni_multi_bit_to_range(const uint32_t *mt, uni_chrrng_t **ret,
+                            uint32_t *rlen)
 {
   <<Multi-level structure storage>>
   
@@ -3323,13 +3306,13 @@ This is fairly inelegant and inefficient, but it is not meant to be
 called at run-time very often.  Tables are meant to be pre-generated.
 
 <<Unicode property exports for generator>>=
-uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
-                           uint32_t *ml_len);
+uint32_t *uni_rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
+                               uint32_t *ml_len);
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
-                           uint32_t *ml_len)
+uint32_t *uni_rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
+                               uint32_t *ml_len)
 {
   uint32_t low, high, len, i;
   uint32_t *ml;
@@ -3337,11 +3320,11 @@ uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
 
   /* degenerate cases:  all 0, all 1 */
   if(!tab_len) {
-    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
   if(tab_len == 1 && !tab[0].low && tab[0].high == UNI_MAX_CP) {
-    bits_to_multi(NULL, 0, 1, 0, 1, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 1, 0, &ml, ml_len);
     return ml;
   }
   /* not all 0 or all 1 */
@@ -3385,7 +3368,7 @@ uint32_t *rng_to_multi_bit(const uni_chrrng_t *tab, uint32_t tab_len,
     /* fill in ones if high + 1 not aligned with byte boundary */
     bits[(tab[tab_len - 1].low - low) / 8] |=
                          ~((1 << (tab[tab_len - 1].low - low) % 8) - 1);
-  bits_to_multi(bits, len, low / 8, high / 8, def, 0, &ml, ml_len);
+  uni_bits_to_multi(bits, len, low / 8, high / 8, def, 0, &ml, ml_len);
   free(bits);
   return ml;
 }
@@ -3487,7 +3470,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     print_mtab_info(mtab, nent * 8);
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
-      int rv = is_cp_chrrng(i, rng, nent);
+      int rv = uni_is_cp_chrrng(i, rng, nent);
       int mv = <<range table result for [[i]]>>;
       if(!rv != !mv) {
         fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, rv, mv);
@@ -3500,7 +3483,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
-        tres = is_cp_chrrng(i, rng, nent);
+        tres = uni_is_cp_chrrng(i, rng, nent);
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
@@ -3511,7 +3494,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     /* check conversion */
     uni_chrrng_t *rng2;
     uint32_t nent2;
-    multi_bit_to_range(mtab, &rng2, &nent2);
+    uni_multi_bit_to_range(mtab, &rng2, &nent2);
     if(nent2 != nent || memcmp(rng, rng2, nent * sizeof(*rng))) {
       for(j = 0; j < nent && j < nent2; j++)
         if(memcmp(&rng[j], &rng2[j], sizeof(*rng)))
@@ -4202,9 +4185,9 @@ Now, to finish up post-processing, the multi-level table is generated.
 uint32_t ml_len;
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng)
-    parsed_props[i].mt = rng_to_multi_bit(parsed_props[i].rng,
-                                          parsed_props[i].len,
-                                          &ml_len);
+    parsed_props[i].mt = uni_rng_to_multi_bit(parsed_props[i].rng,
+                                              parsed_props[i].len,
+                                              &ml_len);
 @
 
 \subsection{Generating the Static Data}
@@ -4338,7 +4321,7 @@ int is_uni_x(uint32_t cp, const uint32_t *tab);
 int is_uni_x(uint32_t cp, const uint32_t *tab)
 {
   const uint8_t *mr;
-  uint8_t mv = multi_tab_lookup(tab, cp / 8, &mr, 0);
+  uint8_t mv = uni_multi_tab_lookup(tab, cp / 8, &mr, 0);
   if(mr)
     mv = *mr;
   return mv & UNI_BSET_MASK(mr, cp) ? 1 : 0;
@@ -4420,15 +4403,12 @@ are:  characters which act as line terminators, and characters which
 may initiate backslash-escapes.
 
 <<Unicode property exports>>=
-#define uni_is_nl(x) ((x) == '\n' || (x) == '\r' || (x) == '\v' || (x) == '\f' || \
+int is_uni_nl(uint32_t cp);
+#define is_uni_nl(x) ((x) == '\n' || (x) == '\r' || (x) == '\v' || (x) == '\f' || \
                   (x) == 0x0085 || (x) == 0x2028 || (x) == 0x2029)
 /* just use == '\\' for nfkc_cf */
-#define uni_is_bs(x) (c == '\\' || c == 0xFE68 || c == 0xFF3C)
-@
-
-<<C Prototypes>>=
-int uni_is_nl(uint32_t cp);
-int uni_is_bs(uint32_t cp);
+int is_uni_bs(uint32_t cp);
+#define is_uni_bs(x) (c == '\\' || c == 0xFE68 || c == 0xFF3C)
 @
 
 \section{Enumerated Properties}
@@ -4758,11 +4738,11 @@ uint32_t *enum_vals_len;
 @
 
 <<Unicode property exports for generator>>=
-int cmp_valueof(const void *a, const void *b);
+int uni_cmp_valueof(const void *a, const void *b);
 @
 
 <<Unicode property functions for generator>>=
-int cmp_valueof(const void *a, const void *b)
+int uni_cmp_valueof(const void *a, const void *b)
 {
   return strcmp(((uni_valueof_t *)a)->name, ((uni_valueof_t *)b)->name);
 }
@@ -4809,7 +4789,7 @@ for(i = 0; i < num_prop_aliases; i++) {
     }
     *d = 0;
   }
-  qsort(valueof, num_valueof, sizeof(*valueof), cmp_valueof);
+  qsort(valueof, num_valueof, sizeof(*valueof), uni_cmp_valueof);
   /* remove duplicates now that they are always contiguous */
   for(j = 1; j < num_valueof; j++)
     if(!strcmp(valueof[j].name, valueof[j - 1].name)) {
@@ -4903,14 +4883,14 @@ for(j = 0; j < num_val_aliases[i]; j++) {
   /* filter out bad enum values */
   /* skip version short name */
   if(strchr(va->short_name, '.')) {
-    fprintf(gen_h, "\tU_%s_%s,\n", pn, va->long_name);
+    fprintf(gen_h, "\tUNI_%s_%s,\n", pn, va->long_name);
     continue;
   }
   /* use numeric values directly instead of making into enum */
   if(!isdigit(va->short_name[0]) || !strcmp(va->long_name, va->short_name)) {
     const char *np;
     /* slow, but necessary with e.g. ID_Restrict_Type */
-    fprintf(gen_h, "\tU_%s_", pn);
+    fprintf(gen_h, "\tUNI_%s_", pn);
     for(np = va->short_name; *np; np++) {
       putc(isalnum(*np) ? *np : '_', gen_h);
       /* + and - may both appear, so make + different */
@@ -4920,32 +4900,32 @@ for(j = 0; j < num_val_aliases[i]; j++) {
     putc(',', gen_h);
   }
   if(strcmp(va->long_name, va->short_name)) {
-    fprintf(gen_h, "%cU_%s_%s = ", isdigit(va->short_name[0]) ? '\t' : ' ',
+    fprintf(gen_h, "%cUNI_%s_%s = ", isdigit(va->short_name[0]) ? '\t' : ' ',
                     pn, va->long_name);
     if(!isdigit(va->short_name[0]))
-      fprintf(gen_h, "U_%s_%s,", pn, va->short_name);
+      fprintf(gen_h, "UNI_%s_%s,", pn, va->short_name);
     else
       fprintf(gen_h, "%s,", va->short_name);
   }
   /* filter out alt names with dashes */
   if(va->alt_name && !strchr(va->alt_name, '-') &&
      strcmp(va->alt_name, va->long_name))
-    fprintf(gen_h, " U_%s_%s = U_%s_%s,", pn, va->alt_name, pn, va->long_name);
+    fprintf(gen_h, " UNI_%s_%s = UNI_%s_%s,", pn, va->alt_name, pn, va->long_name);
   /* again, | is to skip comments */
   if(va->alt_name2 && !strchr(va->alt_name2, '|') && !strchr(va->alt_name2, '-') &&
      strcmp(va->alt_name, va->long_name) && strcmp(va->alt_name, va->alt_name2))
-    fprintf(gen_h, " U_%s_%s = U_%s_%s,", pn, va->alt_name2, pn, va->long_name);
+    fprintf(gen_h, " UNI_%s_%s = UNI_%s_%s,", pn, va->alt_name2, pn, va->long_name);
   fputc('\n', gen_h);
 }
 fputs("};\n", nf);
-fprintf(gen_h, "\tU_NUM_%s\n} uni_%s_t;\n", pn, pn);
+fprintf(gen_h, "\tUNI_NUM_%s\n} uni_%s_t;\n", pn, pn);
 fprintf(gen_h, "extern const uni_valueof_t uni_%s_valueof[];\n", pn);
 fprintf(nf, "const uni_valueof_t uni_%s_valueof[] = {\n", pn);
 for(j = 0; j < enum_vals_len[i]; j++) {
   const char *name = val_aliases[i][enum_vals[i][j].val].short_name;
   if(isdigit(*name))
     name = val_aliases[i][enum_vals[i][j].val].long_name;
-  fprintf(nf, "\t{ \"%s\", U_%s_", enum_vals[i][j].name, pn);
+  fprintf(nf, "\t{ \"%s\", UNI_%s_", enum_vals[i][j].name, pn);
   /* slow, but necessary with e.g. ID_Restrict_Type */
   /* also, the CLDR ones have /, +, space, etc. */
   for(; *name; name++) {
@@ -5014,11 +4994,11 @@ uint8_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
   uni_enum_name_strip(s);
   v.name = s;
   /* more yuck - bsearch is 1/2 as fast as hand-coded binary search */
-  f = bsearch(&v, tab, len, sizeof(*tab), cmp_valueof);
+  f = bsearch(&v, tab, len, sizeof(*tab), uni_cmp_valueof);
   if(!f && !strncmp(s, "is", 2) && s[2]) {
     v.name = s + 2;
     /* more yuck - bsearch is 1/2 as fast as hand-coded binary search */
-    f = bsearch(&v, tab, len, sizeof(*tab), cmp_valueof);
+    f = bsearch(&v, tab, len, sizeof(*tab), uni_cmp_valueof);
   }
   free(s);
   return f ? f->val : def;
@@ -5037,12 +5017,12 @@ for(j = 0; j < enum_vals_len[i]; j++) {
   approx_array[j].val = enum_vals[i][j].val;
   uni_enum_name_strip((char *)approx_array[j].name);
 }
-qsort(approx_array, enum_vals_len[i], sizeof(*approx_array), cmp_valueof);
+qsort(approx_array, enum_vals_len[i], sizeof(*approx_array), uni_cmp_valueof);
 for(j = 0; j < enum_vals_len[i]; j++) {
   const char *name = val_aliases[i][approx_array[j].val].short_name;
   if(isdigit(*name))
     name = val_aliases[i][approx_array[j].val].long_name;
-  fprintf(anf, "\t{ \"%s\", U_%s_", approx_array[j].name, pn);
+  fprintf(anf, "\t{ \"%s\", UNI_%s_", approx_array[j].name, pn);
   /* slow, but necessary with e.g. ID_Restrict_Type */
   /* also, the CLDR ones have /, +, space, etc. */
   for(; *name; name++) {
@@ -5085,14 +5065,14 @@ if(!strcmp(pn, "gc")) {
     if(desc && !strchr(desc, '|'))
       desc = NULL;
     if(!desc)
-      fprintf(tf, "1ULL << U_gc_%s", val_aliases[i][j].short_name);
+      fprintf(tf, "1ULL << UNI_gc_%s", val_aliases[i][j].short_name);
     else {
       const char *desce;
       while(1) {
         desce = strchr(desc, ' ');
 	if(!desce)
 	  desce = desc + strlen(desc);
-	fprintf(tf, "(1ULL << U_gc_%.*s)%s", (int)(desce - desc), desc,
+	fprintf(tf, "(1ULL << UNI_gc_%.*s)%s", (int)(desce - desc), desc,
 	                                     *desce ? " | " : "");
 	if(!*desce)
 	  break;
@@ -5201,7 +5181,7 @@ fprintf(gen_h, "#define uni_propdesc_len %d\n"
                index);
 fputs("\n};\n\n"
       "const uni_valueof_t uni_propdesc_valueof[] = {\n", pnf);
-qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), cmp_valueof);
+qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), uni_cmp_valueof);
 for(i = num_prop_ptrs - 1; i > 0; i--) {
   if(!strcmp(prop_ptrs[i -1].name, prop_ptrs[i].name)) {
     if(prop_ptrs[i - 1].val != prop_ptrs[i].val) {
@@ -5225,7 +5205,7 @@ fputs("#include \"uni_prop.h\"\n\n"
       "const uni_valueof_t uni_propdesc_valueof_approx[] = {\n", paf);
 for(i = 0; i < num_prop_ptrs; i++)
   uni_enum_name_strip((char *)prop_ptrs[i].name);
-qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), cmp_valueof);
+qsort(prop_ptrs, num_prop_ptrs, sizeof(*prop_ptrs), uni_cmp_valueof);
 for(i = num_prop_ptrs - 1; i > 0; i--) {
   if(!strcmp(prop_ptrs[i -1].name, prop_ptrs[i].name)) {
     if(prop_ptrs[i - 1].val != prop_ptrs[i].val) {
@@ -5292,7 +5272,7 @@ uint32_t nameof_len, valueof_len;
 fprintf(pnf, ", %d", (int)parsed_props[i].def);
 if(t == UNI_PROP_TYPE_ENUM && enum_vals[i]) {
   fprintf(pnf, ", uni_%s_nameof, uni_%s_valueof, uni_%s_valueof_approx,\n"
-               "\t\tU_NUM_%s, uni_%s_valueof_len",
+               "\t\tUNI_NUM_%s, uni_%s_valueof_len",
                name, name, name, name, name);
 } else
   fputs(", NULL, NULL, NULL, 0, 0", pnf);
@@ -5314,12 +5294,12 @@ static uint32_t enum_val(int pno, const char *v)
   }
   *d = 0;
   vp = bsearch(&me, enum_vals[pno], enum_vals_len[pno], sizeof(me),
-               cmp_valueof);
+               uni_cmp_valueof);
   /* permit excess prefix of "is" */
   if(!vp && s[0] == 'i' && s[1] == 's' && s[2]) {
     me.name = s + 2;
     vp = bsearch(&me, enum_vals[pno], enum_vals_len[pno], sizeof(me),
-                 cmp_valueof);
+                 uni_cmp_valueof);
   }
   free(s);
   if(!vp) {
@@ -5503,7 +5483,7 @@ decl_enum(age, "unassigned");
 open_f("Scripts.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
-  /* need to manually convert U_SC_Hrkt to U_SC_Hira+U_SC_Kana */
+  /* need to manually convert UNI_SC_Hrkt to UNI_SC_Hira+UNI_SC_Kana */
   add_enum(sc, fields[1]);
 }
 fclose(f);
@@ -5612,13 +5592,13 @@ lookup function as well.  The actual multi-level table data is just
 the adjusted enumeration value, one byte per entry.
 
 <<Unicode property exports for generator>>=
-uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
-                            uint32_t *ml_len, uint8_t def);
+uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
+                                uint32_t *ml_len, uint8_t def);
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
-                            uint32_t *ml_len, uint8_t def)
+uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
+                                uint32_t *ml_len, uint8_t def)
 {
   uint32_t low, high, len, i;
   uint32_t *ml;
@@ -5626,7 +5606,7 @@ uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
 
   /* degenerate case:  always out-of-range */
   if(!tab_len) {
-    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
   for(i = tab_len; i > 0; i--)
@@ -5644,7 +5624,7 @@ uint32_t *rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
   for(; i < tab_len; i++)
     if(tab[i].dat != def)
       memset(bits + tab[i].low - low, tab[i].dat + 1, tab[i].high - tab[i].low + 1);
-  bits_to_multi(bits, len, low, high, 0, 0, &ml, ml_len);
+  uni_bits_to_multi(bits, len, low, high, 0, 0, &ml, ml_len);
   free(bits);
   return ml;
 }
@@ -5677,9 +5657,9 @@ static void fixup_rng_dat8(prop_t *p)
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat8) {
     fixup_rng_dat8(&parsed_props[i]);
-    parsed_props[i].mt = rng_dat8_to_multi(parsed_props[i].rng_dat8,
-                                          parsed_props[i].len,
-                                          &ml_len, parsed_props[i].def);
+    parsed_props[i].mt = uni_rng_dat8_to_multi(parsed_props[i].rng_dat8,
+                                               parsed_props[i].len,
+                                               &ml_len, parsed_props[i].def);
 }
 @
 
@@ -5691,13 +5671,13 @@ multi-level table data is just the raw native-endian 16-bit or 32-bit
 data.
 
 <<Unicode property exports for generator>>=
-uint32_t *rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
-                             uint32_t *ml_len);
+uint32_t *uni_rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
+                                 uint32_t *ml_len);
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
-                             uint32_t *ml_len)
+uint32_t *uni_rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
+                                 uint32_t *ml_len)
 {
   uint32_t low, high, len, i, j;
   uint32_t *ml;
@@ -5705,7 +5685,7 @@ uint32_t *rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
 
   /* degenerate case:  always out-of-range */
   if(!tab_len) {
-    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
   for(i = tab_len; i > 0; i--)
@@ -5724,20 +5704,20 @@ uint32_t *rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
     if(tab[i].datl || tab[i].dath)
       for(j = tab[i].low; j <= tab[i].high; j++)
         bits[j - low] = (tab[i].dath << 8) + tab[i].datl;
-  bits_to_multi((uint8_t *)bits, len * 2, low * 2, high * 2, 0, 0, &ml, ml_len);
+  uni_bits_to_multi((uint8_t *)bits, len * 2, low * 2, high * 2, 0, 0, &ml, ml_len);
   free(bits);
   return ml;
 }
 @
 
 <<Unicode property exports for generator>>=
-uint32_t *rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
-                             uint32_t *ml_len);
+uint32_t *uni_rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
+                                 uint32_t *ml_len);
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
-                             uint32_t *ml_len)
+uint32_t *uni_rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
+                                 uint32_t *ml_len)
 {
   uint32_t low, high, len, i, j;
   uint32_t *ml;
@@ -5745,7 +5725,7 @@ uint32_t *rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
 
   /* degenerate case:  always out-of-range */
   if(!tab_len) {
-    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
   for(i = tab_len; i > 0; i--)
@@ -5764,7 +5744,7 @@ uint32_t *rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
     if(tab[i].dat)
       for(j = 0; j <= tab[i].len; j++)
         bits[tab[i].low - low + j] = tab[i].dat;
-  bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 0, &ml, ml_len);
+  uni_bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 0, &ml, ml_len);
   free(bits);
   return ml;
 }
@@ -5802,11 +5782,11 @@ for(i = 0; i < nparsed; i++) {
 	if(strchr(val_name, '-')) {
 	  const char *np;
 	  /* slow, but necessary with e.g. ID_Restrict_Type */
-	  fprintf(of, "U_%s_", name);
+	  fprintf(of, "UNI_%s_", name);
 	  for(np = val_name; *np; np++)
 	    putc(*np == '-' ? '_' : *np, of);
 	} else
-	  fprintf(of, "U_%s_%s", name, val_name);
+	  fprintf(of, "UNI_%s_%s", name, val_name);
       }
       fprintf(of, " }%s\n", j < parsed_props[i].len - 1 ? "," : "");
     }
@@ -5832,7 +5812,7 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def);
 int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 {
   const uint8_t *mr;
-  uint8_t mv = multi_tab_lookup(tab, cp, &mr, 0);
+  uint8_t mv = uni_multi_tab_lookup(tab, cp, &mr, 0);
   if(mr)
     mv = *mr;
   if(!mv)
@@ -6171,9 +6151,9 @@ static void fixup_rng_dat32(prop_t *p)
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat32) {
     fixup_rng_dat32(&parsed_props[i]);
-    parsed_props[i].mt = rng_dat32_to_multi(parsed_props[i].rng_dat32,
-                                            parsed_props[i].len,
-                                            &ml_len);
+    parsed_props[i].mt = uni_rng_dat32_to_multi(parsed_props[i].rng_dat32,
+                                                parsed_props[i].len,
+                                                &ml_len);
 }
 @
 
@@ -6226,14 +6206,14 @@ void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom);
 uint32_t uni_x_dat32(uint32_t cp, const uint32_t *tab)
 {
   const uint8_t *mr;
-  int r = multi_tab_lookup(tab, cp * 4, &mr, 0);
+  int r = uni_multi_tab_lookup(tab, cp * 4, &mr, 0);
   return mr ? *(uint32_t *)mr : r ? ~0 : 0;
 }
 
 void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 {
   const uint8_t *mr;
-  multi_tab_lookup(tab, cp * 4, &mr, 0);
+  uni_multi_tab_lookup(tab, cp * 4, &mr, 0);
   if(!mr)
     *num = 0;
   else {
@@ -6418,11 +6398,11 @@ if(low == 0xAC00) {
 
 <<Unicode property exports>>=
 /* requires 3-char buf; returns actual len */
-int hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full);
+int uni_hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full);
 @
 
 <<Unicode property functions>>=
-int hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full)
+int uni_hangul_syllable_decomp(uint32_t cp, uint32_t *res, int full)
 {
   int L, V, T;
   if(cp < 0xAC00 || cp > 0xD7A3)
@@ -6728,8 +6708,8 @@ typedef struct {
 
 <<Unicode property exports for generator>>=
 <<[[uni_cp_val_t]]>>
-uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
-                           uint32_t *ml_len);
+uint32_t *uni_cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
+                              uint32_t *ml_len);
 @
 
 <<Known Data Types>>=
@@ -6737,8 +6717,8 @@ uni_cp_val_t,%
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
-                           uint32_t *ml_len)
+uint32_t *uni_cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
+                              uint32_t *ml_len)
 {
   uint32_t low, high, len, i;
   uint32_t *ml;
@@ -6746,7 +6726,7 @@ uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
 
   /* degenerate case:  always out-of-range */
   if(!tab_len) {
-    bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
+    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
     return ml;
   }
   low = tab[0].cp;
@@ -6757,14 +6737,14 @@ uint32_t *cp_val_to_multi(const uni_cp_val_t *tab, uint32_t tab_len,
   clearbuf(bits, len);
   for(i = 0; i < tab_len; i++)
     bits[tab[i].cp - low] = tab[i].val;
-  bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 4, &ml, ml_len);
+  uni_bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 4, &ml, ml_len);
   free(bits);
   return ml;
 }
 @
 
 <<Dump character information as C code>>=
-uint32_t *tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
+uint32_t *tmt = uni_cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("canon_decomp", tmt, gen_h);
 free(tmt);
 @
@@ -6800,7 +6780,7 @@ fclose(kf);
 fprintf(gen_h, "extern const uni_str_arr_t uni_compat_decomp_arr[];\n"
 	       "#define uni_compat_decomp_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
-tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
+tmt = uni_cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("compat_decomp", tmt, gen_h);
 free(tmt);
 @
@@ -6841,7 +6821,7 @@ fclose(dm);
 fprintf(gen_h, "extern const uni_str_arr_t uni_dm_arr[];\n"
 	       "#define uni_dm_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
-tmt = cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
+tmt = uni_cp_val_to_multi((uni_cp_val_t *)dec, curent, &ml_len);
 print_mtab("dm", tmt, gen_h);
 free(tmt);
 @
@@ -6899,26 +6879,23 @@ lookups are used.
 <<Unicode property exports>>=
 /* 2-step lookup: uni_find_xxx followed by uni_get_decomp */
 /* off is uint16_t; len and compat are uint8_t; compat is optional */
+void uni_find_canon_decomp(uint32_t cp, int16_t *off, uint8_t *len);
 #define uni_find_canon_decomp(cp, off, len) \
   uni_x_dec(cp, uni_canon_decomp_mtab, off, len, NULL, 1, uni_dm_strs)
+void uni_find_compat_decomp(uint32_t cp, int16_t *off, uint8_t *len,
+                            uint8_t *compat);
 #define uni_find_compat_decomp(cp, off, len, compat) \
   uni_x_dec(cp, uni_compat_decomp_mtab, off, len, compat, 1, uni_dm_strs)
+void uni_find_dm(uint32_t cp, int16_t *off, uint8_t *len, uint8_t *compat);
 #define uni_find_dm(cp, off, len, compat) \
   uni_x_dec(cp, uni_dm_mtab, off, len, compat, 0, uni_dm_strs)
+void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 #define uni_get_decomp(cp, buf, off, len) do { \
   if((off) == -1) \
-    hangul_syllable_decomp(cp, buf, (len) == 3); \
+    uni_hangul_syllable_decomp(cp, buf, (len) == 3); \
   else \
     cpybuf(buf, uni_dm_strs + (off), len); \
 } while(0)
-@
-
-<<C Prototypes>>=
-void uni_find_canon_decomp(uint32_t cp, int16_t *off, uint8_t *len);
-void uni_find_compat_decomp(uint32_t cp, int16_t *off, uint8_t *len,
-                            uint8_t *compat);
-void uni_find_dm(uint32_t cp, int16_t *off, uint8_t *len, uint8_t *compat);
-void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 @
 
 <<Unicode property exports>>=
@@ -6931,7 +6908,7 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
                uint8_t *compat, int h, const uint32_t *strs)
 {
   const uint8_t *mr;
-  multi_tab_lookup(tab, cp * 4, &mr, 0);
+  uni_multi_tab_lookup(tab, cp * 4, &mr, 0);
   if(!mr) {
     *off = 0;
     *len = 0;
@@ -7014,7 +6991,7 @@ const uni_str_ptr_t *uni_x_str_of(uint32_t cp, const uint32_t *tab)
 {
   const uni_str_ptr_t *ret;
   static const uni_str_ptr_t z = {0};
-  multi_tab_lookup(tab, cp * 4, (const uint8_t **)&ret, 0);
+  uni_multi_tab_lookup(tab, cp * 4, (const uint8_t **)&ret, 0);
   return ret ? ret : &z;
 }
 @
@@ -7175,7 +7152,7 @@ static void dump_str_tabs(prop_t *prop, FILE *gen_h, FILE *tstf)
   fprintf(gen_h, "extern const uni_str_arr_t uni_%s_arr[];\n"
 	         "#define uni_%s_arr_len %d /* %d lookups max */\n",
 	         prop->name, prop->name, i, lg2(i + 1));
-  uint32_t ml_len, *tmt = cp_val_to_multi((uni_cp_val_t *)short_str, i, &ml_len);
+  uint32_t ml_len, *tmt = uni_cp_val_to_multi((uni_cp_val_t *)short_str, i, &ml_len);
   print_mtab(prop->name, tmt, gen_h);
   free(tmt);
   free(short_str);
@@ -7216,7 +7193,7 @@ they are stored as if they were strings themselves: A is used to look
 up a string, which is actually a code point/value table to look up C
 given B.  As with the dm table, the Hangul Syllables are given special
 treatment. The A-indexed entries for all LV and L characters point to
-zero-length tables, indicating that the [[hangul_syllable_comp]]
+zero-length tables, indicating that the [[uni_hangul_syllable_comp]]
 function should be used to compose instead.
 
 <<Initialize UCD files>>=
@@ -7233,7 +7210,7 @@ for(i = 0; i < dm_prop->len; i++) {
   if(dm_prop->str_arr[i].len != 2 ||
      uni_chrrng_dat8(cp, dt_prop->rng_dat8, dt_prop->len, none_val) !=
          can_val ||
-     is_cp_chrrng(cp, fce_prop->rng, fce_prop->len))
+     uni_is_cp_chrrng(cp, fce_prop->rng, fce_prop->len))
     continue; /* skip if not canonical composition */
   str[0] = dmf_prop->strs[dm_prop->str_arr[i].off + 1]; /* B */
   str[1] = cp;
@@ -7277,11 +7254,11 @@ for(i = cm_prop->len - 1; i > 0; i--) {
 
 <<Unicode property exports>>=
 /* returns 0 if invalid */
-uint32_t hangul_syllable_comp(uint32_t a, uint32_t b);
+uint32_t uni_hangul_syllable_comp(uint32_t a, uint32_t b);
 @
 
 <<Unicode property functions>>=
-uint32_t hangul_syllable_comp(uint32_t a, uint32_t b)
+uint32_t uni_hangul_syllable_comp(uint32_t a, uint32_t b)
 {
   if(a >= 0x1100 && a <= 0x1112) /* L */
     if(b >= 0x1161 && b <= 0x1175) /* V */
@@ -7332,7 +7309,7 @@ fclose(cm);
 fprintf(gen_h, "extern const uni_str_arr_t uni_canon_comp_arr[];\n"
 	       "#define uni_canon_comp_arr_len %d /* %d lookups max */\n",
 	       i, lg2(i + 1));
-cm_prop->mt = cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->len, &ml_len);
+cm_prop->mt = uni_cp_val_to_multi((uni_cp_val_t *)dec, cm_prop->len, &ml_len);
 print_mtab("canon_comp", cm_prop->mt, gen_h);
 fputs("str(canon_comp);\n", tstf);
 @
@@ -7348,17 +7325,14 @@ binary search is performed.  This is hand-coded for speed.
 <<Unicode property exports>>=
 /* to compose A+B->C: */
 /* look up B->C table for A (cp) */
+void uni_find_canon_comp(uint32_t cp, int16_t *off, uint8_t *len);
 #define uni_find_canon_comp(cp, off, len) \
   uni_x_dec(cp, uni_canon_comp_mtab, off, len, NULL, -1, uni_canon_comp_strs)
 /* then look up C given B->C table info */
+uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
 #define uni_canon_comp(cpa, cpb, off, len) \
   ((len) > 0 ? uni_lookup_compent(cpb, uni_canon_comp_strs + (off), len) : \
-               hangul_syllable_comp(cpa, cpb))
-@
-
-<<C Prototypes>>=
-void uni_find_canon_comp(uint32_t cp, int16_t *off, uint8_t *len);
-uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
+               uni_hangul_syllable_comp(cpa, cpb))
 @
 
 <<Unicode property exports for generator>>=
@@ -7637,9 +7611,9 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
 				const uint32_t *special, const uint32_t *strs)
 {
   const uint8_t *mr;
-  multi_tab_lookup(special, cp * 4, &mr, 0);
+  uni_multi_tab_lookup(special, cp * 4, &mr, 0);
   if(!mr) {
-    multi_tab_lookup(simple, cp * 4, &mr, 0);
+    uni_multi_tab_lookup(simple, cp * 4, &mr, 0);
     if(!mr)
       return -1;
     ret = NULL;
@@ -7672,7 +7646,7 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
     str += (*str & UNI_SC_FL_LEN_MASK) + 1;
   }
   if(!ncond) {
-    multi_tab_lookup(simple, cp * 4, &mr, 0);
+    uni_multi_tab_lookup(simple, cp * 4, &mr, 0);
     if(!mr)
       return -1;
     *ret = NULL;
@@ -7953,7 +7927,7 @@ static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
       len = 1;
       rptr = &cp;
     } else if(doff < 0) {
-      hangul_syllable_decomp(cp, hbuf, 1);
+      uni_hangul_syllable_decomp(cp, hbuf, 1);
       rptr = hbuf;
     } else
       rptr = str + doff;
@@ -9044,7 +9018,7 @@ static void str_to_enum(prop_t *p, const char *def)
   /* while strs was sorted, it was sorted by long word, not byte */
   /* this sort is really only necessary on little-endian systems */
   qsort(enum_vals[pnum], enum_vals_len[pnum], sizeof(*enum_vals[pnum]),
-        cmp_valueof);
+        uni_cmp_valueof);
   free(p->strs);
   p->strs = NULL;
   free(p->str_arr);
@@ -9875,7 +9849,7 @@ if(var_mode > 0 && l123 <= var_top && l123 > 0xffff) {
         st->in_var = 0;
       break;
     case UNI_DUCET_VAR_MODE_IGNORE_SP:
-      if((uni_gc_trans[U_gc_P] & (1 << uni_gc_of(c))) ||
+      if((uni_gc_trans[UNI_gc_P] & (1 << uni_gc_of(c))) ||
          is_uni_WSpace(c)) {
         l4 = l123 >> UNI_DUCET_LEV1_SHIFT;
 	/* undocumented behavior copied from SHIFTED */
@@ -10281,13 +10255,13 @@ uint32_t c;
 
 <<Look up in DUCET given no state>>=
 const uni_str_ptr_t *v;
-multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
 if(!v || (!v->off && !v->len)) {
   uint32_t hbuf[3];
-  int hlen = hangul_syllable_decomp(c, hbuf, 1);
+  int hlen = uni_hangul_syllable_decomp(c, hbuf, 1);
   if(hlen > 0) {
     c = hbuf[0];
-    multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+    uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
     add_bt(hbuf[1], st);
     if(hlen > 2)
       add_bt(hbuf[2], st);
@@ -10303,7 +10277,7 @@ if(v && (v->off || v->len)) {
   if(is_uni_UIdeo(c)) {
 #if 0
     uni_blk_t blk = uni_blk_of(c);
-    if(blk == U_blk_CJK || blk == U_blk_CJK_Compat)
+    if(blk == UNI_blk_CJK || blk == UNI_blk_CJK_Compat)
 #else
     if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3300 && c <= 0x33FF))
 #endif
@@ -10706,7 +10680,7 @@ uint32_t multi_ret_len;
 
 <<Return blank single-character index DUCET result>>=
 const uni_str_ptr_t *v;
-multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
+uni_multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
 st->multi_ret = uni_dm_strs + v->off;
 st->multi_ret_len = v->len;
 <<Return DUCET entry for next decomp character>>
@@ -10727,7 +10701,7 @@ if(st->multi_ret_len) {
 @
 
 <<Look up and return DUCET value for [[c]]>>=
-multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
 str = st->strs + v->off;
 <<Return DUCET value for [[str]]/[[c]]>>
 @
@@ -11296,9 +11270,9 @@ static void fixup_rng_dat16(prop_t *p)
 for(i = 0; i < nparsed; i++)
   if(parsed_props[i].rng_dat16) {
     fixup_rng_dat16(&parsed_props[i]);
-    parsed_props[i].mt = rng_dat16_to_multi(parsed_props[i].rng_dat16,
-                                            parsed_props[i].len,
-                                            &ml_len);
+    parsed_props[i].mt = uni_rng_dat16_to_multi(parsed_props[i].rng_dat16,
+                                                parsed_props[i].len,
+                                                &ml_len);
 }
 @
 
@@ -11340,7 +11314,7 @@ uint16_t uni_x_dat16(uint32_t cp, const uint32_t *tab);
 uint16_t uni_x_dat16(uint32_t cp, const uint32_t *tab)
 {
   const uint8_t *mr;
-  multi_tab_lookup(tab, cp * 2, &mr, 0);
+  uni_multi_tab_lookup(tab, cp * 2, &mr, 0);
   return mr ? *(uint16_t *)mr : 0;
 }
 @
@@ -14842,7 +14816,7 @@ cpybuf(val_aliases[lang] + nlang, val_aliases[grandf], ngrandf);
 cpybuf(enum_vals[lang] + nlang, enum_vals[grandf], ngrandf);
 for(ap = 0; ap < ngrandf; ap++)
   enum_vals[lang][nlang + ap].val += nlang;
-qsort(enum_vals[lang], nlang + ngrandf, sizeof(*enum_vals[lang]), cmp_valueof);
+qsort(enum_vals[lang], nlang + ngrandf, sizeof(*enum_vals[lang]), uni_cmp_valueof);
 free(enum_vals[grandf]);
 enum_vals[grandf] = NULL;
 enum_vals_len[grandf] = 0;
@@ -14899,18 +14873,18 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
   }
   me.name = to;
   tp = bsearch(&me, enum_vals[prop], enum_vals_len[prop], sizeof(me),
-               cmp_valueof);
+               uni_cmp_valueof);
   if(tp) {
     me.name = from;
     fp = bsearch(&me, enum_vals[prop], enum_vals_len[prop], sizeof(me),
-                 cmp_valueof);
+                 uni_cmp_valueof);
     if(!fp) {
       /* some aliases are not listed in any original data */
       /* so auto-add them */
       int l, h, m, c;
       for(l = 0, h = enum_vals_len[prop] - 1; l <= h; ) {
         m = (l + h) / 2;
-        c = cmp_valueof(&from, &enum_vals[prop][m]);
+        c = uni_cmp_valueof(&from, &enum_vals[prop][m]);
 	if(c < 0)
 	  l = m + 1;
 	else
@@ -16196,7 +16170,7 @@ still, so care must be taken that sorting either uses a different
 comparison function than above or that the values never exceed this
 value.
 
-% is_cp_chrrng prototype
+% uni_is_cp_chrrng prototype
 
 In addition to plain ranges, ranges may store data.  One variant,
 [[uni_chrrng_dat8_t]], stores a byte of data along side a
@@ -16278,10 +16252,10 @@ of the [[low]] to [[high]] range be either all zeroes or all ones;
 [[*ml]], is always allocated using [[malloc]], and contains [[*ml_len]]
 32-bit words.
 
-% bits_to_multi prototype
+% uni_bits_to_multi prototype
 
 Once a table [[dat]] is generated, the first byte of data for a code
-point [[val]] can be found using [[multi_tab_lookup]].  For data
+point [[val]] can be found using [[uni_multi_tab_lookup]].  For data
 structures whose size is not one byte, the code point must be
 multiplied by the number of bytes.  For bit arrays, this means
 dividing by 8.  For bit arrays, the actual bit must then be obtained
@@ -16297,7 +16271,7 @@ during table creation is returned (i.e., all zeroes or all ones).  If
 is [[NULL]].  Note that if [[def]] is [[~0]], there is no way to tell
 the difference between out-of-range and all ones.
 
-% multi_tab_lookup prototype
+% uni_multi_tab_lookup prototype
 
 The above lookup function returns a pointer to raw data.  Since they
 are most common, bit array tables can be queried using a simpler
@@ -16310,16 +16284,16 @@ To get a list of all members of a multi-level table bit array, it can
 be converted into a sorted range list.  The result ([[*ret]]) is always
 allocated using [[malloc]].
 
-% multi_bit_to_range prototype
+% uni_multi_bit_to_range prototype
 
 The inverse operation is also possible, but it consumes a large amount
 of time and memory.  Internally, the range list is first converted
 into a plain bit array, which is then converted using
-[[bits_to_multi]] above.  The return value is the multi-level table,
+[[uni_bits_to_multi]] above.  The return value is the multi-level table,
 allocated using [[malloc]].  If [[ml_len]] is non-NULL, the storage
 size of the table is returned as well.
 
-% rng_to_multi_bit prototype
+% uni_rng_to_multi_bit prototype
 
 The multi-level tables can store more information, as well.  The
 lookup function merely returns a pointer to a byte.  This byte can be
@@ -16339,7 +16313,7 @@ users, but for the static table generator.  Note that while the
 default value must be provided, it is not stored, but instead is used
 to remove the default value from the table by converting it to zero.
 
-% rng_dat8_to_multi prototype
+% uni_rng_dat8_to_multi prototype
 
 By multiplying the value size with the lookup index, larger values can
 be stored as well.  For an intermediate-sized value, a raw 16-bit or
@@ -16348,9 +16322,9 @@ be stored as well.  For an intermediate-sized value, a raw 16-bit or
 supported.  However, the inverse conversion is not supported.
 
 % uni_x_dat16 prototype
-% rng_dat16_to_multi prototype
+% uni_rng_dat16_to_multi prototype
 % uni_x_dat32 prototype
-% rng_dat32_to_multi prototype
+% uni_rng_dat32_to_multi prototype
 
 Another implementation is to store the numerator and denominator of a
 rational number as a 32-bit value: 24 bits for a signed numerator, and
@@ -16364,9 +16338,9 @@ For values where ranges are inappropriate, a function is provided to
 convert a sorted code point array with 32-bit values (nominally
 [[uni_cp_val_t]]) into a multi-level table.  No inverse function is
 provided.  No generic lookup function is provided, either; remember to
-multiply code point values by 4 when using [[multi_tab_lookup]].
+multiply code point values by 4 when using [[uni_multi_tab_lookup]].
 
-% cp_val_to_multi prototype
+% uni_cp_val_to_multi prototype
 
 \section{All Properties}
 
@@ -16497,10 +16471,10 @@ bit size is returned in [[res_len]], and the actual number of elements
 allocated is returned in [[res_max]].  All return pointers must be
 non-[[NULL]].
 
-% setop_bit64 prototype
-% setop_bit32 prototype
-% setop_bit16 prototype
-% setop_bit8 prototype
+% uni_setop_bit64 prototype
+% uni_setop_bit32 prototype
+% uni_setop_bit16 prototype
+% uni_setop_bit8 prototype
 
 Since sorted code point arrays are generally inefficient for storing
 Unicode boolean properties (sets), no set operations are provided for
@@ -16545,7 +16519,7 @@ is the index of that name in the alias array.
 An array of [[uni_valueof_t]] structures can be searched or sorted
 using the generic comparison function.
 
-% cmp_valueof prototype
+% uni_cmp_valueof prototype
 
 If the name entry is stripped of separators and converted to
 lower-case, then the Unicode approximate matching technique can be
@@ -16557,8 +16531,9 @@ is not found, strips off a leading ``is''.
 
 It performs its function by first stripping the name; manual stripping
 can be done with the following function.  After stripping, the name
-can be looked up directly using [[cmp_valueof]] twice:  first without
-further modification, and second after striping any leading ``is''.
+can be looked up directly using [[uni_cmp_valueof]] twice:  first
+without further modification, and second after striping any leading
+``is''.
 
 % uni_name_strip prototype
 
@@ -16570,11 +16545,11 @@ following symbols are defined:
 \item [[uni_]]\emph{EP}[[_t]] is a C enumeration type whose literals
 correspond to the property's values.
 \item For each canonical enumeration value name \emph{EN}, the symbol
-[[U_]]\emph{EP}[[_]]\emph{EN} is defined, which is an enumeration
+[[UNI_]]\emph{EP}[[_]]\emph{EN} is defined, which is an enumeration
 literal of type [[uni_]]\emph{EP}[[_t]].  Enumeration literals
 corresponding to canonical aliases are defined as well, as long as they
 do not contain a minus sign or a decimal point.
-\item [[U_NUM_]]\emph{EP} is another enumeration literal of type
+\item [[UNI_NUM_]]\emph{EP} is another enumeration literal of type
 [[uni_]]\emph{EP}[[_t]], which corresponds to the number of unique
 values.  Note that where canonical aliases are present, this number
 is smaller than the actual number of enumeration symbols.  Also, where
@@ -16583,7 +16558,7 @@ present.
 \item [[const uni_alias_t uni_]]\emph{EP}[[_nameof[]]] is an array of
 names corresponding with the enumeration literals.  The index is
 simply a valid enumeration literal value, or any positive integer less
-than [[U_NUM_]]\emph{EP}.
+than [[UNI_NUM_]]\emph{EP}.
 \item [[const uni_valueof_t uni_]]\emph{EP}[[_valueof[]]] is a sorted
 array of all unique names (including aliases) for this property; the
 [[val]] field in each entry is the associated enumeration literal.
@@ -16645,21 +16620,21 @@ enumeration that supports enumeration names with minus signs.
 
 In addition, the gc property defines a symbol to support aliases which
 cover more than one value.  For example, the enumeration literal
-[[U_gc_Z]] is actually an alias for [[U_gc_Zl]], [[U_gc_Zp]], and
-[[U_gc_Zs]].  The [[const uint64_t uni_gc_trans[]]] table takes an
-enumeration literal as index, and returns a bit mask with all
+[[UNI_gc_Z]] is actually an alias for [[UNI_gc_Zl]], [[UNI_gc_Zp]],
+and [[UNI_gc_Zs]].  The [[const uint64_t uni_gc_trans[]]] table takes
+an enumeration literal as index, and returns a bit mask with all
 appropriate base classes included with this literal set.  The base
 classes themselves only have one bit set; to check if a class is a
 base class, simply check if the bit is set for itself.
 
 There are two additional support macros for the gc property.
-[[uni_is_nl]] checks if a character is any valid newline-type character,
-and [[uni_is_bs]] checks if a character is any valid backslash-type
-character.  [[is_bs]] is not necessary for text already processed
+[[is_uni_nl]] checks if a character is any valid newline-type character,
+and [[is_uni_bs]] checks if a character is any valid backslash-type
+character.  [[is_uni_bs]] is not necessary for text already processed
 using NFKC\_CF.
 
-% uni_is_nl prototype
-% uni_is_bs prototype
+% is_uni_nl prototype
+% is_uni_bs prototype
 
 \section{Numeric Properties}
 
@@ -16984,13 +16959,13 @@ number of filled-in values (always 2 or 3).  The return buffer
 must contain space for at least 2 characters if the [[full]] flag is
 not set, or 3 if it is set.
 
-% hangul_syllable_decomp prototype
+% uni_hangul_syllable_decomp prototype
 
 To make this easier, a wrapper macro is provided.  This assumes that
 at least [[len]] words are available in the passed-in buffer
 ([[buf]]), and copies out the result.  This is meant to be called
 after [[uni_find_]]\emph{xxx}, using its results combined with the
-[[hangul_syllable_decomp]] results.
+[[uni_hangul_syllable_decomp]] results.
 
 % uni_get_decomp prototype
 
@@ -17042,7 +17017,7 @@ To look up Hangul syllable compositions, another separate function is
 provided.  It returns zero if there is no valid composition; otherwise
 it returns the result of composition.
 
-% hangul_syllable_comp prototype
+% uni_hangul_syllable_comp prototype
 
 Combining the above two steps can be done using a wrapper macro.  Thus
 the preferred method of looking up compositions is to call
@@ -17272,7 +17247,7 @@ internally as a string property whose strings are sequences of
 enumeration literal values corresponding to the sc property.  For
 example, the code point U+0363 has the scx property ``Arab Syrc'',
 which is stored as string of length two.  The first character of the
-string is [[U_sc_Arab]], and the second is [[U_sc_Syrc]].
+string is [[UNI_sc_Arab]], and the second is [[UNI_sc_Syrc]].
 
 % End-doc Users-Guide
 
