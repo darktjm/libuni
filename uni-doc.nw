@@ -8,6 +8,8 @@
 \RCS $Id$
 \RCS $Revision$
 \RCS $Date$
+% override with uni.nw's RCS info
+\input{uni-rcs.tex} %%% doc
 
 %%% requires uni
 %%% no-ext-ref
@@ -16,7 +18,7 @@
 
 \title{Unicode Support Routines (Users' Guide)}
 \author{Thomas J. Moore}
-\date{Version 1.0\\Revision \RCSRevision\\\RCSDate}
+\input{uni-version.tex} %%% doc
 \maketitle
 
 \input{Introduction.tex} %%% doc

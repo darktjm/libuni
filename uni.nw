@@ -5,11 +5,17 @@
 \documentclass[twoside,english]{report}
 \usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
 %%% latex preamble
+% Begin-doc uni-rcs
 \RCS $Id$
 \RCS $Revision$
 \RCS $Date$
+% End-doc uni-rcs
 
 %%% requires tjm-ext
+
+% shut l2h up about the font changes
+% l2h ignore newfontfamily A[{
+% l2h ignore unimono
 
 % There are very few monospace Unicode fonts, and even fewer
 % that support U+2620 SKULL AND CROSSBONES.
@@ -27,15 +33,13 @@
 %\setsansfont{DejaVuSans}
 %\setmonofont{DejaVuSansMono}
 
-% shut l2h up about the font changes
-% l2h ignore newfontfamily
-% l2h ignore unimono
-
 \begin{document}
 
 \title{Unicode Support Routines}
 \author{Thomas J. Moore}
+% Begin-doc uni-version
 \date{Version 0.\RCSRevision\\\RCSDate}
+% End-doc uni-version
 \maketitle
 
 \begin{rawhtml}
@@ -15139,7 +15143,7 @@ well.
 
 \begin{table}
 \begin{centering}
-\begin{tabular}{llll}
+\begin{tabular}{lllll}
 AHex&ASSIGNED&Alpha&Bidi\_C&Bidi\_M\\
 CE&CI&CWCF&CWCM&CWKCF\\
 CWL&CWT&CWU&Cased&Comp\_Ex\\
@@ -15148,11 +15152,12 @@ Gr\_Base&Gr\_Ext&Hex&Hyphen&IDC\\
 IDS&IDSB&IDST&Ideo&Join\_C\\
 LOE&Lower&Math&NChar&NFD\_QC\\
 NFKD\_QC&OAlpha&ODI&OIDC&OIDS\\
-OLower&OMath&OUpper&Ogr_Ext&Pat\_Syn\\
+OLower&OMath&OUpper&Ogr\_Ext&Pat\_Syn\\
 Pat\_WS&QMark&Radical&SD&STerm\\
 Term&UIdeo&Upper&VS&WSpace\\
 XIDC&XIDS\\
 \end{tabular}
+
 {\small Note: Hyphen is a deprecated property.}
 \caption{\label{tab:boolprop}Boolean properties (Unicode canonical short name)}
 \end{centering}
@@ -15407,6 +15412,7 @@ is more than one value, the [[val2]] macro will return a non-zero value.
 nv&cjkRSUnicode&slc&suc\\
 stc&scf&bmg&\\
 \end{tabular}
+
 {\small Note: slc, suc, stc, scf, and bmg are technically string
 properties, but always return either nothing or a string of length
 one.  For the former case, 0 is returned; for the latter, the single
