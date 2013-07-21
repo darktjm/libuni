@@ -790,6 +790,7 @@ struct uni_file_t {
 @
 
 <<Unicode I/O local definitions>>=
+<<Unicode file buffer state deps>>
 <<[[uni_file_t]]>>
 @
 
@@ -803,7 +804,8 @@ provided to create and remove the state.
 
 <<Unicode I/O Exports>>=
 /* encoding = NULL for automatic detection */
-/* automatically detects utf16/utf32 if encoding == UTF-8 */
+/* automatically detects utf16/utf32 if encoding == UTF */
+/* automatically detects endianness if encoding == UTF or UTF-16 or UTF-32 */
 uni_file_t *uni_fopen(const char *name, const char *encoding);
 void uni_fclose(uni_file_t *uf);
 @
@@ -811,19 +813,18 @@ void uni_fclose(uni_file_t *uf);
 <<Unicode I/O functions>>=
 uni_file_t *uni_fopen(const char *name, const char *encoding)
 {
-  uni_file_t *uf;
+  uni_file_t *uf = calloc(sizeof(*uf), 1);
 
-  inisize(uf, 1);
-  clearbuf(uf, 1);
+  if(!uf)
+    return NULL;
   uf->name = strdup(name);
   if(!uf->name) {
-    free(uf);
+    uni_fclose(uf);
     return NULL;
   }
   uf->f = fopen(name, "rb");
   if(!uf->f) {
-    free(uf->name);
-    free(uf);
+    uni_fclose(uf);
     return NULL;
   }
   <<Initialize unicode file buffer state>>
@@ -834,32 +835,40 @@ uni_file_t *uni_fopen(const char *name, const char *encoding)
 <<Unicode I/O functions>>=
 void uni_fclose(uni_file_t *uf)
 {
-  free(uf->name);
-  fclose(uf->f);
+  /* all frees are conditional so uni_fopen can uni_fclose partial progress */
+  if(uf->name)
+    free(uf->name);
+  if(uf->f)
+    fclose(uf->f);
   <<Free unicode file buffer state>>
   free(uf);
 }
 @
 
 One limitation of standard I/O is that only one character may be
-pushed back into the stream.  To correct this, a 4-byte buffer is
-kept, along with a count.  In order to avoid reading from the file
-after the buffered characters have been removed, an end-of-file flag
-is kept as well.  In order to allow error messages to display the
-correct file offset, that is also kept.
+pushed back into the stream.  To correct this, a readahead buffer is
+kept.  While C provides its own large buffers, preventing I/O overhead
+on every read, the read itself can be expensive anyway if called too
+often.  To avoid this, the buffer is much larger than needed for
+simple UTF lookahead.
+
+<<Unicode file buffer state deps>>=
+#define UNIF_BUF_LEN 16384 /* about 4x my old usual buf size */
+@
 
 <<Unicode file buffer state>>=
-size_t fpos;
-char readahead[4];
-unsigned char raptr;
-unsigned char eof;
+char readahead[UNIF_BUF_LEN];
+unsigned short raptr, ralen;
 @
 
 The first thing to do is to decide the file's encoding.  ASCII and
 ISO-Latin-1 can be read raw, since they map directly to Unicode.
-UTF-8 is taken to mean automatic Unicode detection, with UTF-8 as a
-default.  For all other input types, the [[iconv]] function should be
-used.%
+UTF is taken to mean automatic Unicode detection, with UTF-8 as a
+default.  UTF-8, UTF-16, UTF-32, UTF-16LE, UTF-16BE, UTF-32LE, and
+UTF-32BE are processed directly, with UTF-16 and UTF-32 using native
+encoding if a byte order mark is not found.  For all other input
+types (including the above-mentioned ones which are in other formats,
+such as lower-case), the [[iconv]] function should be used.%
 \footnote{The C99 library provides something similar in the
 [[mbstowcs]] function, but the POSIX [[iconv]] function is commonly
 available (perhaps even as a third party library), and could be
@@ -876,6 +885,7 @@ bloat, this can be disabled with a configuration variable.
 <<makefile.config>>=
 # Set to non-empty to enable iconv input support
 #USE_ICONV=y
+
 @
 
 <<makefile.vars>>=
@@ -885,7 +895,7 @@ endif
 @
 
 \lstset{language=C}
-<<Unicode I/O local definitions>>=
+<<Unicode file buffer state deps>>=
 #ifdef UNI_USE_ICONV
 #include <langinfo.h>
 #include <locale.h>
@@ -893,34 +903,14 @@ endif
 #endif
 @
 
-
 <<Unicode file buffer state>>=
-unsigned char enctype;
 /*
  * 0 = ASCII/Latin-1
  * 1 = iconv (if UNI_USE_ICONV)
  * 8/16/32 = utf-8/16/32
  */
-#ifdef UNI_USE_ICONV
-void *enchelp;
-#endif
-@
-
-<<Unicode I/O local definitions>>=
-#ifdef UNI_USE_ICONV
-#define ICBUF_SIZE 1024
-typedef struct {
-  iconv_t ic;
-  char ibuf[ICBUF_SIZE];
-  int ilen;
-  uint32_t obuf[ICBUF_SIZE];
-  int optr, olen;
-} iconv_supt_t;
-#endif
-@
-
-<<Known Data Types>>=
-iconv_supt_t,%
+unsigned char enctype;
+unsigned char bige;
 @
 
 <<Initialize unicode file buffer state>>=
@@ -930,40 +920,83 @@ if(!encoding) {
   encoding = nl_langinfo(CODESET);
 }
 #endif
-if(!encoding)
-  encoding = "UTF-8";
-if(encoding && (!strcmp(encoding, "ISO-8859-1") ||
+if(encoding && (!strcmp(encoding, "ISO-8859-1") || /* Latin-1 */
                 !strcmp(encoding, "ANSI_X3.4-1968"))) /* ASCII */
-  return uf; /* enctype == 0 */
-#ifdef UNI_USE_ICONV
-else if(encoding && strcmp(encoding, "UTF-8")) {
-  iconv_supt_t *ics;
-  inisize(ics, 1);
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-#define bo "LE"
-#else
-#define bo "BE"
-#endif
-  ics->ic = iconv_open("UTF-32" bo, encoding);
-  if(ics->ic == (iconv_t)-1) {
-    perror(encoding);
-    exit(1);
+  return uf; /* enctype == 0 -> raw bytes */
+if(encoding && !strncmp(encoding, "UTF", 3)) {
+  if(!encoding[3])
+    encoding = NULL;
+  else if(encoding[3] == '-') {
+    if(encoding[4] == '8' && !encoding[5]) {
+      uf->enctype = 8;
+      return uf;
+    } else if(encoding[4] == '1' && encoding[5] == '6') {
+      uf->enctype = 16;
+      <<Check if [[encoding]] is has [[BE]] or [[LE]] suffix>>
+    } else if(encoding[4] == '3' && encoding[5] == '2') {
+      uf->enctype = 32;
+      <<Check if [[encoding]] is has [[BE]] or [[LE]] suffix>>
+    }
   }
-  uf->enchelp = ics;
+}
+@
+
+<<Check if [[encoding]] is has [[BE]] or [[LE]] suffix>>=
+if(encoding[6] == 'B' && encoding[7] == 'E' && !encoding[8]) {
+  uf->bige = 1;
+  return uf;
+} else if(encoding[6] == 'L' && encoding[7] == 'E' && !encoding[8])
+  return uf;
+else if(!encoding[6]) {
+  uf->bige = __BYTE_ORDER == __BIG_ENDIAN;
+  encoding = NULL; /* need to determine endianness still */
+} /* else use iconv */
+@
+
+<<Unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+iconv_t ic;
+uint32_t *obuf; /* only allocated when needed */
+uint16_t optr, olen;
+#endif
+@
+
+<<Initialize unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+if(encoding) {
+  uf->obuf = malloc(UNIF_BUF_LEN); /* max len == UNIF_BUF_LEN / 4 */
+  if(!uf->obuf) {
+    uni_fclose(uf);
+    return NULL;
+  }
+#if __BYTE_ORDER == __BIG_ENDIAN
+#define bo "BE"
+#else
+#define bo "LE"
+#endif
+  uf->ic = iconv_open("UTF-32" bo, encoding);
+  if(uf->ic == (iconv_t)-1) {
+    uni_fclose(uf);
+    return NULL;
+  }
   uf->enctype = 1;
   return uf;
 }
+#else
+if(encoding) {
+  errno = EINVAL;
+  uni_fclose(uf);
+  return NULL;
+}
 #endif
-/* otherwise it's Unicode */
 @
 
 <<Free unicode file buffer state>>=
 #ifdef UNI_USE_ICONV
-if(uf->enctype == 1 && uf->enchelp) {
-  iconv_supt_t *ics = uf->enchelp;
-  iconv_close(ics->ic);
-  free(ics);
-}
+if(uf->obuf)
+  free(uf->obuf);
+if(uf->enctype == 1)
+  iconv_close(uf->ic);
 #endif
 @
 
@@ -972,35 +1005,39 @@ the byte order mark (U+FEFF).  Flags are kept to indicate what was
 found.  Note that the byte order mark is still returned as the first
 character, so all read characters must be backed out.
 
-<<Unicode file buffer state>>=
-unsigned char bige;
-@
-
 <<Initialize unicode file buffer state>>=
-uf->enctype = 8; /* default is UTF-8 */
+if(!uf->enctype)
+  uf->enctype = 8; /* default is UTF-8 */
 /* Read and process BOM (FEFF) */
 int c;
 <<Read and store a char from [[uf]]>>
 if(c == 0xfe) {
   <<Read and store a char from [[uf]]>>
-  if(c == 0xff) { /* FEFF UTF-16BE */
+  if(c == 0xff && uf->enctype != 32) { /* FEFF UTF-16BE */
     uf->bige = 1;
     uf->enctype = 16;
   }
 } else if(c == 0xff) {
   <<Read and store a char from [[uf]]>>
-  if(c == 0xfe) {
-    <<Read and store a char from [[uf]]>>
-    if(!c) {
+  if(c == 0xfe) { /* FFFE UTF-16LE or UTF-32LE (or native UTF-32) */
+    if(uf->enctype == 16)
+      uf->bige = 0;
+    else {
       <<Read and store a char from [[uf]]>>
-      if(!c) /* FFFE0000 UTF-32LE */
-        uf->enctype = 32;
-      else /* FFFE */
+      if(!c) {
+        <<Read and store a char from [[uf]]>>
+        if(!c) { /* FFFE0000 UTF-32LE */
+          uf->enctype = 32;
+	  uf->bige = 0;
+        } else if(!uf->enctype)
+          uf->enctype = 16;
+	/* else UTF-32 native-endian */
+      } else if(!uf->enctype)
         uf->enctype = 16;
-    } else /* FEFF UTF-16LE */
-      uf->enctype = 16;
+      /* else UTF-32 native-endian */
+    }
   }
-} else if(!c) {
+} else if(!c && uf->enctype != 16) {
   <<Read and store a char from [[uf]]>>
   if(!c) {
     <<Read and store a char from [[uf]]>>
@@ -1013,14 +1050,24 @@ if(c == 0xfe) {
     }
   }
 }
+<<Unread all chars read from [[uf]]>>
 @
 
 <<Read and store a char from [[uf]]>>=
-c = getc(uf->f);
-if(c == EOF)
-  uf->eof = 1;
-else
-  uf->readahead[uf->raptr++] = c;
+if(uf->raptr < uf->ralen)
+  c = uf->readahead[uf->raptr++];
+else if(!uf->ralen) {
+  uf->ralen = fread(uf->readahead, 1, UNIF_BUF_LEN, uf->f);
+  if(uf->raptr)
+    c = uf->readahead[uf->raptr++];
+  else
+    c = EOF;
+} else
+  c = EOF;
+@
+
+<<Unread all chars read from [[uf]]>>=
+uf->raptr = 0;
 @
 
 The reader then uses the appropriate method to read a character based
@@ -1034,12 +1081,7 @@ int32_t uni_fgetc(uni_file_t *uf);
 int32_t uni_fgetc(uni_file_t *uf)
 {
   if(!uf->enctype) {
-    int c = getc(uf->f);
-    if(c == EOF)
-      uf->eof = 1;
-    else
-      uf->fpos++;
-    return c;
+    return getc(uf->f);
 #ifdef UNI_USE_ICONV
   } else if(uf->enctype == 1) {
     <<Return a character using iconv>>
@@ -1052,85 +1094,99 @@ int32_t uni_fgetc(uni_file_t *uf)
 Rather than using the potentially flawed direct I/O routines, the
 Unicode reader always reads raw bytes and then calls the decoder
 instead.  That way, the readahead issue disappears.  The readahead
-buffer is always flushed to four characters every time, since UTF-32
-and UTF-16 both may require that much.  UTF-8 only requires three, but
-there is little point in making that a special case.
+buffer is refilled whenever it has less than 4 characters, since all
+encodings require at most that many.
 
 <<Return a Unicode character>>=
-while(!uf->eof && uf->raptr < 4) {
-  int nr = fread(uf->readahead + uf->raptr, 1, 4 - uf->raptr, uf->f);
-  if(nr <= 0)
-    uf->eof = 1;
-  else
-    uf->raptr += nr;
+if(uf->ralen < uf->raptr + 4 && (!uf->ralen || uf->ralen == UNIF_BUF_LEN)) {
+  memcpy(uf->readahead, uf->readahead + uf->raptr, uf->ralen - uf->raptr);
+  uf->ralen -= uf->raptr;
+  uf->raptr = 0;
+  uf->ralen += fread(uf->readahead + uf->ralen, 1, UNIF_BUF_LEN - uf->ralen, uf->f);
 }
-if(uf->eof && !uf->raptr)
+if(uf->raptr == uf->ralen)
   return -1;
 int cp;
 unsigned int l;
+uint8_t *ra = (uint8_t *)uf->readahead + uf->raptr;
 if(uf->enctype == 32) {
-  cp = uni_utf32_decode((uint32_t *)uf->readahead, uf->bige);
+  cp = uni_utf32_decode((uint32_t *)ra, uf->bige);
   l = 4;
 } else if(uf->enctype == 16) {
-  cp = uni_utf16_decode((uint16_t *)uf->readahead, &l, uf->bige);
+  cp = uni_utf16_decode((uint16_t *)ra, &l, uf->bige);
   l *= 2;
 } else
-  cp = uni_utf8_decode((uint8_t *)uf->readahead, &l);
-if(l > uf->raptr) {
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-  uf->raptr = 0;
+  cp = uni_utf8_decode(ra, &l);
+if(l > uf->ralen - uf->raptr) {
+  uf->ralen = uf->raptr = 0;
   return -2;
 }
 if(l < 4)
   movebuf(uf->readahead, uf->readahead + l, 4 - l);
-if(cp < 0)
-  fprintf(stderr, "Ill-formed character @ %lu\n", uf->fpos);
-uf->raptr -= l;
-uf->fpos += l;
+uf->raptr += l;
 return cp < 0 ? -2 : cp;
 @
 
 The [[iconv]] conversion proceeds much differently.  If a character is
 availble in the output buffer, it validates and returns that character.
 Otherwise, it fills up the input buffer from the file, and then
-attempts to fill the output buffer using [[iconv]].  Any unprocessed
-input characters are then moved to the start of the input buffer for
-the next pass.
+attempts to fill the output buffer using [[iconv]].
+
+The [[iconv]] routine needs to be called one more time at end-of-file.
+Detection of end-of-file is easy, but detection of whether or not this
+last step has been done is not.  A flag is used to indicate this.
+
+<<Unicode file buffer state>>=
+#ifdef UNI_USE_ICONV
+uint8_t did_ic_eof;
+#endif
+@
 
 <<Return a character using iconv>>=
-iconv_supt_t *ics = uf->enchelp;
 while(1) {
-  if(ics->olen) {
-    --ics->olen;
-    return uni_utf32_decode(&ics->obuf[ics->optr++], __BYTE_ORDER == __BIG_ENDIAN);
+  if(uf->olen) {
+    --uf->olen;
+    uint32_t cp = uf->obuf[uf->optr++];
+    if(cp > 0x10FFFF || (cp >= 0xD800 && cp < 0xE000))
+      return -3;
+    return cp;
   }
-  char *ibuf = ics->ibuf;
-  size_t ilen = ics->ilen;
-  char *obuf = (char *)ics->obuf;
-  size_t olen = ICBUF_SIZE * 4;
-  while(!uf->eof && ilen < ICBUF_SIZE) {
-    int nr = fread(ibuf, 1, ICBUF_SIZE - ilen, uf->f);
-    if(nr <= 0)
-      uf->eof = 1;
-    else
-      ilen += nr;
+  /* if not at end of input, refill buffer */
+  if(!uf->ralen || uf->ralen == UNIF_BUF_LEN) {
+    /* if more than UNIF_BUF_LEN needed for a pass of iconv, this is screwed */
+    if(uf->ralen && !uf->raptr) {
+      errno = ENOSPC;
+      return -2;
+    }
+    memmove(uf->readahead, uf->readahead + uf->raptr, uf->ralen - uf->raptr);
+    uf->ralen += fread(uf->readahead + uf->ralen, 1, UNIF_BUF_LEN - uf->ralen, uf->f);
+    if(!uf->ralen) /* len was 0, and 0 additional bytes read: EOF @start */
+      return -1; /* assume iconv wouldn't return anything either */
+    uf->ralen -= uf->raptr;
+    uf->raptr = 0;
   }
-  while(1) {
-    iconv(ics->ic, &ibuf, &ilen, &obuf, &olen);
-    if(ibuf != ics->ibuf)
-      break;
-    /* ignore bad chars */
-    if(!--ilen)
-      break;
-    movebuf(ics->ibuf, ics->ibuf + 1, ilen);
+  char *obuf = (char *)uf->obuf;
+  size_t olen = UNIF_BUF_LEN;
+  if(uf->ralen == uf->raptr) {
+    if(uf->did_ic_eof)
+      return -1;
+    uf->did_ic_eof = 1;
+    if(!uf->ralen)
+      uf->ralen = uf->raptr = 1; /* avoid reading again */
+    if(iconv(uf->ic, NULL, NULL, &obuf, &olen) < 0)
+      return -2;
+  } else {
+    char *ibuf = uf->readahead + uf->raptr;
+    size_t ilen = uf->ralen - uf->raptr;
+    if(iconv(uf->ic, &ibuf, &ilen, &obuf, &olen) < 0 &&
+       ibuf == uf->readahead + uf->raptr) {
+      uf->raptr++;
+      return -2;
+    }
+    uf->raptr = uf->ralen - ilen;
   }
-  if(ilen)
-    movebuf(ics->ibuf, ibuf, ilen);
-  else if(uf->eof)
-    iconv(ics->ic, NULL, NULL, &obuf, &olen);
-  ics->olen = olen / 4;
-  ics->optr = 0;
-  ics->ilen = ilen;
+  uf->optr = 0;
+  uf->olen = UNIF_BUF_LEN - olen;
 }
 @
 
@@ -4100,7 +4156,12 @@ static void add_bool_rng(prop_t *p, uint32_t low, uint32_t high)
 
 The only directly derived boolean properties in [[UnicodeData.txt]] are
 ASSIGNED, which is true if the character is present, and
-Bidi\_Mirrored, which is true if field 10 is Y.
+Bidi\_Mirrored, which is true if field 10 is Y%
+\footnote{This property, like many boolean properties, has property
+value aliases that indicate Yes, T, and True as possible truth values
+as well.  For now, though, all files are parsed assuming Y, since that
+is always the case in the current UCD.}%
+.
 
 <<UCD parser variables>>=
 decl_bool(ASSIGNED);
@@ -4231,12 +4292,11 @@ static void fixup_rng(prop_t *p)
 @
 
 [[DerivedNormalizationProps.txt]] contains the only remaining required
-boolean UCD properties.  Unlike the other three, there are some
-non-boolean properties in this file as well.  Luckily, some boolean
-values can be detected by simply counting the fields.  The
-Expands\_On\_* properties are deprecated.  Technically, some of the
-quick check fields could be booleans as well, but they will be taken
-care of as enumerations.
+boolean UCD properties.  Unlike the others, there are some non-boolean
+properties in this file as well.  Luckily, some boolean values can be
+detected by simply counting the fields.  The Expands\_On\_* properties
+are deprecated.  Technically, some of the quick check fields could be
+booleans as well, but they will be taken care of as enumerations.
 
 <<Parse UCD files>>=
 open_f("DerivedNormalizationProps.txt");
@@ -4260,8 +4320,14 @@ There are no boolean fields exported from Unihan.  The only field
 which might be considered boolean (kIICore) is not required by
 anything I use.
 
+\lstset{language=txt}
+<<FIXME>>=
+Unihan_IRGSources.txt: kIICore
+@
+
 Now, to finish up post-processing, the multi-level table is generated.
 
+\lstset{language=C}
 <<Post-process property data>>=
 uint32_t ml_len;
 for(i = 0; i < nparsed; i++)
@@ -4477,8 +4543,8 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
 
 \subsection{Additional Properties}
 
-A few specific character classes that are useful for the compiler do
-not warrant a full set of tables.  Instead, they are implemented as
+A few specific character classes that are useful for some applications
+do not warrant a full set of tables.  Instead, they are implemented as
 macros that compare directly to the limited set they contain.  These
 are:  characters which act as line terminators, characters which
 may initiate backslash-escapes, and UTF-16 surrogates.
@@ -5623,6 +5689,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+test with auxiliary/LineBreakTest.txt
+@
+
+\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/GraphemeBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5632,6 +5704,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+test with auxiliary/GraphemeBreakTest.txt
+@
+
+\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/SentenceBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5641,6 +5719,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+test with auxiliary/SentenceBreakTest.txt
+@
+
+\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/WordBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5650,6 +5734,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+test with auxiliary/WordBreakText.txt
+@
+
+\lstset{language=C}
 <<Parse UCD files>>=
 open_f("EastAsianWidth.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5668,10 +5758,14 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-And there is one file that has two properties per line.  However, like
-the bc property, the jt property's default value is not a single
-value.  For that reason, it is read from the derived file
-instead%
+And there is one file that has two properties per line:
+[[ArabicShaping.txt]]%
+\footnote{Actually, [[ArabicShaping.txt]] has three values per line,
+but field 2 (descriptive name) is informative and will not be read in
+as a property unless I find a use.}%
+.  However, like the bc property, the jt
+property's default value is not a single value.  For that reason, it
+is read from the derived file instead%
 \footnote{see footnote \ref{fn:extracted} on page \pageref{fn:extracted}.}%
 .
 
@@ -5944,6 +6038,12 @@ int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
 uni_x_of(i, mtab, def)
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+IndicSyllabicCategory.txt: field 2 == InSC (default = Other)
+IndicMatraCategory.txt: field 2 == InMC (default = NA)
+@
+
 \section{Numeric Properties}
 
 Numeric properties are a subset of enumerated properties.  The
@@ -5966,6 +6066,7 @@ than 19 bits, so it is stored in the remaining 3 bytes.  The generic
 these, by casting the 32-bit value back and forth between the native
 fraction structure ([[uni_frac_t]]).
 
+\lstset{language=C}
 <<[[uni_frac_t]]>>=
 typedef struct {
     int32_t num:24;
@@ -6126,13 +6227,29 @@ if(*fields[8]) {
 @
 
 An optional numeric property comes from
-[[Unihan_RadicalStrokeCounts.txt]]: cjkRSUnicode.  It is, like all
-unihan files, a tab-separated file, with the single code point in U+
-notation in field 1.  Note that the actual optional property is
-CJK\_Radical, which I interpret as meaning the same as cjkRSUnicode.
-However, I will not add a non-normative alias (especially considering
-that the library currently only supports four names, and there are
-already four names for this property).
+[[Unihan_RadicalStrokeCounts.txt]]: cjkRSUnicode%
+\footnote{Listed in UniHan as Informative, but still needed for regex.}%
+.  It is, like all unihan files, a tab-separated file, with the single
+code point in U+ notation in field 1.  Note that the actual optional
+property is CJK\_Radical, which I interpret as meaning the same as
+cjkRSUnicode. However, I will not add a non-normative alias
+(especially considering that the library currently only supports four
+names, and there are already four names for this property).
+
+Technically, this file also includes a number of other stroke count
+properties (kRSAdobe\_Japan1\_6, kRSJapanese, kRSKangXi, kRSKanWa,
+kRSKorean)%
+\footnote{Listed in UniHan as Provisional}%
+.  These are not required for regular expressions, so I will
+not be provided as a property until I find a use for them.  Most of
+them would be trivial to add, though, since they are the same format
+as kRSUnicode.  However, kRSAdobe\_Japan1\_6 has additional
+information that would turn it into a string property.
+
+There is another, related file ([[CJKRadicals.txt]]) which provides
+additional interpretation for the radical numbers returned by this
+property.  Since this file's values have no proprety label, I will not
+provide them as a property for now.
 
 <<UCD parser local functions>>=
 static void split_line_tab(char *buf)
@@ -6225,6 +6342,15 @@ void uni_kRSUnicode_val2(int32_t num, uint8_t denom, uint8_t &l,
                          int8_t &r);
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+CJKRadicals.txt:
+  field 1 = radical # (index); may include ' (maps to !?)
+  field 2 = CJK Radical character
+  field 3 = CJK Unified Ideograph character
+ 2 & 3 are always 1 16-bit char, so could store as 32-bit value per index
+@
+
 The only other numeric property currently supported is age, which
 comes from [[DerivedAge.txt]].  Since it has aliases, it is already
 added as an enumeration.
@@ -6235,6 +6361,7 @@ Once finished, the tables can be dumped.  Just as with other
 properties, only range tables have been built, so it's time to
 generate the multi-level table, assuming that the range data is correct.
 
+\lstset{language=C}
 <<UCD parser local functions>>=
 static void fixup_rng_dat32(prop_t *p)
 {
@@ -6367,6 +6494,19 @@ numeric (UAX44-LM1):
   e.g. 01.00 == 1
 @
 
+<<FIXME>>=
+Unihan_NumericValues.txt: kAccountingNumeric, kOtherNumeric, kPrimaryNumeric
+  (may need inclusion in nt/nv)
+  (note: listed in unihan as "informative")
+  (note: no character has more than one of these)
+Unihan_DictionaryLikeData.txt:  kFourCornerCode, kFrequency, kGradeLevel,
+                                kHKGlyph, kTotalStrokes
+				kCHaiT: maybe; maybe needs alt. rep.
+				kFenn, kPhonetic: could put last bit in denom
+Unihan_DictionaryIndices.txt: lots.  may need alt. rep to fit values
+Unihan_OtherMappings.txt: lots (may need string for some)
+@
+
 \section{String Properties}
 
 String properties are those which have a value that cannot be
@@ -6481,7 +6621,11 @@ The first string field from [[UnicodeData.txt]] is the decomposition
 mapping (dm) field.  For compatibility decompositions, the initial
 part of the field is the decomposition type in angle brackets, which
 has already been encoded as an enumeration (dt), so it is skipped,
-along with the space which always follows it.
+along with the space which always follows it%
+\footnote{The [[NormalizationCorrections.txt]] file provides previous
+versions of this field, but since I see no use for it, and no property
+name for it, it will not be provided.}%
+.
 
 <<Initialize UCD files>>=
 decl_str(dm);
@@ -6759,7 +6903,9 @@ static void dump_strs(prop_t *p, FILE *gen_h)
     else {
       const char *s = (const char *)(p->strs + soff);
       for(j = 0; j < len; j++, s++) {
-        if(isprint(*s))
+        if(*s == '\\' || *s == '\'')
+	  fprintf(of, "%s'\\%c'", prefix, *s);
+        else if(isprint(*s))
 	  fprintf(of, "%s '%c'", prefix, (int)*s);
 	else
 	  fprintf(of, "%s0x%02X", prefix, (int)(uint8_t)*s);
@@ -8058,7 +8204,10 @@ int uni_<<@type>><<@sz>>(uint32_t cp, <<Buffer return parameters for UTF-[[<<@sz
 @
 
 [[DerivedNormalizationProps.txt]] contains the final case folding
-method.  The main difference between it and the other methods is that
+method%
+\footnote{The FC\_NFKC property is related to case folding, but is
+deprecated and therefore not provided as a property.}%
+.  The main difference between it and the other methods is that
 it applies multiple transformations simultaneously.  In addition to
 case folding, it also removes default ignorable code points and
 performs compatibility decomposition on the results repeatedly until
@@ -8703,15 +8852,7 @@ the file will not be closed and reopened without an intervening EOF.
 It is also assumed that the function will not be called any more after
 it returns EOF.
 
-Note that the private [[uni_file_t]] structure definition is just
-repeated here, verbatim, which is normally bad form.  Each structure
-should only be defined in one file, and that should be a header file
-if the structure is shared.  However, the literate code chunk defining
-the structure is guaranteed to never vary between uses, so this is
-safe.
-
 <<Unicode normalization support local definitions>>=
-<<[[uni_file_t]]>>
 typedef struct unifile_norm {
   struct unifile_norm *next;
   uni_file_t *uf;
@@ -8756,10 +8897,12 @@ unsigned int buf_len;
 
 We'll also need to know how many characters are in the buffer, and how
 many of those are good to go.  Since more than one may be good to go,
-a pointer to the next character to go is kept as well.
+a pointer to the next character to go is kept as well.  Since the last
+good-to-go character may be the last in the file, a flag is added to
+detect this.
 
 <<Normalized input buffer state>>=
-int len, oklen, okptr;
+int len, oklen, okptr, eof;
 @
 
 To return a single character, we'll need to normalize until at least
@@ -8768,7 +8911,7 @@ is non-zero).
 
 <<Return normalized character if not EOF>>=
 unsigned int oklen = ufn->oklen;
-while(!oklen && !uf->eof) {
+while(!oklen && !ufn->eof) {
   /* read a char into end of buf, if needed & possible */
   <<Read and normalize a character>>
 }
@@ -8783,7 +8926,8 @@ if(oklen) {
   } else
    ufn->oklen = oklen;
   return c;
-}
+} else if(ufn->eof)
+  return -1;
 @
 
 To add more characters, the decomposition of the next read character
@@ -8809,6 +8953,10 @@ if(bp && nt == UNI_NORM_NONE) {
   break;
 }
 c = uni_fgetc(uf);
+if(c == -1)
+  ufn->eof = 1;
+if(c < -1)
+  c = 0xFFFD; /* recommended REPLACEMENT CHARACTER */
 if(nt == UNI_NORM_NONE)
   return c; /* don't bother allocating buf */
 if(c != -1)
@@ -8832,7 +8980,7 @@ number of ordered characters is saved in [[oblen]].  If no characters
 can be ordered, try to read more right away.
 
 <<Read and normalize a character>>=
-int oblen = uni_Canon_Order32(ufn->buf, bp, uf->eof);
+int oblen = uni_Canon_Order32(ufn->buf, bp, ufn->eof);
 if(!oblen) {
   ufn->len = bp;
   continue;
@@ -8854,8 +9002,8 @@ switch(nt) {
   case UNI_NORM_NFC:
   case UNI_NORM_NFKC:
   case UNI_NORM_NFKC_CF: {
-    int cblen = uni_NFC_comp32(ufn->buf, oblen, uf->eof ? NULL : &oklen);
-    if(uf->eof)
+    int cblen = uni_NFC_comp32(ufn->buf, oblen, ufn->eof ? NULL : &oklen);
+    if(ufn->eof)
       oklen = cblen;
     /* move unordered characters down if composition removed chars */
     if(cblen < oblen) {
@@ -9034,7 +9182,17 @@ if(uni_NFC32(obuf, 1, &obptr, -1, &l1) != 1 || obuf[0] != i ||
 \subsection{Parsing the UCD -- Names}
 
 An ``Other'' property which can be treated as a string for now is
-the na property.  This includes the Name\_Alias property, as well.
+the na property, the last property to be retrieved from
+[[UnicodeData.txt]]%
+\footnote{Fields 11 and 12 (isc and na1) are obsolete and informative,
+so they will not be read in as a property unless I find a use for
+them.  na1 was useful prior to 6.2, since it contained names for
+control characters, but those are now officially aliases.}%
+.  This includes the Name\_Alias property (from
+[[NameAliases.txt]]%
+\footnote{The third field of [[NameAliases.txt]] (Type) is
+informative, and will not be read in as a property unless I find a use.}%
+), as well.
 
 Since these names are always pure ASCII, storing one character per
 32-bit word is even more wasteful than above:  more than 25 bits are
@@ -9044,9 +9202,7 @@ cast the 32-bit string pointer to an 8-bit string pointer, and pad
 with zeroes to the next 32-bit boundary.  In fact, since they are
 always upper-case letters, digits, spaces, and hyphens, they could be
 represented as 6 bits per word, but that amount of compression could
-just end up being too expensive to extract.  Many names also have
-large substrings in common with each other, so the string tables could
-be reduced by more effective common substring elimination.
+just end up being too expensive to extract.
 
 Some characters' names are generated by appending the hexadecimal code
 point to a range name.  The Hangul syllable characters also have
@@ -9060,30 +9216,8 @@ stored as a plain string property, with each end point in the range
 table.  Like-named ranges are never consecutive, so the range can be
 determined by going down and/or up one.
 
-In addition, the Hangul syllable names require the name of each part,
-also known as the Jamo\_Short\_Name property.  It is extracted from
-[[Jamo.txt]].
-
-A related table which is not strictly a per-character property is the
-Named Sequences table. This associates names with character sequences,
-rather than just single characters.  This is read in as well, and
-stored in the pseudo-property naseq.  The names are indexed by the
-first character of the sequence, and the string value's first
-characters are additional characters in the sequence.  Rather than
-store this as UTF-8, the name is stored as a length, followed by the
-string, and the index extension is stored as UTF-16 at the next even
-byte.  The table will then be dumped as UTF-16.
-
-While each sequence is unique, each starting character is not:
-multiple entries will exist with the same index.  There are few such
-duplicates, though, so it is reasonable to expect a linear search.
-Thus the format of each entry is the length of the character string
-and the length of the index extension, followed by the string and
-index extension, followed by the next entry with the same first
-character.
-
 <<UCD parser local definitions>>=
-#define add_str_raw(n, v) do { \
+#define add_str8(n, v) do { \
   if(prop_##n < 0) \
     prop_##n = add_prop(#n); \
   if(*v) { \
@@ -9101,27 +9235,25 @@ character.
 decl_str(na);
 decl_str(Name_Alias);
 decl_str(narng);
-decl_str(Jamo_Short_Name);
-decl_str(naseq);
 @
 
 <<Process a line of [[UnicodeData.txt]]>>=
 if(fields[1][0] != '<' && (high < 0xF900 || low > 0xFAD9) &&
    (high < 0x2F800 || low > 0x2FA1D))
-  add_str_raw(na, fields[1]);
+  add_str8(na, fields[1]);
 else {
   uint32_t h = high;
   high = low;
   if(fields[1][0] == '<' && (s = strchr(fields[1], ','))) {
     *s = 0;
-    add_str_raw(narng, fields[1] + 1);
+    add_str8(narng, fields[1] + 1);
     low = high = h;
-    add_str_raw(narng, fields[1] + 1);
+    add_str8(narng, fields[1] + 1);
   } else if(low == 0xF900 || low == 0x2F800) {
     *strchr(fields[1], '-') = 0;
-    add_str_raw(narng, fields[1]);
+    add_str8(narng, fields[1]);
     high = low = low == 0xF900 ? 0xFAD9 : 0x2FA1D;
-    add_str_raw(narng, fields[1]);
+    add_str8(narng, fields[1]);
   } /* else either <control> or CJK COMPATIBILITY other than low */
 }
 @
@@ -9131,56 +9263,106 @@ parsed_props[prop_na].strs_char_size = 8;
 open_f("NameAliases.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
-  add_str_raw(Name_Alias, fields[1]);
+  add_str8(Name_Alias, fields[1]);
 }
 fclose(f);
 parsed_props[prop_Name_Alias].strs_char_size = 8;
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_na], gen_h, tstf);
+dump_str_tabs(&parsed_props[prop_Name_Alias], gen_h, tstf);
+@
+
+In addition, the Hangul syllable names require the name of each part,
+also known as the Jamo\_Short\_Name (JSN) property.  It is extracted
+from [[Jamo.txt]].
+
+<<Initialize UCD files>>=
+decl_str(JSN);
 @
 
 <<Parse UCD files>>=
 open_f("Jamo.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
-  add_str_raw(Jamo_Short_Name, fields[1]);
+  add_str8(JSN, fields[1]);
 }
 fclose(f);
-parsed_props[prop_Jamo_Short_Name].strs_char_size = 8;
+parsed_props[prop_JSN].strs_char_size = 8;
+@
+
+A related table which is not strictly a per-character property is the
+Named Sequences table (from [[NamedSequences.txt]]%
+\footnote{There is another file, [[NamedSequencesProv.txt]], which
+contains provisional named sequence names.  These will not be
+supported.  Insted, wait for them to become official.}%
+).  This associates names with character sequences, rather than just
+single characters. This is read in as well, and stored in the
+pseudo-property naseq.  The names are indexed by the first character
+of the sequence, and both the name and the additional index characters
+are stored in the string value.
+
+While each sequence is unique, each starting character is not:
+multiple entries will exist with the same index.  There are few such
+duplicates, though, so it is reasonable to expect a linear search.
+Each string value contains all possible entries with that initial
+index character appended to each other.  In order to skip to the next,
+each also includes both the index length and the name length.  The two
+lengths can fit into a single byte if the index length is five or less
+(extension length is 1-4, so 2 bits) and the name length is 64 or less
+(6 bits).
+
+The index needs to be word-aligned, and stored in its entirety.  If
+the index is at the end of the entry, the last entry might be stripped
+(in 8-bit mode) if its last byte is zero.  If it is at the beginning,
+finding its length may be hard.  Placing it one up wastes two bytes,
+so it is placed at the beginning, but the length is placed at the end
+of the string.  The name then occupies the middle.  Multiple
+concatenated entries are word-aligned by padding with a zero.  In
+fact, the entire table needs to be word-aligned.  One way to do that
+would be to use 16-bit mode, but I prefer being able to sort of read
+the generated table, so it uses 16-bit mode and always pads the name
+(rather than the whole string) to force the full length to be
+word-aligned.
+
+<<Initialize UCD files>>=
+decl_str(naseq);
 @
 
 <<UCD parser local definitions>>=
-#define add_strseq_raw(n, seq, v) do { \
+#define add_strseq(n, seq, v) do { \
   if(prop_##n < 0) \
     prop_##n = add_prop(#n); \
   if(*v) { \
     uint32_t str[64]; \
-    uint16_t v16; \
-    uint8_t *p = (uint8_t *)&v16, *vp = (uint8_t *)v; \
-    int len = strlen(v), vlen = len, slen = 0; \
-    *p = len; \
-    p[1] = *vp++; \
-    str[slen++] = v16; \
-    len--; \
-    while(len > 0) { \
-      p[0] = *vp++; \
-      p[1] = *vp++; /* may be terminating 0 */ \
-      str[slen++] = v16; \
-      len -= 2; \
-    } \
-    low = high = strtol(seq, &s, 16); \
+    uint16_t *p16 = (uint16_t *)str; \
+    low = strtol(seq, &s, 16); \
     uint32_t seqlen = 0; \
     while(*s) { \
-      str[slen] = strtol(s, &s, 16); \
-      seqlen += uni_utf16_enclen(str[slen]); \
-      slen++; \
+      high = strtol(s + 1, &s, 16); \
+      int clen = uni_int_utf16_encode(p16, high); \
+      p16 += clen; \
+      seqlen += clen; \
     } \
-    /* big trouble if seqlen ever exceeds 4, or strlen > 63 */ \
+    uint8_t *p8 = (uint8_t *)p16; \
+    strcpy((char *)p8, v); \
+    int len = strlen((char *)p8); \
+    p8 += len; \
+    if(!(len & 1)) \
+      *p8++ = 0; \
+    *p8++ = (len - 1) | ((seqlen - 1) << 6); \
     /* current UCD has max strlen 57 and max seqlen 4 */ \
-    if(seqlen > 4 || vlen > 63) { \
-      fprintf(stderr, "Unparsable sequence file %s (%d/%d)\n", lbuf, (int)p[0], seqlen); \
+    if(seqlen > 4 || len > 64) { \
+      fprintf(stderr, "Unparsable sequence file %s (%d/%d)\n", lbuf, len, seqlen); \
       exit(1); \
     } \
-    p[0] |= (seqlen - 1) << 6; \
-    add_str_rng(&parsed_props[prop_##n], low, high, str, slen); \
+    len = p8 - (uint8_t *)str; \
+    while(len % 4) { \
+      *p8++ = 0; \
+      len++; \
+    } \
+    add_str_rng(&parsed_props[prop_##n], low, low, str, len / 4); \
   } \
 } while(0)
 @
@@ -9191,8 +9373,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   split_line(lbuf);
   if(num_fields < 2 || !isxdigit(fields[1][0]))
     continue;
-  add_strseq_raw(naseq, fields[1], fields[0]);
+  add_strseq(naseq, fields[1], fields[0]);
 }
+parsed_props[prop_naseq].strs_char_size = 8;
+@
+
+<<Post-process property data>>=
 prop_t *naseq = &parsed_props[prop_naseq];
 qsort(naseq->str_arr, naseq->len, sizeof(*naseq->str_arr), uni_cmp_cp);
 for(i = naseq->len - 1; i > 0; i--) {
@@ -9212,10 +9398,7 @@ for(i = naseq->len - 1; i > 0; i--) {
 @
 
 <<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_na], gen_h, tstf);
 dump_str_tabs(&parsed_props[prop_naseq], gen_h, tstf);
-dump_str_tabs(&parsed_props[prop_Name_Alias], gen_h, tstf);
-dump_str_tabs(&parsed_props[prop_Jamo_Short_Name], gen_h, tstf);
 @
 
 The string tables are much too large for 16-bit offsets (509,515 bytes
@@ -9242,7 +9425,7 @@ for(i = 0; i < na->len; i++) {
   while(!e[-1])
     e--;
   while(ws < e) {
-    for(we = ws; we < e; we++)
+    for(we = ws + 1; we < e; we++)
       if(*we == ' ' || *we == '-')
         break;
     if((we - ws) > 2) {
@@ -9256,6 +9439,7 @@ for(i = 0; i < na->len; i++) {
     ws = we + 1;
     while(ws < e && (*ws == '-' || *ws == ' '))
       ws++;
+    ws--; /* include leading char (space/-) in word */
   }
 }
 sort_strs = na->strs;
@@ -9291,7 +9475,7 @@ for(i = 0; i < na->len; i++) {
   while(!e[-1])
     e--;
   while(ws < e) {
-    for(we = ws; we < e; we++)
+    for(we = ws + 1; we < e; we++)
       if(*we == ' ' || *we == '-')
         break;
     if((we - ws) > 2) {
@@ -9322,6 +9506,7 @@ for(i = 0; i < na->len; i++) {
     ws = we + 1;
     while(ws < e && (*ws == '-' || *ws == ' '))
       ws++;
+    ws--; /* include leading char (space/-) in word */
   }
   int slen = e - (uint8_t *)(na->strs + na->str_arr[i].off);
   while(slen % 4) {
@@ -9383,41 +9568,49 @@ fprintf(gen_h, "extern const uni_str_ptr_t uni_na_words_arr[];\n"
                "#define uni_na_words_arr_len %d\n", wordno);
 @
 
-This reduces the name table by more than half, to 239,418 bytes. 
-Unfortunately, that is still too large, and even if everything is
-32-bit aligned in order to quarter the offset requirement, it would
-require
+This reduces the name table by well over half, to 179,282 bytes.  That
+is still too long, but one easy way around it is to continue to retain
+the 32-bit encoding.  The number of 32-bit words is only 54,286, which
+adds a lot of padding (37,862 bytes), but allows 16-bit offsets.
+
+<<Post-process property data>>=
+na->strs_char_size = 32;
+@
+
+To look up a name using a code point, a function must be called.  It
+checks the na table.  If a name is present, that is returned;
+otherwise, an algorithmically generated name is attempted.  Failure
+for both should never happen, but if it does happen, an empty string
+is returned.  The return format is similar to the UTF-8 static/dynamic
+return buffer mechanism used by other string functions.
+
+---
+
+Algorithmically generated names other than Hangul syllables append
+their code point in hex, following a hyphen character.
+
 
 \lstset{language=txt}
 <<FIXME>>=
-dump names & name aliases
 add name lookup function
-name (UAX44-LM2):
-  ignore case, whitespace, underscore, and medial hyphens except 1180
-name (UTS18-2.5.1):
-  ignore case, whitespace, underscore, and all hyphens except 1180,
-     0F60, 0FB0
-  allow "namespace": prefix to apply if name doesn't match otherwise
-    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
-      insert CAPITAL and LOWER into appropriate spot.
 @
 
-It is difficult to come up with a good storage mechanism for character
-names.  For one thing, there are a lot of them, even if the
-algorithmically generated names are removed.  Another issue is that
-the storage method should match the usage, so a variety of storage
-mechanims may need to be supported.  Rather than supporting every use
-case, the raw list of names can be easily retrieved and used in a
-per-application static data generator similar to parse-ucd.  A few
-common use cases are considered as well.
+The name tables are not really that useful as is:  few programs
+display a Unicode code point's name.  However, there are many file
+parsers which allow Unicode code points to be specified by name.  Thus
+a reverse lookup table is required.  There is no perfect reverse
+lookup method; it depends on the application.  It is expected that a
+program using the name tables will dump a custom version of both
+forward and reverse lookups as application-specific C code.
 
-So, what do we do with all of these names?  The obvious thing is to
-create a hash table to look up the code point using the name, and
-another hash table to look up the name using the code point.  Since
-the cost of comparing integers is small, a binary search might suffice
-for the code point-to-name lookup.  For the hash table, we could
-either use some random hash function and hash table implementation, or
-we could generate a perfect hash function using [[gperf]].%
+The obvious thing to provide is an explicit name lookup function, using
+either a range list sorted by name instead of code point, or a hash
+table, or something similar.  Matching loosely needs to be supported as
+well, by stripping spaces and dashes for the lookup.
+
+For the hash table, either some random hash function could be
+provided, or a perfect hash function could be generated using
+[[gperf]].%
 \footnote{After I wrote this, a program called [[cmph]]
 (\url{http://sourceforge.net/projects/cmph}) caught my attention. This
 generates minimal perfect hash functions in linear time (sub second
@@ -9429,21 +9622,19 @@ and that it does not perform the final comparison step, essentially
 just returning the integer index of a possible hashed string (easily
 correctable).}
 My initial implementation used [[gperf]], but generating a perfect
-hash for the full Unicode set took 2 hours on my machine, and an
-additional 1 hour to compile.  Instead, I decided to go with the first
-thing I ever implemented in a compiler: a single hash table used for
-all strings in the system, preloaded with known symbols.
+hash for the full Unicode set took two hours on my machine, and an
+additional hour to compile.
 
-Of course a hash function may not even be ideal.  For example, Unicode
-regular expressions may allow searching for a name using a pattern.
-For that, the ideal structure is probably a suffix table.  Of
-course such structures can be much larger than the equivalent hash
-table.
-
----
-
-Algorithmically generated names other than Hangul syllables append
-their code point in hex, following a hyphen character.
+<<FIXME>>=
+name (UAX44-LM2):
+  ignore case, whitespace, underscore, and medial hyphens except 1180
+name (UTS18-2.5.1):
+  ignore case, whitespace, underscore, and all hyphens except 1180,
+     0F60, 0FB0
+  allow "namespace": prefix to apply if name doesn't match otherwise
+    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
+      insert CAPITAL and LOWER into appropriate spot.
+@
 
 ---
 
@@ -9471,7 +9662,8 @@ Hangul is more difficult, requiring character-by-character parsing.
 It might be possible to come up with a regular expression to do the
 match, but that would not help with returning the correct code point.
 Instead, lookup tables are used for all three parts.  The tables are
-filled from the abbreviations listed in Jamo.txt.
+generated by splitting the JSN proprety by jt property, and providing
+an easy-to-use lookup table.
 
 \lstset{language=make}
 <<makefile.vars>>=
@@ -9603,33 +9795,6 @@ return 0xAC00 + T + (NUM_JONG + 1) * (V + NUM_JUNG * L);
 
 ---
 
-To do reverse lookups, the static string should be returned.  However,
-for Unicode, we have to generate a name in case the name is
-algorithmically generated.
-
----
-
-Unicode is more difficult, of course, and not just because the name
-needs to be copied into an output buffer.  The first part is simple,
-and the same as for XML, though:  look up the code point in the name
-table.  The table is only filled with entries which are not
-automatically generated, so this might fail even if there is a good
-name.  Like with XML, the table is generated from the string data.
-
----
-
-For strings that are found, we are not done, though.  Unless of course
-no characters are actually to be copied out, since the length is
-indeed accurate.
-
----
-
-Next, we copy out the characters, converting them to upper-case.  They
-are stored lower-case in the symbol table because NFKC\_CF converts
-strings to lower-case for comparison.
-
----
-
 The other transformation which was done for easy comparison is to
 strip the dashes out.  To fix this, a table of dash locations is used.
 This table stores the offsets into the name of up to three dashes; no
@@ -9693,7 +9858,8 @@ the computed length.
 For Hangul, the computation of the letters to append is pretty simple,
 but the table already generated does not have the letters in the right
 order, so they are added again, but this time in all caps and in the
-right order, and without any additional data.
+right order, and without any additional data.  Note: JSN raw should
+work for this instead.
 
 <<Return Unicode name of [[cp]]>>=
 int t = (cp - 0xac00) % 28;
@@ -9761,252 +9927,9 @@ while(--tl >= 0)
 return fulllen;
 @
 
-
-
-\subsection{Parsing the UCD -- Others}
-
-[[BidiMirroring.txt]] contains the last officially supported string
-property.  However, like the simple case conversion properties, it
-always returns just a single code point, and is therefore encoded as a
-numeric property.
-
-<<Initialize UCD files>>=
-decl_num(bmg);
-@
-
-<<Parse UCD files>>=
-open_f("BidiMirroring.txt");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  <<Parse dotted cp>>
-  add_num(bmg, strtol(fields[1], NULL, 16), 1);
-}
-fclose(f);
-@
-
-While scx is officially an ``Other'' property, it can be treated just
-like a string.  The difference is that the string elements are script
-enumeration values, rather than code points.
-
+\lstset{language=txt}
 <<FIXME>>=
-Encode as 8-bit values instead
-@
-
-<<Initialize UCD files>>=
-decl_str(scx);
-@
-
-<<Parse UCD files>>=
-open_f("ScriptExtensions.txt");
-prop_scx = add_prop("scx");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  uint32_t str[32], len = 0;
-  <<Parse dotted cp>>
-  s = fields[1];
-  while(1) {
-    char *n = strchr(s, ' ');
-    if(n)
-      *n = 0;
-    str[len++] = enum_val(prop_sc, s);
-    if(!n)
-      break;
-    s = n + 1;
-  }
-  if(prop_scx < 0)
-    prop_scx = add_prop("scx");
-  add_str_rng(&parsed_props[prop_scx], low, high, str, len);
-}
-fclose(f);
-@
-
-<<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_scx], gen_h, tstf);
-@
-
-<<Parse UCD files>>=
-parsed_props[prop_scx].mt = (uint32_t *)~0; /* force addition to prop table */
-@
-
-Unofficially, [[Unihan_Variants]] provides some properties as well.
-Their fields are formatted differently, with U+ prefixes on every code
-point.  Of these properties, only cjkCompatibilityVariant has an
-official property name entry.
-
-\lstset{language=C}
-<<UCD parser local definitions>>=
-#define add_hstr(n, v) do { \
-  if(prop_##n < 0) \
-    prop_##n = add_prop(#n); \
-  if(*v) { \
-    uint32_t str[10]; \
-    uint32_t len; \
-    for(s = v, len = 0; *s; len++) { \
-      while(isspace(*s)) s++; \
-      if(*s == 'U') \
-        s += 2; \
-      str[len] = strtol(s, &s, 16); \
-    } \
-    add_str_rng(&parsed_props[prop_##n], low, high, str, len); \
-  } \
-} while(0)
-@
-
-<<Initialize Unihan files>>=
-decl_str(cjkTraditionalVariant);
-decl_str(cjkSimplifiedVariant);
-decl_str(cjkCompatibilityVariant);
-@
-
-<<Parse Unihan files>>=
-open_f("Unihan_Variants.txt");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  <<Parse Unihan cp>>
-  if(!strcmp(fields[1], "kTraditionalVariant"))
-    add_hstr(cjkTraditionalVariant, fields[2]);
-  else if(!strcmp(fields[1], "kSimplifiedVariant"))
-    add_hstr(cjkSimplifiedVariant, fields[2]);
-  else if(!strcmp(fields[1], "kCompatibilityVariant"))
-    add_hstr(cjkCompatibilityVariant, fields[2]);
-}
-@
-
-<<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_cjkTraditionalVariant], gen_h, tstf);
-dump_str_tabs(&parsed_props[prop_cjkSimplifiedVariant], gen_h, tstf);
-dump_str_tabs(&parsed_props[prop_cjkCompatibilityVariant], gen_h, tstf);
-@
-
-<<Parse Unihan files>>=
-/* force addition to prop table */
-parsed_props[prop_cjkTraditionalVariant].mt = (uint32_t *)~0;
-parsed_props[prop_cjkSimplifiedVariant].mt = (uint32_t *)~0;
-parsed_props[prop_cjkCompatibilityVariant].mt = (uint32_t *)~0;
-@
-
-Another optional string value comes from the IDNA compatiblity
-database.  This is available from a separate location
-(\url{http://www.unicode.org/Public/idna/}), but is only checked for
-in the UCD directory and a few minor variants.  If not present, it is
-ignored.  The IDNA\_Status property is technically an enumeration, but
-since it has no value aliases, it is instead accumulated as a string
-property.  It is then converted to an enumeration.
-
-<<FIXME>>=
-support storing strings as 8-bit ASCII (probably in str section above)
-@
-
-<<Initialize UCD files>>=
-decl_str(IDNA_Status);
-decl_str(IDNA_Mapping);
-@
-
-<<Parse UCD files>>=
-if((f = fopen("IdnaMappingTable.txt", "r")) ||
-   (f = fopen("idna/IdnaMappingTable.txt", "r")) ||
-   (f = fopen("../idna/IdnaMappingTable.txt", "r"))) {
-  while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-    <<Parse dotted cp>>
-    add_str_raw(IDNA_Status, fields[1]);
-    if(num_fields > 2)
-      add_str(IDNA_Mapping, fields[2]);
-  }
-  fclose(f);
-  str_to_enum(&parsed_props[prop_IDNA_Status], "disallowed");
-}
-@
-
-<<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_IDNA_Mapping], gen_h, tstf);
-@
-
-<<Parse UCD files>>=
-parsed_props[prop_IDNA_Mapping].mt = (uint32_t *)~0; /* force addition to prop table */
-@
-
-<<UCD parser local functions>>=
-static void str_to_enum(prop_t *p, const char *def)
-{
-  uint32_t i, poff = 0, plen = 0, pnum = (uint32_t)(p - parsed_props);
-  int32_t seq = -1;
-
-  merge_strs(p);
-  p->def = def ? ~0 : 0;
-  inisize(val_aliases[pnum], max_val_aliases[pnum] = 5);
-  inisize(p->rng_dat8, p->len);
-  for(i = 0; i < p->len; i++) {
-    if(p->str_arr[i].off == poff && p->str_arr[i].len == plen) {
-      p->rng_dat8[i].low = p->rng_dat8[i].high = p->str_arr[i].cp;
-      p->rng_dat8[i].dat = seq;
-      continue;
-    }
-    seq++;
-    poff = p->str_arr[i].off;
-    plen = p->str_arr[i].len;
-    if(num_val_aliases[pnum] == max_val_aliases[pnum])
-      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
-    {
-      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
-      char *n;
-      inisize(n, plen * 4 + 1);
-      memcpy(n, (char *)(p->strs + poff), plen * 4);
-      n[plen * 4] = 0;
-      if(def && !strcmp(n, def))
-        p->def = seq;
-      va->short_name = va->long_name = n;
-      va->alt_name = va->alt_name2 = NULL;
-      num_val_aliases[pnum]++;
-    }
-    i--; /* re-run for current item to actually add it */
-  }
-  if(p->def == (uint8_t)~0) {
-    p->def = seq;
-    if(num_val_aliases[pnum] == max_val_aliases[pnum])
-      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
-    {
-      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
-      va->short_name = va->long_name = strdup(def);
-      va->alt_name = va->alt_name2 = NULL;
-      num_val_aliases[pnum]++;
-    }
-  }
-  inisize(enum_vals[pnum], enum_vals_len[pnum] = num_val_aliases[pnum]);
-  for(i = 0; i < enum_vals_len[pnum]; i++) {
-    enum_vals[pnum][i].name = strdup(val_aliases[pnum][i].short_name);
-    enum_vals[pnum][i].val = i;
-  }
-  /* while strs was sorted, it was sorted by long word, not byte */
-  /* this sort is really only necessary on little-endian systems */
-  qsort(enum_vals[pnum], enum_vals_len[pnum], sizeof(*enum_vals[pnum]),
-        uni_cmp_valueof);
-  free(p->strs);
-  p->strs = NULL;
-  free(p->str_arr);
-  p->str_arr = NULL;
-}
-@
-
-Similarly, the security information database, available separately at
-\url{http://www.unicode.org/Public/security/}, contains two optional
-enumeration properties without value aliases.
-
-<<Initialize UCD files>>=
-decl_str(ID_Restrict_Status);
-decl_str(ID_Restrict_Type);
-@
-
-<<Parse UCD files>>=
-if((f = fopen("xidmodifications.txt", "r")) ||
-   (f = fopen("security/xidmodifications.txt", "r")) ||
-   (f = fopen("../security/xidmodifications.txt", "r"))) {
-  while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-    <<Parse dotted cp>>
-    add_str_raw(ID_Restrict_Status, fields[1]);
-    if(num_fields > 2)
-      add_str_raw(ID_Restrict_Type, fields[2]);
-  }
-  fclose(f);
-  str_to_enum(&parsed_props[prop_ID_Restrict_Status], "restricted");
-  str_to_enum(&parsed_props[prop_ID_Restrict_Type], "not-chars");
-}
+Document lack of NamesList.txt (informative, harder to parse, mostly useless)
 @
 
 \subsection{Parsing the UCD -- DUCET}
@@ -10043,13 +9966,6 @@ character (and in fact the well-formedness rules require this),
 multiple entries with the same [[cp]] are created, but the raw string
 table storage method does not care.
 
-<<FIXME>>=
-If strings are UTF-16, assumptions need to be made about data.  Maybe
-move reformatting to 32-bit l123 here, and split into two words, and
-always encode l4 as 2 words (split UTF-32).  That way length comments
-still hold.
-@
-
 In addition to the DUCET itself, the data files include the same data
 adjusted for use with the CLDR (\texttt{allkeys\_CLDR.txt} in
 \texttt{CollationAuxiliary.zip}).  This file is in the same format. 
@@ -10059,6 +9975,7 @@ locale extension \texttt{u-co-standard}.  The CLDR still requires the
 normal DUCET; it can be selected manually using the locale extension
 \texttt{u-co-ducet}.
 
+\lstset{language=C}
 <<Initialize UCD files>>=
 decl_str(DUCET);
 decl_str(DUCET_CLDR);
@@ -10339,12 +10256,6 @@ index string, it can no longer be detected by length alone.  Since
 every character can be encoded in fewer than 30 bits, the extra index
 characters are simply shifted left two, leaving the lower two bits for
 special encoding as above:
-
-<<FIXME>>=
-If encoding as UTF-16, it is impossible to use the lower bits of
-normal chars.  That screws up everything.  How do we flag normal chars
-vs. other stuff?
-@
 
 \begin{itemize}
 \item 3: This word is actually part of the collation element (index)
@@ -13103,16 +13014,311 @@ Mark groups for logical positioning in locale reordering
     variable top refers to default, not user setting
 @
 
+\subsection{Parsing the UCD -- Others}
+
+[[BidiMirroring.txt]] contains the last officially supported string
+property.  However, like the simple case conversion properties, it
+always returns just a single code point, and is therefore encoded as a
+numeric property.
+
+\lstset{language=C}
+<<Initialize UCD files>>=
+decl_num(bmg);
+@
+
+<<Parse UCD files>>=
+open_f("BidiMirroring.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_num(bmg, strtol(fields[1], NULL, 16), 1);
+}
+fclose(f);
+@
+
+While scx is officially an ``Other'' property, it can be treated just
+like a string.  The difference is that the string elements are script
+enumeration values, rather than code points.  The values fit in a
+byte, so it's tempting to encode it as 8 bits, but there are zeroes in
+the values, which makes the string table dumper sometimes strip them.
+The table is small enough that the savings wouldn't be great, anyway.
+
+<<Initialize UCD files>>=
+decl_str(scx);
+@
+
+<<Parse UCD files>>=
+open_f("ScriptExtensions.txt");
+prop_scx = add_prop("scx");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  uint32_t str[32], len = 0;
+  <<Parse dotted cp>>
+  s = fields[1];
+  while(1) {
+    char *n = strchr(s, ' ');
+    if(n)
+      *n = 0;
+    str[len++] = enum_val(prop_sc, s);
+    if(!n)
+      break;
+    s = n + 1;
+  }
+  if(prop_scx < 0)
+    prop_scx = add_prop("scx");
+  add_str_rng(&parsed_props[prop_scx], low, high, str, len);
+}
+fclose(f);
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_scx], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+parsed_props[prop_scx].mt = (uint32_t *)~0; /* force addition to prop table */
+@
+
+\lstset{language=txt}
+<<FIXME>>=
+Change 8-bit array format to require byte length instead of word
+length, so scx can be dumped 8-bit (as well as any others with 0 in data)
+@
+
+<<FIXME>>=
+EmojiSources.txt
+  field 1 = index (may be multi-char)
+  field 2 = 16-bit DoCoMo Shift-JIS code
+  field 3 = 16-bit KDDI Shift-JIS code
+  field 4 = 16-bit SoftBank Shift-JIS code
+  [may add more fields in the future]
+ encoding: all 3 fields as 16-bit numbers (0 if absent), followed by index ext
+   # of fields is given as #define
+   can't really provide vendor name to field # mapping w/o parsing comments
+     '# <n - 1>: <vendor> Shift-JIS code'
+ property name = ???
+StandardizedVariants.txt
+  Field 2: English descriptive text; probably not really useful for computers
+  Field 3 could be enumerated, but is useless w/o field 2
+USourceData.txt: [note: uses cr for line termination]
+  Hard to say if it's useful outside of IRG.  Index is U-source ID,
+  not Unicode code point (UTC-x or UCI-x).  See tr45.
+@
+
+Unofficially, [[Unihan_Variants]] provides some properties as well.
+Their fields are formatted differently, with U+ prefixes on every code
+point.  Of these properties, only cjkCompatibilityVariant has an
+official property name entry.  Only Traditional, Simplified, and
+Compatibility variants are needed for regular expressions.  The others
+(Semantic, SpecializedSemantic, and Z) will not be read into a
+property unless I find a use for them.  Part of the reason for this is
+that these properties contain additional information, in the form of
+providence annotations.  The annotations could simply be dropped and
+those properties added without issue (after all, static linking
+ensures their removal if unused), but for now, they are left out.
+
+\lstset{language=C}
+<<UCD parser local definitions>>=
+#define add_hstr(n, v) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  if(*v) { \
+    uint32_t str[10]; \
+    uint32_t len; \
+    for(s = v, len = 0; *s; len++) { \
+      while(isspace(*s)) s++; \
+      if(*s == 'U') \
+        s += 2; \
+      str[len] = strtol(s, &s, 16); \
+    } \
+    add_str_rng(&parsed_props[prop_##n], low, high, str, len); \
+  } \
+} while(0)
+@
+
+<<Initialize Unihan files>>=
+decl_str(cjkTraditionalVariant);
+decl_str(cjkSimplifiedVariant);
+decl_str(cjkCompatibilityVariant);
+@
+
+<<Parse Unihan files>>=
+open_f("Unihan_Variants.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse Unihan cp>>
+  if(!strcmp(fields[1], "kTraditionalVariant"))
+    add_hstr(cjkTraditionalVariant, fields[2]);
+  else if(!strcmp(fields[1], "kSimplifiedVariant"))
+    add_hstr(cjkSimplifiedVariant, fields[2]);
+  else if(!strcmp(fields[1], "kCompatibilityVariant"))
+    add_hstr(cjkCompatibilityVariant, fields[2]);
+}
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_cjkTraditionalVariant], gen_h, tstf);
+dump_str_tabs(&parsed_props[prop_cjkSimplifiedVariant], gen_h, tstf);
+dump_str_tabs(&parsed_props[prop_cjkCompatibilityVariant], gen_h, tstf);
+@
+
+<<Parse Unihan files>>=
+/* force addition to prop table */
+parsed_props[prop_cjkTraditionalVariant].mt = (uint32_t *)~0;
+parsed_props[prop_cjkSimplifiedVariant].mt = (uint32_t *)~0;
+parsed_props[prop_cjkCompatibilityVariant].mt = (uint32_t *)~0;
+@
+
+\lstset{language=txt}
+<<FIXME>>=
+Unihan_DictionaryLikeData.txt:  kCangjie, kCheungBaur, kHDZRadBreak
+Unihan_Readings.txt: kCantonese, kDefinition, ...
+@
+
+Another pair of optional string values comes from the IDNA compatiblity
+database%
+\footnote{Actually, there is a third field (IDNA2008 status), but it
+is informative, and will not be read in as a property unless I find a
+use.}%
+.  This is available from a separate location
+(\url{http://www.unicode.org/Public/idna/}), but is only checked for
+in the UCD directory and a few minor variants.  If not present, it is
+ignored.  The IDNA\_Status property is technically an enumeration, but
+since it has no value aliases, it is instead accumulated as a string
+property.  It is then converted to an enumeration.
+
+\lstset{language=C}
+<<Initialize UCD files>>=
+decl_str(IDNA_Status);
+decl_str(IDNA_Mapping);
+@
+
+<<Parse UCD files>>=
+if((f = fopen("IdnaMappingTable.txt", "r")) ||
+   (f = fopen("idna/IdnaMappingTable.txt", "r")) ||
+   (f = fopen("../idna/IdnaMappingTable.txt", "r"))) {
+  while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+    <<Parse dotted cp>>
+    add_str8(IDNA_Status, fields[1]);
+    if(num_fields > 2)
+      add_str(IDNA_Mapping, fields[2]);
+  }
+  fclose(f);
+  str_to_enum(&parsed_props[prop_IDNA_Status], "disallowed");
+  parsed_props[prop_IDNA_Mapping].strs_char_size = 8;
+}
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_IDNA_Mapping], gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+parsed_props[prop_IDNA_Mapping].mt = (uint32_t *)~0; /* force addition to prop table */
+@
+
+<<UCD parser local functions>>=
+static void str_to_enum(prop_t *p, const char *def)
+{
+  uint32_t i, poff = 0, plen = 0, pnum = (uint32_t)(p - parsed_props);
+  int32_t seq = -1;
+
+  merge_strs(p);
+  p->def = def ? ~0 : 0;
+  inisize(val_aliases[pnum], max_val_aliases[pnum] = 5);
+  inisize(p->rng_dat8, p->len);
+  for(i = 0; i < p->len; i++) {
+    if(p->str_arr[i].off == poff && p->str_arr[i].len == plen) {
+      p->rng_dat8[i].low = p->rng_dat8[i].high = p->str_arr[i].cp;
+      p->rng_dat8[i].dat = seq;
+      continue;
+    }
+    seq++;
+    poff = p->str_arr[i].off;
+    plen = p->str_arr[i].len;
+    if(num_val_aliases[pnum] == max_val_aliases[pnum])
+      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    {
+      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
+      char *n;
+      inisize(n, plen * 4 + 1);
+      memcpy(n, (char *)(p->strs + poff), plen * 4);
+      n[plen * 4] = 0;
+      if(def && !strcmp(n, def))
+        p->def = seq;
+      va->short_name = va->long_name = n;
+      va->alt_name = va->alt_name2 = NULL;
+      num_val_aliases[pnum]++;
+    }
+    i--; /* re-run for current item to actually add it */
+  }
+  if(p->def == (uint8_t)~0) {
+    p->def = seq;
+    if(num_val_aliases[pnum] == max_val_aliases[pnum])
+      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    {
+      uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
+      va->short_name = va->long_name = strdup(def);
+      va->alt_name = va->alt_name2 = NULL;
+      num_val_aliases[pnum]++;
+    }
+  }
+  inisize(enum_vals[pnum], enum_vals_len[pnum] = num_val_aliases[pnum]);
+  for(i = 0; i < enum_vals_len[pnum]; i++) {
+    enum_vals[pnum][i].name = strdup(val_aliases[pnum][i].short_name);
+    enum_vals[pnum][i].val = i;
+  }
+  /* while strs was sorted, it was sorted by long word, not byte */
+  /* this sort is really only necessary on little-endian systems */
+  qsort(enum_vals[pnum], enum_vals_len[pnum], sizeof(*enum_vals[pnum]),
+        uni_cmp_valueof);
+  free(p->strs);
+  p->strs = NULL;
+  free(p->str_arr);
+  p->str_arr = NULL;
+}
+@
+
+Similarly, the security information database, available separately at
+\url{http://www.unicode.org/Public/security/}, contains two optional
+enumeration properties without value aliases.
+
+<<Initialize UCD files>>=
+decl_str(ID_Restrict_Status);
+decl_str(ID_Restrict_Type);
+@
+
+<<Parse UCD files>>=
+if((f = fopen("xidmodifications.txt", "r")) ||
+   (f = fopen("security/xidmodifications.txt", "r")) ||
+   (f = fopen("../security/xidmodifications.txt", "r"))) {
+  while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+    <<Parse dotted cp>>
+    add_str8(ID_Restrict_Status, fields[1]);
+    if(num_fields > 2)
+      add_str8(ID_Restrict_Type, fields[2]);
+  }
+  fclose(f);
+  str_to_enum(&parsed_props[prop_ID_Restrict_Status], "restricted");
+  str_to_enum(&parsed_props[prop_ID_Restrict_Type], "not-chars");
+}
+@
+
+\lstset{language=txt}
+<<FIXME>>=
+security/intentional.txt: could be numeric (char-to-char mapping) (propname?)
+security/confusables.txt: propname? 4 props or field 3 as part of value?
+security/confusablesWholeScript.txt: propname?
+  could be plain 32-bit value: <from><to><type>, but there are dup indices
+@
+
 \chapter{XML Data Files}
 
-As mentioned in the introduction, the XML standard's entity names are
-generally much shorter than Unicode names, so a facility to use them
-instead is provided.  This requires parsing the XML entity database.
-One way to deal with this would be to turn it into a simple-to-parse
-format using XSLT.  An earlier version of this library did just that.
-However, since there are other XML files to parse as well, and
-everything else is being done in parse-ucd, it is now read in directly
-using libxml2.%
+A number of data files outside of the UCD are encoded in XML.  These
+include in particular the CLDR files.  One way to deal with this would
+be to turn the files into files more like the rest of the UCD using
+CLDR.  In fact, an earlier version of this library did just that for
+the single XML file it supported.  The CLDR has many more files,
+though, and not all are in the same format, so something else needs to
+be done.  Since everything else is being parsed in parse-ucd,
+parse-ucd will read and parse the XML files directly, usoing libxml2.%
 \footnote{\url{http://xmlsoft.org/}}
 For maximum simplicity, each file is simply read in using the
 document-at-once
@@ -13124,6 +13330,7 @@ XML structure can be freed when finished.  Scanning the tree is done
 using manual traversal.  While the associated libxslt could be used to
 run the old code directly, the C code is actually much simpler.
 
+\lstset{language=C}
 <<UCD parser local definitions>>=
 #include <libxml/parser.h>
 #include <libxml/xmlerror.h>
@@ -13135,7 +13342,6 @@ XML_CFLAGS := $(shell xml2-config --cflags)
 XML_LDFLAGS := $(shell xml2-config --libs)
 # adding xml flags only to PARSER_CFLAGS would be nice, but hard
 # to integrate w/ static_proto gen
-PARSER_CFLAGS += -DXMLUNI=\"$(XMLUNI)\"
 EXTRA_CFLAGS += $(XML_CFLAGS)
 PARSER_LDFLAGS += $(XML_LDFLAGS)
 @
@@ -13153,12 +13359,28 @@ PARSER_LDFLAGS += $(XML_LDFLAGS)
 
 <<Parse character data files>>=
 xmlInitParser();  /* xmlCleanupParser() when done */
-xmlDocPtr doc = xmlReadFile(XMLUNI, NULL, xml_opts);
+xmlDocPtr doc; /* the document under consideration */
+xmlNodePtr n, c; /* for traversing the nodes */
+@
+
+\section{XML Entity Names}
+
+As mentioned in the introduction, the XML standard's entity names are
+generally much shorter than Unicode names, so a facility to use them
+instead is provided.  This requires parsing the XML entity database.
+
+\lstset{language=make}
+<<makefile.vars>>=
+PARSER_CFLAGS += -DXMLUNI=\"$(XMLUNI)\"
+@
+
+\lstset{language=C}
+<<Parse character data files>>=
+doc = xmlReadFile(XMLUNI, NULL, xml_opts);
 if(!doc) {
   perror(XMLUNI);
   exit(1);
 }
-xmlNodePtr n;
 for(n = doc->children; n; n = n->next)
   if(n->children && xml_isname(n, "unicode"))
     break;
@@ -13167,6 +13389,7 @@ if(!n) {
   exit(1);
 }
 @
+
 
 The name database has subsets called groups.  Using every single name
 is certain to frequently collide with Unicode names, so a particular
@@ -13199,7 +13422,6 @@ int ngrp_set;
 @
 
 <<Parse character data files>>=
-xmlNodePtr c;
 for(c = n->children; c; c = c->next) {
   if(!c->children || !xml_isname(c, "entitygroups"))
     continue;
@@ -13245,19 +13467,13 @@ static int sort_strcmp(const void *a, const void *b)
 Once the group's set names are known, the charlist is scanned for
 character tags with an entity descriptor belonging to one of those
 sets.  The id of the entity is the entity name, and the id of the
-character is the Unicode code point.  Some of these define
-multi-character code points; these are added into a separate
-psuedo-property, similar to the Unicode named sequences.  Like the
-Unicode named sequences, the entries are indexed by the first
-character, and remaining characters of the index are the initial part
-of the string value, with the length in the upper byte of the first
-word.  In practice, no sequences are more than two characters, but it
-doesn't hurt to generically support more.
+character is the Unicode code point.  Some names are for
+multi-code-point sequences, similar to the Unicode named sequences.
+For now, sequences are read into a separate property.
 
 <<Parse character data files>>=
-decl_str(xmlname);
-decl_str(xmlnameseq);
-prop_xmlnameseq = add_prop("xmlnameseq");
+decl_str(na_xml);
+decl_str(naseq_xml);
 for(n = n->children; n; n = n->next)
   if(n->children && xml_isname(n, "charlist"))
     break;
@@ -13284,33 +13500,179 @@ for(n = n->children; n; n = n->next) {
       low = high = strtol(cid + 1, NULL, 16);
       /* note: duplicates will occur: */
       /*   both fully duplicated entries and multiple names for one cp */
-      add_str_raw(xmlname, eid);
-    } else {
-      uint32_t str[64], *strp;
-      low = high = strtol(cid + 1, &s, 16);
-      for(strp = str; *s; strp++)
-        *strp = strtol(++s, &s, 16);
-      str[0] |= (strp - str) << 24;
-      uint32_t len = strlen(fields[0]);
-      strp[len / 4] = 0;
-      memcpy(strp, eid, len);
-      len = (len + 3) / 4 + (int)(strp - str);
-      add_str_rng(&parsed_props[prop_xmlnameseq], low, high, str, len);
-    }
+      add_str8(na_xml, eid);
+    } else
+      add_strseq(naseq_xml, cid + 1, eid);
     xmlprop_free(set);
     xmlprop_free(eid);
     xmlprop_free(cid);
   }
 }
 xmlFreeDoc(doc);
+parsed_props[prop_na_xml].strs_char_size = 8;
 @
 
-<<Parse character data files>>=
-/* for testing to see if read properly */
-#if 0
-str_to_enum(&parsed_props[prop_xmlname], NULL);
-#endif
+Some Unicode code points have multiple names, and of course some
+sequences may have the same starting index.  Both of these problems
+can be solved the same way as named sequence conflicts were solved:
+by providing a linear search list of all values with length bytes to
+skip over them.  Since this encoding needs to be done on the main
+string table as well, both tables may as well be combined in the
+process.
+
+One possible optimization would be to detect the lack of multiple
+entries immediately.  This can be detected either by reading an actual
+length byte, or by noting that there are no length bytes.  The latter
+requires encoding the length byte distinctly from any character in the
+name.  Since name lengths never exceed 32, the name length portion can
+be reduced by one bit, shifting the sequence count down, and leaving
+room to set the high bit for lengths.
+
+Another required modification to the length byte is that Unicode named
+sequences always have between one and four index extension characters,
+whereas this table will have between zero and two (at least using the
+current [[unicode.xml]] and the 2007 group).  Thus the index extension
+length needs to have one added to leave room for zero-length extensions.
+
+So, in order to merge the arrays and process duplicates and multiple
+values per index in the main array at the same time, the first thing
+to do is simply append the name sequence array to the main array,
+processing each entry as needed.  This processing simply adjusts the
+length byte as described above, and moves the string contents to the
+main string content array.
+
+<<Post-process property data>>=
+prop_t *xna = &parsed_props[prop_na_xml];
+prop_t *xnaseq = &parsed_props[prop_naseq_xml];
+/* adjust counts so they have high bit set */
+/* also, set (index ext len) - 1 to (index ext len) */
+/* also, copy to xna array */
+while(xna->len + xnaseq->len > xna->max_len)
+  resize(xna->str_arr, xna->max_len *= 2);
+raw_cp_str_t *xna_str = xna->str_arr, *xnaseq_str = xnaseq->str_arr;
+for(i = 0; i < xnaseq->len; i++) {
+  int len = xnaseq_str[i].len;
+  uint32_t *p32 = xnaseq->strs + xnaseq_str[i].off;
+  uint8_t *p8 = (uint8_t *)(p32 + len);
+  while(!*--p8);
+  uint8_t nlen = *p8, extlen = (nlen >> 6) + 1;
+  nlen = (nlen & 0x3f) + 1;
+  *p8 = (nlen - 1) | (extlen << 5) | 0x80;
+  xna_str[xna->len + i] = xnaseq_str[i];
+  xna_str[xna->len + i].off = xna->strs_len;
+  while(xna->strs_len + len > xna->max_strs)
+    resize(xna->strs, xna->max_strs *= 2);
+  memcpy(xna->strs + xna->strs_len, xnaseq->strs + xnaseq_str[i].off, len * 4);
+  xna->strs_len += len;
+}
+xna->len += xnaseq->len;
 @
+
+Once the arrays have been merged, the name sequence array is no longer
+needed.  Technically, it does not need to be freed (I don't free any
+of the other arrays either, until the end of the program), but doing
+so is harmless.
+
+<<Post-process property data>>=
+free(xnaseq->strs);
+free(xnaseq_str);
+clearbuf(xnaseq, 1);
+@
+
+Next, all duplicates need to be removed.  In addition, even though the
+length byte modification eliminates the need for a length byte on
+every string, the 16-bit index extensions impose an alignment
+restriction that require padding on some elements.  If padding is
+needed, it is added in the form of a one, which cannot be a length
+byte or a valid name character.
+
+<<Post-process property data>>=
+qsort(xna_str, xna->len, sizeof(*xna_str), uni_cmp_cp);
+for(i = xna->len - 1; i > 0; i--) {
+  /* collect entries w/ same cp */
+  for(low = i - 1; low > 0; low--)
+    if(xna_str[i].cp != xna_str[low].cp)
+      break;
+  if(++low == i) {
+    <<Pad unique XML name if needed>>
+    continue;
+  }
+  high = i;
+  /* mark exact duplicates as cp == ~0 */
+  /* could improve the speed of this by sorting first, but why bother? */
+  for(j = low; j < high; j++) {
+    unsigned int k;
+    if(xna_str[j].cp == (uint32_t)~0)
+      continue;
+    for(k = j + 1; k <= high; k++)
+      if(xna_str[k].cp != (uint32_t)~0 && xna_str[j].len == xna_str[k].len &&
+         !memcmp(xna->strs + xna_str[j].off, xna->strs + xna_str[k].off,
+	         xna_str[k].len))
+        xna_str[k].cp = ~0;
+  }
+  /* now create new entry w/ all unique entries from list */
+  int max_ent_len = 0;
+  for(j = low; j <= high; j++) {
+    if(xna_str[j].cp == (uint32_t)~0)
+      continue;
+    /* + 2 is for length byte & padding */
+    max_ent_len += xna_str[j].len * 4 + 2;
+  }
+  if(max_ent_len == xna_str[low].len * 4 + 2) {
+    /* only one was added, so there is only one unique name */
+    <<Pad unique XML name if needed>>
+  } else {
+    max_ent_len = (max_ent_len + 3) / 4;
+    while(xna->max_strs < xna->strs_len + max_ent_len)
+      resize(xna->strs, xna->max_strs *= 2);
+    uint8_t *p8 = (uint8_t *)(xna->strs + xna->strs_len);
+    for(j = low; j <= high; j++) {
+      if(xna_str[j].cp == (uint32_t)~0)
+        continue;
+      int elen = xna_str[j].len * 4;
+      memcpy(p8, xna->strs + xna_str[j].off, elen);
+      while(!p8[elen - 1])
+        elen--;
+      if(!(p8[elen - 1] & 0x80)) {
+	if(!(elen % 2))
+	  p8[elen++] = 0;
+        p8[elen] = 0x80 | (elen - 1);
+	elen++;
+      }
+      p8 += elen;
+    }
+    max_ent_len = p8 - (uint8_t *)(xna->strs + xna->strs_len);
+    while(max_ent_len % 4) {
+      *p8++ = 0;
+      max_ent_len++;
+    }
+    xna_str[low].off = xna->strs_len;
+    xna_str[low].len = max_ent_len / 4;
+    xna->strs_len += max_ent_len / 4;
+  }
+  /* remove all but generated entry */
+  memmove(xna_str + low + 1, xna_str + high, xna->len - high);
+  xna->len -= (high - low) + 1;
+  if(!(i = low))
+    break;
+}
+@
+
+<<Pad unique XML name if needed>>=
+/* no duplicates: no length byte needed, but maybe padding */
+uint8_t *p8 = (uint8_t *)(xna->strs + xna_str[low].off);
+int elen = xna_str[low].len * 4;
+while(!p8[elen - 1])
+  elen--;
+if(elen % 2)
+  p8[elen] = 1; /* force padding to 16 bits */
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_na_xml], gen_h, tstf);
+@
+
+\section{The CLDR}
 
 The CLDR also uses XML rather than simple tables.  Doing hand-coded
 XSLT for hundreds of data files seemed excessive, which is the main
@@ -14270,7 +14632,7 @@ for regex:
   string property "exemplar" is UnicodeSet ldml/characters/exmplarCharacters
 @
 
-\chapter{Testing}
+\chapter{Additional Testing}
 
 Here is a master driver to call some of the above code for testing.
 
@@ -14513,6 +14875,11 @@ int main(void)
 #endif
 @
 
+\lstset{language=txt}
+<<FIXME>>=
+Unihan_IRGSources.txt: kIRG_* (not sure how to encode)
+@
+
 \chapter{Code Index}
 \nowebchunks
 
@@ -14714,9 +15081,12 @@ target format (e.g. 32-bit words for UTF-32) written to the file on
 success, and zero or less on failure.  If the failure was due to a
 short write, the return value is the negative of the number of words
 actually written.  Use [[ferror]] to distinguish between invalid input
-and read/write errors.  The readers return $-1$ if no characters could
-be read, $-2$ on a short (less than a full code point) read, $-3$ on
-invalid code points, and otherwise the read character.
+and read/write errors.  The readers return
+% Begin-doc utf-reader-ret
+$-1$ if no characters could be read, $-2$ on a short (less than a full
+code point) read, $-3$ on invalid code points, and otherwise the read
+character.
+% End-doc utf-reader-ret
 
 Note that due to limitations of the C [[FILE]] API, it may not be
 possible to recover from errors reading UTF-16 input.  A read of an
@@ -14745,25 +15115,47 @@ the (short) number of bytes written.
 
 % uni_utf8_fputs prototype
 
-Reading files whose encoding is unknown (e.g. UTF-16 and UTF-32) is
-supported by a separate mechanism.  Instead of using the standard C
-[[FILE]] type, it uses the opaque type [[uni_file_t]].  Functions to
-open, close, and read from such files are provided.
+Reading files whose encoding is unknown (e.g. UTF-16 and UTF-32, whose
+endianness is determined by the file contents) is supported by a
+separate mechanism.  Instead of using the standard C [[FILE]] type, it
+uses the opaque type [[uni_file_t]].  Functions to open, close, and
+read from such files are provided.
 
 The [[uni_fopen]] function supports multiple input file encodings, as
 specified by the [[encoding]] parameter.  If the library was compiled
 with [[iconv]] support, all available input encodings for [[iconv]]
-are supported.  Otherwise, only ASCII (\verb|ANSI_X3.4-1968|;
-range unchecked), ISO Latin-1 (\verb|ISO-8859-1|), and generic Unicode
-are supported.  In either case, generic Unicode can be specified using
-\verb|UTF-8|.  The default (if [[encoding]] is [[NULL]]) is to use
+are supported.  Otherwise, only the raw input formats, listed below,
+are supported.  The default (if [[encoding]] is [[NULL]]) is to use
 the current locale's encoding if [[iconv]] support is compiled in and
-the current locale's encoding can be obtained, or \verb|UTF-8|
+the current locale's encoding can be obtained, or \verb|UTF|
 (generic Unicode) if not.
 
-For generic Unicode input, if the first character could be Byte Order
-Mark (U+FEFF) in any supported format, it is considered to be one, and
-the format of the file is the format of that Byte Order Mark:
+\paragraph*{Built-in Unicode encodings (case-sensitive):}
+\begin{quote}
+\begin{description}
+\item[ANSI\_X3.4-1968] --- ASCII (i.e., raw bytes; no range checking)
+\item[ISO-8859-1] --- ISO Latin-1 (i.e., raw bytes)
+\item[UTF] --- Automatically detected UTF mode
+\item[UTF-8] --- UTF-8
+\item[UTF-16] --- UTF-16; if first character in file is U+FEFF in
+inverse native byte order, use that order; otherwise, use native byte order
+\item[UTF-16LE] --- Little-endian UTF-16
+\item[UTF-16BE] --- Big-endian UTF-16
+\item[UTF-32] --- UTF-32; if first character in file is U+FEFF in
+inverse native byte order, use that order; otherwise, use native byte order
+\item[UTF-32LE] --- Little-endian UTF-32
+\item[UTF-32BE] --- Big-endian UTF-32
+\end{description}
+\end{quote}
+
+Note that unlike [[uni_utf16_getc]], all of the internal encoding
+types consume the longest erroneous sequence, and no more, when an
+encoding error is encountered.
+
+For generic Unicode input ([["UTF"]]), if the first character could be
+Byte Order Mark (U+FEFF) in any supported format, it is considered to
+be one, and the format of the file is the format of that Byte Order
+Mark:
 
 \begin{quote}
 \begin{tabular}{ll}
@@ -14783,14 +15175,10 @@ there is no valid UTF-8 character which starts with FF or FE, so there
 should be no conflict.  Also, the Byte Order Mark is part of the file
 data, so it is returned as the first character.
 
-Also note that there is no problem recovering from short multi-word
-sequences in UTF-16 files as there was with [[uni_utf16_getc]].
-
 The return value for [[uni_fopen]] is [[NULL]] on error, or a pointer
 to the file structure.  This structure is freed by [[uni_fclose]].
-The [[uni_fgetc]] return value is the same as the return value from
-the readers above:  the number of characters read on success, and less
-than zero on error.
+The [[uni_fgetc]] return value is
+\input{utf-reader-ret.tex} %%% doc
 
 % uni_fopen prototype
 % uni_fclose prototype
@@ -14804,11 +15192,16 @@ normalization type names:  [[UNI_NORM_NFD]], [[UNI_NORM_NFKD]],
 completeness, no normalization can be specified using
 [[UNI_NORM_NONE]], although it is cheaper to just use [[uni_fgetc]].
 
-Since normalization needs lookahead, the entire file must be read
-using this function in order for it to work properly.  Changing the
-normalization type mid-stream is also generally not supported, since
-any normalization in progress will not be affected.  Calling this
-function after an error or EOF is returned is not supported, either.
+The entire file must be read using this function in order for it to
+work properly.  Changing the normalization type mid-stream is also
+generally not supported, since any normalization in progress will not
+be affected.
+
+Errors in the input stream are ignored.  Encoding errors and invalid
+Unicode characters (surrogates and code points larger than
+[[0x10FFFF]]) are converted to U+FFFD, REPLACEMENT CHARACTER.  There
+is no way to determine the difference between the presence of an
+actual REPLACEMENT CHARACTER and invalid text.
 
 % uni_fgetc_norm prototype
 
@@ -15482,7 +15875,7 @@ dm&canon\_decomp&compat\_decomp&canon\_comp\\
 lc&uc&tc&cf\\
 tcf&NFKC\_CF&cjkTraditionalVariant&cjkSimplifiedVariant\\
 cjkCompatibilityVariant&IDNA\_Mapping&DUCET&DUCET\_CLDR\\
-rev\_DUCET&rev\_DUCET\_CLDR&scx\\
+rev\_DUCET&rev\_DUCET\_CLDR&scx&JSN\\
 \end{tabular}
 
 \small{The following properties are not standard Unicode properties:
@@ -15985,18 +16378,13 @@ string is [[UNI_sc_Arab]], and the second is [[UNI_sc_Syrc]].
 \lstset{language=txt}
 <<FIXME>>=
 Document:
-  const uni_chrrng_dat8_t uni_range_rng[]
-  uni_range_rng_len
-  const uint32_t uni_range_mtab[]
-  uni_range_mtab_len
-  uni_range_invalid
   CLDR name lookups:
     CLDR_{language,territory,script,variant,currency,tzid,altList,
           casing,apend,calendar,collationType,format,numberSystem}
   enums w/o names:
     DUCET_dt
   strings:
-    DUCET_dm, rev_DUCET, rev_DUCET_CLDR
+    DUCET_dm, rev_DUCET, rev_DUCET_CLDR, na (and related)
   other:
     uni_DUCET_var_top, uni_DUCET_CLDR_var_top
   functions:
@@ -16017,95 +16405,60 @@ notes:
        in old code; need to reimplement for new code
     Unicode Collation Algorithm (UCA)
    not implemented:
-    Default Case Conversion
-    Default Case Detection
+    Default Case Conversion (depends on Word Segmentation, Normalization)
+      toUppercase(X) : map each C in X to Uppercase_Mapping(C)
+      toLowercase(X): map each C in X to Lowercase_Mapping(C)
+      toTitlecase(X): find word boundaries; use Titlecase_Mapping(C)
+                      for 1st char of each word, and Lowercase_Mapping otherwise
+    Default Case Folding (technically part of Default Case Conversion)
+      toCasefold(X): map each C in X to Case_Folding(C) (only C & F mapping)
+      toNFKC_Casefold(X): map each C in X to NFKC_Casefold(C), and then NFC
+    Default Case Detection (depends on Default Case Conversion)
+      isLowercase(X): X == toLowercase(X)
+      isUppercase(X): X == toUppercase(X)
+      isTitlecase(X): X == toTitlecase(X)
+      isCasefolded(X): X == toCasefold(X)
+      isCased(X): !isLowercase(X) || !isUppercase(X) || !isTitlecase(X)
     Line Breaking Algorithm
+      complicated; see tr14
     Character Segmentation
-    Word Segmentation
-    Sentence Segmentation
+      complicated; see tr29
+    Word Segmentation (with possible CLDR customizaton)
+      complicated; see tr29 & CLDR
+    Sentence Segmentation (with possible CLDR customizaton)
+      complicated; see tr29 & CLDR
     Hangul Syllable Boundary Determination
+      complicated; see tr29
     Default Identifier Determiniation
+      ID = ID_Start { ID_Continue }
+      XID = XID_Start { XID_Continue }
+        note: there are alternatives with format chars & grandfathered chars
+	note: optionally NFD, NFKC, NFKC_CF (see tr31)
     Alternative Identifier Determination
+      !Pattern_White_Space&!Pattern_Syntax&!Noncharacter_Code_Point&
+      !(gc in Private_Use, Surrogate, Control)
     Pattern Syntax Determination
+      Pattern_White_Space == space/separator
+      Patter_Syntax == syntactic chars
+      other = literals or identifiers
     Identifier Normalization
     Identifer Case Folding
    won't implement:
     Bidirectional Algorithm (UBA)
       but should probably do it anyway, to ensure that data files are
-      usable
+      usable, and to exercise BidiTest.txt (see tr9)
     Standard Compression Scheme for Unicode
-
-Partially ignored files:
-  NameAliases.txt, field 3 (alias type; str-enum)
-  ArabicShaping.txt, field 2 (descriptive name; str)
-  UnicodeData.txt, fields 11-12 (obsolete/comment)
-  PropList.txt: Hyphen property (deprecated)
-  DerivedCoreProperties.txt: Grapheme_Link property (deprecated)
-  DerivedNormalizatioProps.txt: Expands_On_* properties (deprecated)
-                                FC_NFKC property (deprecated)
-  IdnaMappingTable.txt: field 4 (informative/useless)
-  Unihan_Variants.txt: SemanticVariant, SpecializedSemanticVariant, ZVariant
-                       (and related providence annotations)
-  Unihan_RadicalStrokeCounts.txt: anything but kRSUnicode
-
-Completely untouched files:
-  BidiTest.txt (but no UBA, so no tests needed)
-  CJKRadicals.txt
-  EmojiSources.txt
-  Index.txt (not really data)
-  IndicMatraCategory.txt
-  IndicSyllabicCategory.txt
-  NamedSequencesProv.txt (do we really want to support provisional stuff?)
-  NameList.txt (informative; nothing that isn't in other files)
-  NormalizationCorrections.txt (might be useful to someone, but not me)
-  StandardizedVariants.txt
-  USourceData.txt [note: uses cr instead of lf]
-  extracted/Derived* (nothing that isn't in other files)
-    DerivedNumeric{Type,Values}.txt might be useful (nt/nv including unihan)
-  auxiliary/GraphemeBreakTest.txt
-  auxiliary/LineBreakTest.txt
-  auxiliary/SentenceBreakTest.txt
-  auxiliary/WordBreakTest.txt
-
-  Unihan:
-    Unihan_DictionaryIndices.txt
-    Unihan_DictionaryLikeData.txt
-    Unihan_IRGSources.txt
-      But should for kIRG_*Source
-    Unihan_NumericValues.txt
-      But should for kAccountingNumeric kOtherNumeric kPrimaryNumeric
-    Unihan_OtherMappings.txt
-    Unihan_Readings.txt
-
-  UCA:
-    CollationAuxiliary/FractionalUCA*.txt (alt. DUCET format; ignored)
-    CollationAuxiliary/UCA_Rules* (alt. DUCET format; ignored)
-
+   other:
+     simple strcasecmp(X, Y): toCasefold(X) == toCasefold(Y)
+     canonical strcasecmp(X, Y): NFD(toCasefold(NFD(X))) == NFD(toCasefold(NFD(Y)))
+     compat strcasecmp(X, Y): NFKD(toCasefold(NFKD(toCasefold(NFD(X))) ==
+                              NFKD(toCasefold(NFKD(toCasefold(NFD(Y)))
+     id strcasecmp(X, Y): toNFKC_Casefold(NFD(X)) == toNFKC_Casefold(NFD(Y))
+Completely untouched & undocumented files:
   IDNA:
     IdnaTest.txt (IDNA algorithm not implemented, so no testing)
 
-  IVD:
+  IVD: (doesn't seem all that useful except to the supported vendors)
     IVD_Collections.txt
     IVD_Sequences.txt
     IVD_Stats.txt
-
-  security:
-    confusables.txt
-    confusablesSummary.txt
-    confusablesWholeScript.txt
-    intentional.txt
-
-Unsupported properties from PropertyAliases.txt:
-  Unihan:
-    kAccountingNumeric kOtherNumeric kPrimaryNumeric kIICore kIRG_GSource
-    kIRG_HSource kIRG_JSource kIRG_KPSource kIRG_KSource kIRG_MSource
-    kIRG_TSource kIRG_USource kIRG_VSource
-  deprecated:
-    FC_NFKC Gr_Link Hyphen XO_NFC XO_NFD XO_NFKC XO_NFKD
-  other:
-    isc na1 (informative fields)
-    InMC InSC
-
-Note: booleans are listed in PropertyValueAliases.txt w/ following entries:
-  N/No/F/False
-  Y/Yes/T/True
