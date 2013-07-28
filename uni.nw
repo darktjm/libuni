@@ -493,15 +493,14 @@ int32_t uni_utf16_getc(FILE *f, int bige, unsigned int *nread)
   else
     c += c2 << 8;
   if(c < 0xdc00 || c >= 0xe000) {
-#if 0 /* This does not work; ungetc() can't be called twice */
-    ungetc(c2, f);
     ungetc(bige ? c >> 8 : c & 0xff, f);
-    if(nread)
+    /* POSIX only guarantees 1 ungetc */
+    if(ungetc(c2, f) == EOF) {
+      c2 = getc(f);
+      if(nread)
+        *nread = 4;
+    } else if(nread)
       *nread = 2;
-#else
-    if(nread)
-      *nread = 4;
-#endif
     return -3;
   }
   if(nread)
@@ -1545,35 +1544,37 @@ takes less space on average.
 uint<<@sz>>_t **buf, int off, unsigned int *buf_len
 @
 
-<<[[uni_return_buf]] proto for returning UTF-(@sz)>>=
+<<[[uni_returnN_buf]](@sz) proto>>=
 uint32_t uni_return<<@csz>>_buf<<@sz>>(const uint<<@csz>>_t *str, uint32_t len,
                                 <<Buffer return parameters for UTF-[[<<@sz>>]]>>)
 @
 
-<<[[uni_return_buf]] protos for converting from UTF-(@csz)>>=
-<<[[uni_return_buf]] proto for returning UTF-[[32]]>>;
-<<[[uni_return_buf]] proto for returning UTF-[[16]]>>;
-<<[[uni_return_buf]] proto for returning UTF-[[8]]>>;
+<<[[uni_return]](@csz)[[_bufN]] protos>>=
+<<[[uni_returnN_buf]][[32]] proto>>;
+<<[[uni_returnN_buf]][[16]] proto>>;
+<<[[uni_returnN_buf]][[8]] proto>>;
 @
 
 <<Unicode I/O Exports>>=
-<<[[uni_return_buf]] protos for converting from UTF-[[32]]>>
-<<[[uni_return_buf]] protos for converting from UTF-[[16]]>>
+<<[[uni_return]][[32]][[_bufN]] protos>>
+<<[[uni_return]][[16]][[_bufN]] protos>>
+<<[[uni_return]][[8]][[_bufN]] protos>>
 @
 
 <<Unicode I/O functions>>=
-<<[[uni_return_buf]] for converting from UTF-[[32]]>>
-<<[[uni_return_buf]] for converting from UTF-[[16]]>>
+<<[[uni_return]][[32]][[_bufN]]>>
+<<[[uni_return]][[16]][[_bufN]]>>
+<<[[uni_return]][[8]][[_bufN]]>>
 @
 
-<<[[uni_return_buf]] for converting from UTF-(@csz)>>=
-<<[[uni_return_buf]] for UTF-[[32]]>>
-<<[[uni_return_buf]] for UTF-[[16]]>>
-<<[[uni_return_buf]] for UTF-[[8]]>>
+<<[[uni_return]](@csz)[[_bufN]]>>=
+<<[[uni_returnN_buf]][[32]]>>
+<<[[uni_returnN_buf]][[16]]>>
+<<[[uni_returnN_buf]][[8]]>>
 @
 
-<<[[uni_return_buf]] for UTF-(@sz)>>=
-<<[[uni_return_buf]] proto for returning UTF-[[<<@sz>>]]>>
+<<[[uni_returnN_buf]](@sz)>>=
+<<[[uni_returnN_buf]][[<<@sz>>]] proto>>
 {
   unsigned int i, rlen;
   
@@ -4417,19 +4418,19 @@ query function (actually, preprocessor macro wrapper) is printed for
 the multi-level table lookup functions.  Finally, a list of boolean
 properties needs to be converted into calls to [[bool()]] for the test
 program.  This is generated directly into a fixed-named C file,
-[[tsttab.c.tests]].
+[[tsttab.tests.gen.c]].
 
 <<Plain Built Files>>=
-tsttab.c.tests \
+tsttab.tests.gen.c \
 @
 
 \lstset{language=C}
 <<Test generated tables>>=
-#include "tsttab.c.tests"
+#include "tsttab.tests.gen.c"
 @
 
 <<Dump character information as C code>>=
-open_wf(tstf, "tsttab.c.tests");
+open_wf(tstf, "tsttab.tests.gen.c");
 for(i = 0; i < nparsed; i++) {
   if(parsed_props[i].rng) {
     const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
@@ -5099,7 +5100,7 @@ fgrep -v _valueof | \
 @
 
 Another useful array to print is for approximate name matching.  In
-this case, approximate is defined by UAX\#44: case-insensitive,
+this case, approximate is defined by UAX44-LM3: case-insensitive,
 optionally without any prefix of is, and without any spaces,
 underscores, and dashes.  A function to perform most of this
 transformation in-place is provided as well.  If additional
@@ -5692,6 +5693,7 @@ fclose(f);
 \lstset{language=txt}
 <<FIXME>>=
 test with auxiliary/LineBreakTest.txt
+support CLDR override
 @
 
 \lstset{language=C}
@@ -5707,6 +5709,7 @@ fclose(f);
 \lstset{language=txt}
 <<FIXME>>=
 test with auxiliary/GraphemeBreakTest.txt
+support CLDR override
 @
 
 \lstset{language=C}
@@ -5722,6 +5725,7 @@ fclose(f);
 \lstset{language=txt}
 <<FIXME>>=
 test with auxiliary/SentenceBreakTest.txt
+support CLDR override
 @
 
 \lstset{language=C}
@@ -5737,6 +5741,7 @@ fclose(f);
 \lstset{language=txt}
 <<FIXME>>=
 test with auxiliary/WordBreakText.txt
+support CLDR override
 @
 
 \lstset{language=C}
@@ -6491,7 +6496,7 @@ if(parsed_props[i].rng_num)
 <<FIXME>>=
 numeric (UAX44-LM1):
   compare as floating-point number w/ limited precision
-  e.g. 01.00 == 1
+  e.g. 01.00 == 1, 0.3333 = 1/3
 @
 
 <<FIXME>>=
@@ -6953,6 +6958,7 @@ static void dump_strs(prop_t *p, FILE *gen_h)
             p->str_arr[i].off = p->str_arr[i + 1].off;
 	    saved += plen;
 	  }
+	  i++; /* last loop goes under by one */
         } else
 	  break;
       }
@@ -8020,12 +8026,12 @@ three supported output formats.
 /* return: -1 means no change */
 /*         -2 means condition required */
 /*         0+ == length of potential return */
-<<[[uni_case_convert]] proto for UTF-[[32]]>>;
-<<[[uni_case_convert]] proto for UTF-[[16]]>>;
-<<[[uni_case_convert]] proto for UTF-[[8]]>>;
+<<[[uni_case_convert]][[32]] proto>>;
+<<[[uni_case_convert]][[16]] proto>>;
+<<[[uni_case_convert]][[8]] proto>>;
 @
 
-<<[[uni_case_convert]] proto for UTF-(@sz)>>=
+<<[[uni_case_convert]](@sz) proto>>=
 int uni_case_convert<<@sz>>(uint32_t cp, uint32_t cond,
                        <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
                        const uint32_t *simple, const uint32_t *special,
@@ -8088,13 +8094,13 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
 @
 
 <<Unicode property functions>>=
-<<[[uni_case_convert]] for UTF-[[32]]>>
-<<[[uni_case_convert]] for UTF-[[16]]>>
-<<[[uni_case_convert]] for UTF-[[8]]>>
+<<[[uni_case_convert]][[32]]>>
+<<[[uni_case_convert]][[16]]>>
+<<[[uni_case_convert]][[8]]>>
 @
 
-<<[[uni_case_convert]] for UTF-(@sz)>>=
-<<[[uni_case_convert]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_case_convert]](@sz)>>=
+<<[[uni_case_convert]][[<<@sz>>]] proto>>
 {
   const uint16_t *rbuf;
   int32_t ret = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
@@ -8107,12 +8113,12 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
 @
 
 <<[[uni_case_convert]] support for (@type)>>=
-<<[[uni_case_convert]] support for UTF-[[32]]>>
-<<[[uni_case_convert]] support for UTF-[[16]]>>
-<<[[uni_case_convert]] support for UTF-[[8]]>>
+<<[[uni_case_convert]][[32]] support>>
+<<[[uni_case_convert]][[16]] support>>
+<<[[uni_case_convert]][[8]] support>>
 @
 
-<<[[uni_case_convert]] support for UTF-(@sz)>>=
+<<[[uni_case_convert]](@sz) support>>=
 int uni_<<@type>><<@sz>>(uint32_t cp, uint32_t cond, <<Buffer return parameters for UTF-[[<<@sz>>]]>>);
 #define uni_<<@type>><<@sz>>(cp, cond, buf, off, buf_len) \
   uni_case_convert<<@sz>>(cp, cond, buf, off, buf_len, \
@@ -8184,12 +8190,12 @@ cf property lookup.  Since there is no condition input, a special macro
 is provided for Turkic locales as well.
 
 <<[[uni_case_convert]] cf support for (@type) using condition (@cond)>>=
-<<[[uni_case_convert]] cf support for UTF-[[32]]>>
-<<[[uni_case_convert]] cf support for UTF-[[16]]>>
-<<[[uni_case_convert]] cf support for UTF-[[8]]>>
+<<[[uni_case_convert]][[32]] cf support>>
+<<[[uni_case_convert]][[16]] cf support>>
+<<[[uni_case_convert]][[8]] cf support>>
 @
 
-<<[[uni_case_convert]] cf support for UTF-(@sz)>>=
+<<[[uni_case_convert]](@sz) cf support>>=
 int uni_<<@type>><<@sz>>(uint32_t cp, <<Buffer return parameters for UTF-[[<<@sz>>]]>>);
 #define uni_<<@type>><<@sz>>(cp, buf, off, buf_len) \
   uni_case_convert<<@sz>>(cp, <<@cond>>, buf, off, buf_len, \
@@ -8317,30 +8323,30 @@ provided to do just that.
 @
 
 <<[[uni_X_dec]] protos for (@type)>>=
-<<[[uni_X_dec]] proto for UTF-[[32]]>>;
-<<[[uni_X_dect]] proto for UTF-[[32]]>>;
-<<[[uni_X_dec]] proto for UTF-[[16]]>>;
-<<[[uni_X_dect]] proto for UTF-[[16]]>>;
-<<[[uni_X_dec]] proto for UTF-[[8]]>>;
-<<[[uni_X_dect]] proto for UTF-[[8]]>>;
+<<[[uni_X_dec]][[32]] proto>>;
+<<[[uni_X_dect]][[32]] proto>>;
+<<[[uni_X_dec]][[16]] proto>>;
+<<[[uni_X_dect]][[16]] proto>>;
+<<[[uni_X_dec]][[8]] proto>>;
+<<[[uni_X_dect]][[8]] proto>>;
 @
 
-<<[[uni_X_dec]] proto for UTF-(@sz)>>=
+<<[[uni_X_dec]](@sz) proto>>=
 int uni_<<@type>><<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
                  <<Buffer return parameters for UTF-[[<<@sz>>]]>>)
 @
 
-<<[[uni_X_dect]] proto for UTF-(@sz)>>=
+<<[[uni_X_dect]](@sz) proto>>=
 int uni_<<@type>>t<<@sz>>(<<Buffer return parameters for UTF-[[<<@sz>>]]>>, unsigned int ilen)
 @
 
 <<Unicode normalization support functions>>=
-<<[[do_any_dec]] for UTF-[[32]]>>
-<<[[do_any_dec]] for UTF-[[16]]>>
-<<[[do_any_dec]] for UTF-[[8]]>>
+<<[[do_any_dec]][[32]]>>
+<<[[do_any_dec]][[16]]>>
+<<[[do_any_dec]][[8]]>>
 @
 
-<<[[do_any_dec]] for UTF-(@sz)>>=
+<<[[do_any_dec]](@sz)>>=
 static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
                           <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
                           const uint32_t *tab, const uint16_t *str)
@@ -8381,12 +8387,12 @@ static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
 @
 
 <<Unicode normalization support functions>>=
-<<[[do_any_dect]] for UTF-[[32]]>>
-<<[[do_any_dect]] for UTF-[[16]]>>
-<<[[do_any_dect]] for UTF-[[8]]>>
+<<[[do_any_dect]][[32]]>>
+<<[[do_any_dect]][[16]]>>
+<<[[do_any_dect]][[8]]>>
 @
 
-<<[[do_any_dect]] for UTF-(@sz)>>=
+<<[[do_any_dect]](@sz)>>=
 static int do_any_dect<<@sz>>(<<Buffer return parameters for UTF-[[<<@sz>>]]>>,
                            unsigned int ilen,
                            const uint32_t *tab, const uint16_t *str)
@@ -8407,18 +8413,18 @@ static int do_any_dect<<@sz>>(<<Buffer return parameters for UTF-[[<<@sz>>]]>>,
 @
 
 <<[[uni_dec_any]] for (@type) using (@tab) and (@str)>>=
-<<[[uni_dec_any]] pair for UTF-[[32]]>>
-<<[[uni_dec_any]] pair for UTF-[[16]]>>
-<<[[uni_dec_any]] pair for UTF-[[8]]>>
+<<[[uni_dec_any]][[32]] pair>>
+<<[[uni_dec_any]][[16]] pair>>
+<<[[uni_dec_any]][[8]] pair>>
 @
 
-<<[[uni_dec_any]] pair for UTF-(@sz)>>=
-<<[[uni_X_dec]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_dec_any]](@sz) pair>>=
+<<[[uni_X_dec]][[<<@sz>>]] proto>>
 {
   return do_any_dec<<@sz>>(ibuf, ilen, buf, off, buf_len, <<@tab>>, <<@str>>);
 }
 
-<<[[uni_X_dect]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_X_dect]][[<<@sz>>]] proto>>
 {
   return do_any_dect<<@sz>>(buf, off, buf_len, ilen, <<@tab>>, <<@str>>);
 }
@@ -8452,19 +8458,19 @@ Instead, only an in-place sorter is provided.
 /* set last to non-0 if no continuations possible */
 /* returns less than ilen if more chars needed */
 /* can skip # of chars equal to return value */
-<<[[canon_order]] proto for UTF-[[32]]>>;
-<<[[canon_order]] proto for UTF-[[16]]>>;
-<<[[canon_order]] proto for UTF-[[8]]>>;
+<<[[canon_order]][[32]] proto>>;
+<<[[canon_order]][[16]] proto>>;
+<<[[canon_order]][[8]] proto>>;
 @
 
-<<[[canon_order]] proto for UTF-(@sz)>>=
+<<[[canon_order]](@sz) proto>>=
 int uni_Canon_Order<<@sz>>(uint<<@sz>>_t *buf, unsigned int ilen, int last)
 @
 
 <<Unicode normalization support functions>>=
-<<[[canon_order]] for UTF-[[32]]>>
-<<[[canon_order]] for UTF-[[16]]>>
-<<[[canon_order]] for UTF-[[8]]>>
+<<[[canon_order]][[32]]>>
+<<[[canon_order]][[16]]>>
+<<[[canon_order]][[8]]>>
 @
 
 <<Unicode normalization support local definitions>>=
@@ -8484,8 +8490,8 @@ static int cmpcc(const void *a, const void *b)
 }
 @
 
-<<[[canon_order]] for UTF-(@sz)>>=
-<<[[canon_order]] proto for UTF-[[<<@sz>>]]>>
+<<[[canon_order]](@sz)>>=
+<<[[canon_order]][[<<@sz>>]] proto>>
 {
   int i;
   for(i = 0; i < ilen; i += uni_utf<<@sz>>_nextc(buf + i)) {
@@ -8540,23 +8546,23 @@ just like canonical ordering, only in-place transformation is supported.
 /* returns nok < ilen if more chars needed */
 /* can skip nok chars */
 /* return value is updated length */
-<<[[uni_NFC_comp]] proto for UTF-[[32]]>>;
-<<[[uni_NFC_comp]] proto for UTF-[[16]]>>;
-<<[[uni_NFC_comp]] proto for UTF-[[8]]>>;
+<<[[uni_NFC_comp]][[32]] proto>>;
+<<[[uni_NFC_comp]][[16]] proto>>;
+<<[[uni_NFC_comp]][[8]] proto>>;
 @
 
-<<[[uni_NFC_comp]] proto for UTF-(@sz)>>=
+<<[[uni_NFC_comp]](@sz) proto>>=
 int uni_NFC_comp<<@sz>>(uint<<@sz>>_t *buf, unsigned int ilen, unsigned int *nok)
 @
 
 <<Unicode normalization support functions>>=
-<<[[uni_NFC_comp]] for UTF-[[32]]>>
-<<[[uni_NFC_comp]] for UTF-[[16]]>>
-<<[[uni_NFC_comp]] for UTF-[[8]]>>
+<<[[uni_NFC_comp]][[32]]>>
+<<[[uni_NFC_comp]][[16]]>>
+<<[[uni_NFC_comp]][[8]]>>
 @
 
-<<[[uni_NFC_comp]] for UTF-(@sz)>>=
-<<[[uni_NFC_comp]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_NFC_comp]](@sz)>>=
+<<[[uni_NFC_comp]][[<<@sz>>]] proto>>
 {
   int i, last0 = -1;
   for(i = 0; i < ilen; i += uni_utf<<@sz>>_nextc(buf + i)) {
@@ -8684,12 +8690,12 @@ full procedure, either in-place or using a separate input buffer.
 @
 
 <<[[full_dec]] proto for (@type)>>=
-<<[[full_dec]] proto for UTF-[[32]]>>
-<<[[full_dec]] proto for UTF-[[16]]>>
-<<[[full_dec]] proto for UTF-[[8]]>>
+<<[[full_dec]][[32]] proto>>
+<<[[full_dec]][[16]] proto>>
+<<[[full_dec]][[8]] proto>>
 @
 
-<<[[full_dec]] proto for UTF-(@sz)>>=
+<<[[full_dec]](@sz) proto>>=
 <<[[uni_dec]] proto>>;
 <<[[uni_dect]] proto>>;
 @
@@ -8710,12 +8716,12 @@ int uni_<<@type>>t<<@sz>>(<<Buffer return parameters for UTF-[[<<@sz>>]]>>,
 @
 
 <<[[full_dec]] for (@type)>>=
-<<[[full_dec]] for UTF-[[32]]>>
-<<[[full_dec]] for UTF-[[16]]>>
-<<[[full_dec]] for UTF-[[8]]>>
+<<[[full_dec]][[32]]>>
+<<[[full_dec]][[16]]>>
+<<[[full_dec]][[8]]>>
 @
 
-<<[[full_dec]] for UTF-(@sz)>>=
+<<[[full_dec]](@sz)>>=
 <<[[uni_dec]] proto>>
 {
   if(!ilen)
@@ -8755,12 +8761,12 @@ int uni_<<@type>>t<<@sz>>(<<Buffer return parameters for UTF-[[<<@sz>>]]>>,
 @
 
 <<[[full_comp]] for (@type) using (@dec)>>=
-<<[[full_comp]] for UTF-[[32]]>>
-<<[[full_comp]] for UTF-[[16]]>>
-<<[[full_comp]] for UTF-[[8]]>>
+<<[[full_comp]][[32]]>>
+<<[[full_comp]][[16]]>>
+<<[[full_comp]][[8]]>>
 @
 
-<<[[full_comp]] for UTF-(@sz)>>=
+<<[[full_comp]](@sz)>>=
 <<[[uni_dec]] proto>>
 {
   int ret = uni_<<@dec>><<@sz>>(ibuf, ilen, buf, off, buf_len);
@@ -9227,6 +9233,7 @@ determined by going down and/or up one.
     memcpy(str, v, len); \
     len = (len + 3) / 4; \
     add_str_rng(&parsed_props[prop_##n], low, high, str, len); \
+    parsed_props[prop_##n].strs_char_size = 8; \
   } \
 } while(0)
 @
@@ -9246,6 +9253,10 @@ else {
   high = low;
   if(fields[1][0] == '<' && (s = strchr(fields[1], ','))) {
     *s = 0;
+    /* standard claims all names are upper-case, but ranges have lower-case */
+    for(s = fields[1]; *s; s++)
+      if(islower(*s))
+        *s = toupper(*s);
     add_str8(narng, fields[1] + 1);
     low = high = h;
     add_str8(narng, fields[1] + 1);
@@ -9258,20 +9269,9 @@ else {
 }
 @
 
-<<Parse UCD files>>=
-parsed_props[prop_na].strs_char_size = 8;
-open_f("NameAliases.txt");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  <<Parse dotted cp>>
-  add_str8(Name_Alias, fields[1]);
-}
-fclose(f);
-parsed_props[prop_Name_Alias].strs_char_size = 8;
-@
-
 <<Dump character information as C code>>=
 dump_str_tabs(&parsed_props[prop_na], gen_h, tstf);
-dump_str_tabs(&parsed_props[prop_Name_Alias], gen_h, tstf);
+dump_str_tabs(&parsed_props[prop_narng], gen_h, tstf);
 @
 
 In addition, the Hangul syllable names require the name of each part,
@@ -9289,7 +9289,65 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   add_str8(JSN, fields[1]);
 }
 fclose(f);
-parsed_props[prop_JSN].strs_char_size = 8;
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(&parsed_props[prop_JSN], gen_h, tstf);
+@
+
+Unfortunately, the Name\_Alias property may have multiple values per
+code point.  To fix this, all aliases are combined into a single
+string, prefixing each with its length.
+
+<<Parse UCD files>>=
+open_f("NameAliases.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  char nabuf[128];
+  strcpy(nabuf + 1, fields[1]);
+  nabuf[0] = strlen(fields[1]) - 1;
+  add_str8(Name_Alias, nabuf);
+}
+fclose(f);
+@
+
+<<Post-process property data>>=
+prop_t *na_alias = &parsed_props[prop_Name_Alias];
+qsort(na_alias->str_arr, na_alias->len, sizeof(*na_alias->str_arr), uni_cmp_cp);
+for(i = na_alias->len - 1; i > 0; i--) {
+  unsigned int nlen = na_alias->str_arr[i].len;
+  for(low = i; low > 0; low--) {
+    if(na_alias->str_arr[low - 1].cp != na_alias->str_arr[i].cp)
+      break;
+    nlen += na_alias->str_arr[low - 1].len;
+  }
+  if(low == i)
+    continue;
+  while(na_alias->max_strs < na_alias->strs_len + nlen)
+    resize(na_alias->strs, na_alias->max_strs *= 2);
+  uint8_t *strs8 = (uint8_t *)(na_alias->strs + na_alias->strs_len);
+  unsigned int strs8_len = 0;
+  for(j = low; j <= i; j++) {
+    uint8_t *p8 = (uint8_t *)(na_alias->strs + na_alias->str_arr[j].off);
+    unsigned int len8 = *p8 + 2;
+    memcpy(strs8 + strs8_len, p8, len8);
+    strs8_len += len8;
+  }
+  while(strs8_len % 4)
+    strs8[strs8_len++] = 0;
+  movebuf(na_alias->str_arr + low + 1, na_alias->str_arr + i + 1,
+          na_alias->len - (i + 1));
+  na_alias->str_arr[low].off = na_alias->strs_len;
+  na_alias->str_arr[low].len = strs8_len / 4;
+  na_alias->strs_len += strs8_len / 4;
+  na_alias->len -= i - low;
+  if(!(i = low))
+    break;
+}
+@
+
+<<Dump character information as C code>>=
+dump_str_tabs(na_alias, gen_h, tstf);
 @
 
 A related table which is not strictly a per-character property is the
@@ -9303,28 +9361,18 @@ pseudo-property naseq.  The names are indexed by the first character
 of the sequence, and both the name and the additional index characters
 are stored in the string value.
 
-While each sequence is unique, each starting character is not:
-multiple entries will exist with the same index.  There are few such
-duplicates, though, so it is reasonable to expect a linear search.
-Each string value contains all possible entries with that initial
-index character appended to each other.  In order to skip to the next,
-each also includes both the index length and the name length.  The two
-lengths can fit into a single byte if the index length is five or less
-(extension length is 1-4, so 2 bits) and the name length is 64 or less
-(6 bits).
-
-The index needs to be word-aligned, and stored in its entirety.  If
-the index is at the end of the entry, the last entry might be stripped
-(in 8-bit mode) if its last byte is zero.  If it is at the beginning,
-finding its length may be hard.  Placing it one up wastes two bytes,
-so it is placed at the beginning, but the length is placed at the end
-of the string.  The name then occupies the middle.  Multiple
-concatenated entries are word-aligned by padding with a zero.  In
-fact, the entire table needs to be word-aligned.  One way to do that
-would be to use 16-bit mode, but I prefer being able to sort of read
-the generated table, so it uses 16-bit mode and always pads the name
-(rather than the whole string) to force the full length to be
-word-aligned.
+The index needs to be word-aligned in order to use the simple decoder.
+If the index is at the end of the entry, the last entry might be
+stripped (in 8-bit mode) if its last byte is zero.  If it is at the
+beginning, finding its length may be hard.  Placing it one up in order
+to insert a length byte wastes two bytes, so it is placed at the
+beginning, but the length is placed at the end of the string.  The
+name then occupies the middle.  Multiple concatenated entries are
+word-aligned by padding with a zero.  In fact, the entire table needs
+to be word-aligned.  One way to do that would be to use 16-bit mode,
+but I prefer being able to sort of read the generated table, so it
+uses 8-bit mode and always pads the name (rather than the whole
+string) to force the full length to be word-aligned.
 
 <<Initialize UCD files>>=
 decl_str(naseq);
@@ -9363,6 +9411,7 @@ decl_str(naseq);
       len++; \
     } \
     add_str_rng(&parsed_props[prop_##n], low, low, str, len / 4); \
+    parsed_props[prop_##n].strs_char_size = 8; \
   } \
 } while(0)
 @
@@ -9375,7 +9424,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     continue;
   add_strseq(naseq, fields[1], fields[0]);
 }
-parsed_props[prop_naseq].strs_char_size = 8;
 @
 
 <<Post-process property data>>=
@@ -9386,10 +9434,20 @@ for(i = naseq->len - 1; i > 0; i--) {
     int jlen = naseq->str_arr[i - 1].len, ilen = naseq->str_arr[i].len;
     while(naseq->max_strs < naseq->strs_len + ilen + jlen)
       resize(naseq->strs, naseq->max_strs *= 2);
-    uint32_t *newseq = naseq->strs + naseq->strs_len;
-    naseq->strs_len += ilen + jlen;
+    uint16_t *newseq = (uint16_t *)(naseq->strs + naseq->strs_len);
+    jlen *= 2;
     cpybuf(newseq, naseq->strs + naseq->str_arr[i - 1].off, jlen);
+    if(!newseq[jlen - 1])
+      jlen--;
+    ilen *= 2;
     cpybuf(newseq + jlen, naseq->strs + naseq->str_arr[i].off, ilen);
+    if(!newseq[jlen + ilen - 1])
+      ilen--;
+    if((ilen + jlen) % 2)
+      newseq[ilen++ + jlen] = 0;
+    naseq->str_arr[i - 1].len = (ilen + jlen) / 2;
+    naseq->str_arr[i - 1].off = naseq->strs_len;
+    naseq->strs_len += (ilen + jlen) / 2;
     movebuf(naseq->str_arr + i, naseq->str_arr + i + 1, naseq->len - (i + 1));
     naseq->len--;
     i--;
@@ -9398,7 +9456,7 @@ for(i = naseq->len - 1; i > 0; i--) {
 @
 
 <<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_naseq], gen_h, tstf);
+dump_str_tabs(naseq, gen_h, tstf);
 @
 
 The string tables are much too large for 16-bit offsets (509,515 bytes
@@ -9412,113 +9470,101 @@ than two characters is placed into its own array, and replaced by a
 two-byte pointer into that array.  The first byte of the pointer has
 its upper bit set to distinguish from other characters.
 
+While the na property is the only one which really needs this
+compression, the same will be applied to the naseq, narng, and
+Name\_Alias properties.  In order to only have to manage pointers into
+one string array during the word building phase, all names from the
+other properties are temporarily added to na's strings.
+
+<<UCD parser local functions>>=
+#define NT_NAME  0
+#define NT_SEQ   1
+#define NT_ALIAS 2
+static void collect_words(prop_t *words, prop_t *na, uint32_t *strs,
+                          unsigned int off, int na_type)
+{
+  unsigned int i;
+
+  if(off)
+    cpybuf(strs + off, na->strs, na->strs_len);
+  for(i = 0; i < na->len; i++) {
+    <<For each word [[ws]] .. [[we]]>>
+      if((we - ws) > 2) {
+        if(words->max_len == words->len)
+          resize(words->str_arr, words->max_len *= 2);
+        words->str_arr[words->len].cp = 0; /* avoid valgrind warning */
+        words->str_arr[words->len].off = ws - (uint8_t *)strs;
+        words->str_arr[words->len].len = we - ws;
+        words->len++;
+      }
+    <<End for each word [[ws]] .. [[we]]>>
+  }
+}
+@
+
+<<For each word [[ws]] .. [[we]]>>=
+uint8_t *ws, *s, *n, *ne;
+s = (uint8_t *)(strs + na->str_arr[i].off + off);
+ne = (uint8_t *)(strs + na->str_arr[i].off + off + na->str_arr[i].len);
+while(!ne[-1])
+  ne--;
+n = ne;
+while(n != s) {
+  uint8_t *e;
+  if(na_type == NT_SEQ) {
+    uint8_t wlen = *--n;
+    if(!n[-1])
+      n--;
+    e = n;
+    n -= (wlen & 0x3f) + 1;
+    ws = n;
+    n -=  2 * ((wlen >> 6) + 1);
+  } else if(na_type == NT_ALIAS) {
+    for(e = s; e < ne; e += *e + 2)
+      if(n == e + *e + 2)
+        break;
+    n = e;
+    ws = e + 1;
+    e += *e + 2;
+  } else {
+    e = n;
+    ws = n = s;
+  }
+  while(ws < e) {
+    uint8_t *we;
+    for(we = ws + 1; we < e; we++)
+      if(*we == ' ' || *we == '-')
+        break;
+@
+
+<<End for each word [[ws]] .. [[we]]>>=
+    ws = we + 1;
+    while(ws < e && (*ws == '-' || *ws == ' '))
+      ws++;
+    ws--; /* include leading char (space/-) in word */
+  }
+}
+@
+
 <<Post-process property data>>=
-prop_t *na = &parsed_props[prop_na];
+prop_t *na = &parsed_props[prop_na], *narng = &parsed_props[prop_narng];
 prop_t words;
 clearbuf(&words, 1);
-uint8_t *na_strs = (uint8_t *)na->strs;
+/* collect all words as pointers into na_strs */
+while(na->max_strs < na->strs_len + naseq->strs_len + na_alias->strs_len +
+                     narng->strs_len)
+  resize(na->strs, na->max_strs *= 2);
 inisize(words.str_arr, words.max_len = 100);
-for(i = 0; i < na->len; i++) {
-  uint8_t *ws, *we, *e;
-  ws = (uint8_t *)(na->strs + na->str_arr[i].off);
-  e = (uint8_t *)(na->strs + na->str_arr[i].off + na->str_arr[i].len);
-  while(!e[-1])
-    e--;
-  while(ws < e) {
-    for(we = ws + 1; we < e; we++)
-      if(*we == ' ' || *we == '-')
-        break;
-    if((we - ws) > 2) {
-      if(words.max_len == words.len)
-        resize(words.str_arr, words.max_len *= 2);
-      words.str_arr[words.len].cp = 0; /* avoid valgrind warning */
-      words.str_arr[words.len].off = ws - na_strs;
-      words.str_arr[words.len].len = we - ws;
-      words.len++;
-    }
-    ws = we + 1;
-    while(ws < e && (*ws == '-' || *ws == ' '))
-      ws++;
-    ws--; /* include leading char (space/-) in word */
-  }
-}
+collect_words(&words, na, na->strs, 0, NT_NAME);
+collect_words(&words, naseq, na->strs, na->strs_len, NT_SEQ);
+collect_words(&words, na_alias, na->strs, na->strs_len + naseq->strs_len, NT_ALIAS);
+collect_words(&words, narng, na->strs,
+              na->strs_len + naseq->strs_len + na_alias->strs_len, NT_NAME);
+/* prepare for merge */
+unsigned int wordno = 0;
+inisize(words.strs, words.max_strs = words.len);
 sort_strs = na->strs;
 qsort(words.str_arr, words.len, sizeof(*words.str_arr), cmp_words);
-int wordno = -1;
-inisize(words.strs, words.max_strs = words.len);
-for(i = 0; i < words.len; i++) {
-  /* merge duplicates */
-  for(j = i + 1; j < words.len; j++)
-    if(words.str_arr[j].len != words.str_arr[i].len ||
-       memcmp(na_strs + words.str_arr[i].off, na_strs + words.str_arr[j].off,
-              words.str_arr[i].len))
-      break;
-  int wlen = (words.str_arr[i].len + 3) / 4;
-  while(words.strs_len + wlen > words.max_strs)
-    resize(words.strs, words.max_strs *= 2);
-  words.strs[words.strs_len + wlen - 1] = 0;
-  memcpy(words.strs + words.strs_len, na_strs + words.str_arr[i].off,
-         words.str_arr[i].len);
-  /* set offset & word # for all occurrences */
-  for(; i < j; i++) {
-    words.str_arr[i].cp = wordno;
-    words.str_arr[i].off = words.strs_len;
-  }
-  wordno++;
-  words.strs_len += wlen;
-  i--;
-}
-for(i = 0; i < na->len; i++) {
-  uint8_t *ws, *we, *e;
-  ws = (uint8_t *)(na->strs + na->str_arr[i].off);
-  e = (uint8_t *)(na->strs + na->str_arr[i].off + na->str_arr[i].len);
-  while(!e[-1])
-    e--;
-  while(ws < e) {
-    for(we = ws + 1; we < e; we++)
-      if(*we == ' ' || *we == '-')
-        break;
-    if((we - ws) > 2) {
-      int l = 0, h = words.len - 1, m;
-      while(l <= h) {
-        m = (l + h) / 2;
-	int len = words.str_arr[m].len;
-	if(len > we - ws)
-	  len = we - ws;
-	int cmp = memcmp(words.strs + words.str_arr[m].off, ws, len);
-	if(!cmp)
-	  cmp = (int)words.str_arr[m].len - (int)(we - ws);
-	if(cmp < 0)
-	  l = m + 1;
-	else if(cmp > 0)
-	  h = m - 1;
-	else
-	  break;
-      }
-      if(l <= h) {
-        memmove(ws + 2, we, e - we + 1);
-	ws[0] = (words.str_arr[m].cp >> 8) | 128;
-	ws[1] = words.str_arr[m].cp & 0xff;
-	e -= we - (ws + 2);
-	we -= we - (ws + 2);
-      }
-    }
-    ws = we + 1;
-    while(ws < e && (*ws == '-' || *ws == ' '))
-      ws++;
-    ws--; /* include leading char (space/-) in word */
-  }
-  int slen = e - (uint8_t *)(na->strs + na->str_arr[i].off);
-  while(slen % 4) {
-    *e++ = 0;
-    slen++;
-  }
-  na->str_arr[i].len = slen / 4;
-}
-words.strs_char_size = 8;
-words.name = strdup("na_words");
-for(i = 0; i < words.len; i++)
-  words.str_arr[i].len = (words.str_arr[i].len + 3) / 4;
 @
 
 <<UCD parser local functions>>=
@@ -9538,17 +9584,125 @@ static int cmp_words(const void *_a, const void *_b)
 }
 @
 
-<<Dump character information as C code>>=
-dump_strs(&words, gen_h);
-open_wf(naw, "uni_na_words_arr.gen.c");
-/* mark duplicates */
+<<Post-process property data>>=
+/* fix words array */
+uint8_t *na_strs = (uint8_t *)na->strs;
 for(i = 0; i < words.len; i++) {
-  while(i < words.len - 1 && words.str_arr[i + 1].cp == words.str_arr[i].cp)
-    words.str_arr[i++].len = 0;
+  /* merge duplicates */
+  for(j = i + 1; j < words.len; j++)
+    if(words.str_arr[j].len != words.str_arr[i].len ||
+       memcmp(na_strs + words.str_arr[i].off, na_strs + words.str_arr[j].off,
+              words.str_arr[i].len))
+      break;
+  /* copy unique word into words_strs and adjust pointers */
+  int wlen = (words.str_arr[i].len + 3) / 4;
+  while(words.strs_len + wlen > words.max_strs)
+    resize(words.strs, words.max_strs *= 2);
+  words.strs[words.strs_len + wlen - 1] = 0;
+  memcpy(words.strs + words.strs_len, na_strs + words.str_arr[i].off,
+         words.str_arr[i].len);
+  /* set offset & word # for all occurrences */
+  for(; i < j; i++) {
+    words.str_arr[i].cp = wordno;
+    words.str_arr[i].off = words.strs_len;
+  }
+  wordno++;
+  words.strs_len += wlen;
+  i--;
 }
+@
+
+<<Post-process property data>>=
+/* replace words in name strings by pointers */
+set_words(&words, na, NT_NAME);
+set_words(&words, naseq, NT_SEQ);
+set_words(&words, na_alias, NT_ALIAS);
+set_words(&words, narng, NT_NAME);
+@
+
+<<UCD parser local functions>>=
+static void set_words(prop_t *words, prop_t *na, int na_type)
+{
+  unsigned int i;
+
+  const uint32_t *strs = na->strs;
+  int off = 0;
+  for(i = 0; i < na->len; i++) {
+    <<For each word [[ws]] .. [[we]]>>
+      if((we - ws) > 2) {
+        int l = 0, h = words->len - 1, m;
+        while(l <= h) {
+          m = (l + h) / 2;
+	  int len = words->str_arr[m].len;
+	  if(len > we - ws)
+	    len = we - ws;
+	  int cmp = memcmp(words->strs + words->str_arr[m].off, ws, len);
+	  if(!cmp)
+	    cmp = (int)words->str_arr[m].len - (int)(we - ws);
+	  if(cmp < 0)
+	    l = m + 1;
+	  else if(cmp > 0)
+	    h = m - 1;
+	  else
+	    break;
+        }
+        if(l <= h) {
+	  if(na_type != NT_SEQ || !((ne - we) % 2))
+            memmove(ws + 2, we, ne - we);
+	  else {
+	    /* need to keep things word-aligned */
+	    memmove(ws + 2, we, e - we);
+	    if(*e) {
+	      ws[2 + (e - we)] = 0;
+	      memmove(ws + 2 + (e - we) + 1, e, ne - e);
+	      ne++;
+	    } else {
+	      memmove(ws + 2 + (e - we), e + 1, ne - (e + 1));
+	      ne--;
+	    }
+	  }
+	  ws[0] = (words->str_arr[m].cp >> 8) | 0x80;
+	  ws[1] = words->str_arr[m].cp & 0xff;
+	  e -= we - (ws + 2);
+	  ne -= we - (ws + 2);
+	  /* adjust name length byte */
+	  if(na_type == NT_SEQ) {
+	    if(*e)
+	      *e -= we - (ws + 2);
+	    else
+	      e[1] -= we - (ws + 2);
+	  } else if(na_type == NT_ALIAS)
+	    *n -= we - (ws + 2);
+	  we -= we - (ws + 2);
+        }
+      }
+    <<End for each word [[ws]] .. [[we]]>>
+    int slen = ne - (uint8_t *)(na->strs + na->str_arr[i].off);
+    while(slen % 4) {
+      *ne++ = 0;
+      slen++;
+    }
+    na->str_arr[i].len = slen / 4;
+  }
+}
+@
+
+<<Dump character information as C code>>=
+/* mark duplicates */
+/* adjust word lens for dump_strtab */
+for(i = 0; i < words.len; i++) {
+  words.str_arr[i].len = (words.str_arr[i].len + 3) / 4;
+  while(i < words.len - 1 && words.str_arr[i + 1].cp == words.str_arr[i].cp)
+    words.str_arr[++i].len = 0;
+}
+/* compress & dump strings */
+words.strs_char_size = 8;
+words.name = strdup("na_words");
+dump_strs(&words, gen_h);
 /* sort by word # */
 qsort(words.str_arr, words.len, sizeof(*words.str_arr), uni_cmp_cp);
-/* dump C code */
+/* dump table */
+open_wf(naw, "uni_na_words_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
       "const uni_str_ptr_t uni_na_words_arr[] = {\n", naw);
 for(i = 0; i < words.len; i++) {
@@ -9577,22 +9731,365 @@ adds a lot of padding (37,862 bytes), but allows 16-bit offsets.
 na->strs_char_size = 32;
 @
 
-To look up a name using a code point, a function must be called.  It
-checks the na table.  If a name is present, that is returned;
-otherwise, an algorithmically generated name is attempted.  Failure
-for both should never happen, but if it does happen, an empty string
-is returned.  The return format is similar to the UTF-8 static/dynamic
-return buffer mechanism used by other string functions.
+Since the format of the name table is not very simple, and there are
+algorithmically generated names, a function is provided for name
+lookup.  This function should also support looking up sequence names,
+so the code point is passed in as a buffer pointer and length.  The
+return format is similar to the UTF-8 static/dynamic return buffer
+mechanism used by other string functions, plus a parameter to indicate
+if passing more code points might result in a different name.  Since
+the name table is rather large, this function is placed in a separate
+object file.
 
----
+<<Library [[uni]] Members>>=
+cp_to_name.o
+@
 
-Algorithmically generated names other than Hangul syllables append
-their code point in hex, following a hyphen character.
+<<cp_to_name.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
 
+@
 
-\lstset{language=txt}
-<<FIXME>>=
-add name lookup function
+<<Unicode property exports>>=
+/* |*seq_len| is # of chars matched; negative means possible longer match */
+/* *alias is alias #: */
+/*   if *alias is 0, returned *alias is max alias index */
+/*   if *alias is valid non-0, returned *alias is *alias - 1 */
+/*   if *alias is invalid non-0, returned *alias is -1 */
+int uni_cp_to_name(const uint32_t *cp, unsigned int len, int *seq_len,
+                   int *alias, <<Buffer return parameters for UTF-[[8]]>>);
+@
+
+<<cp_to_name.c>>=
+<<[[uni_cp_to_name]] support>>
+int uni_cp_to_name(const uint32_t *cp, unsigned int len, int *seq_len,
+                   int *alias, <<Buffer return parameters for UTF-[[8]]>>)
+{
+  if(!len) {
+    if(seq_len)
+      *seq_len = 0;
+    if(alias && *alias)
+      *alias = -1;
+    return 0;
+  }
+  if(alias && *alias < 0) {
+    if(seq_len)
+      *seq_len = 0;
+    return 0;
+  }
+  <<Return name for [[*cp]]>>
+}
+@
+
+The first thing to do is look up the code point in the [[naseq]] table.
+If present, the longest possible match is taken, and if there is a
+longer match beyond the passed-in length, [[*seq_len]] is negated as
+well.  Since there may not be an exact match at all, this code may
+just set [[*seq_len]] to $-1$ and fall through to the single-character
+case.  Even if an exact match is found, every possible sequence is
+checked, since there might be a longer sequence that matches.  Note
+that there are no sequence aliases, so any attempt to get an alias is
+denied.
+
+<<Return name for [[*cp]]>>=
+if(seq_len)
+  *seq_len = 1;
+const uni_str_ptr_t *lu = len > 1 || seq_len ? uni_naseq_of(*cp) : NULL;
+if(lu && lu->len && (len == 1 || (alias && *alias))) {
+  if(seq_len)
+    *seq_len = -1;
+} else if(lu && lu->len) {
+  const uint8_t *found_na = NULL;
+  unsigned int found_nalen = 0, found_seqlen = 0, seqlen, nalen;
+  const uint8_t *ep = uni_naseq_strs + lu->off, *p = ep + lu->len;
+  const uint16_t *seqptr;
+  const uint32_t *cp2;
+  while(p > ep) {
+    nalen = *--p;
+    seqlen = (nalen >> 6) + 1;
+    nalen = (nalen & 0x3f) + 1;
+    if(!p[-1])
+      p--;
+    p -= nalen + seqlen * 2;
+    seqptr = (const uint16_t *)p;
+    int sp = 0;
+    for(cp2 = cp + 1; cp2 - cp < len; cp2++) {
+      unsigned int clen;
+      if(*cp2 != uni_int_utf16_decode(seqptr + sp, &clen))
+        break;
+      sp += clen;
+      if(sp == seqlen) {
+        if(seqlen > found_seqlen) {
+          found_na = p + seqlen * 2;
+	  found_nalen = nalen;
+	  found_seqlen = seqlen;
+	}
+	break;
+      }
+    }
+    /* if at end of string, mark as possibly longer */
+    if(seq_len && sp < seqlen && cp2 - cp == len)
+      *seq_len = -1;
+  }
+  if(found_na) {
+    if(seq_len)
+      *seq_len *= found_seqlen + 1; /* 1 or -1 */
+    return expand_words(found_na, found_nalen, buf, off, buf_len);
+  }
+}
+@
+
+<<[[uni_cp_to_name]] support>>=
+static int expand_words(const uint8_t *na_raw, unsigned int na_raw_len,
+                        <<Buffer return parameters for UTF-[[8]]>>)
+{
+  unsigned int i;
+  unsigned int na_len = na_raw_len;
+
+  for(i = 0; i < na_raw_len; i++)
+    if(na_raw[i] & 0x80) {
+      unsigned int wno = (((unsigned int)na_raw[i] & 0x7f) << 8);
+      if(i < na_raw_len - 1)
+	wno += na_raw[++i];
+      else
+        na_len++;
+      na_len += uni_na_words_arr[wno].len - 2;
+    }
+  /* shortcut for just computing length */
+  if(off < 0 && (!buf_len || !*buf_len))
+    return na_len;
+  /* otherwise build name on stack & return the usual way */
+  uint8_t na[na_len], *np = na;
+  for(i = 0; i < na_raw_len; i++) {
+    if(na_raw[i] & 0x80) {
+      unsigned int wno = (((unsigned int)na_raw[i] & 0x7f) << 8);
+      if(i < na_raw_len - 1)
+	wno += na_raw[++i];
+      memcpy(np, uni_na_words_strs + uni_na_words_arr[wno].off,
+             uni_na_words_arr[wno].len);
+      np += uni_na_words_arr[wno].len;
+    } else
+      *np++ = na_raw[i];
+  }
+  return uni_return8_buf8(na, na_len, buf, off, buf_len);
+}
+@
+
+For the single code point case, the easiest thing to look up first is
+the alias, if an alias index is provided.  The return value is either
+that alias or an empty string to indicate an invalid alias index.  If
+no alias was requested, the total alias count is returned in [[*alias]].
+
+<<Return name for [[*cp]]>>=
+if(alias) {
+  int alias_no = *alias;
+  const uni_str_ptr_t *ap = uni_Name_Alias_of(*cp);
+  int alen = ap->len;
+  if(!alen && alias_no) {
+    if(seq_len)
+      *seq_len = 0;
+    *alias = -1;
+    return 0;
+  }
+  if(alen) {
+    const uint8_t *np = uni_Name_Alias_strs + ap->off;
+    while(alen) {
+      unsigned int nlen = *np + 1;
+      if(nlen > alen - 1) /* in case last word# was cut off */
+        nlen = alen - 1;
+      np++;
+      if(!--alias_no) {
+        --*alias;
+	if(seq_len)
+	  *seq_len = 1;
+	return expand_words(np, nlen, buf, off, buf_len);
+      }
+      alen -= nlen + 1;
+      np += nlen;
+    }
+    if(alias_no > 0) {
+      if(seq_len)
+        *seq_len = 0;
+      *alias = -1;
+      return 0;
+    }
+    *alias = -alias_no;
+  }
+}
+@
+
+For the single code point non-alias case, the first step is once again
+lookup in the name table.  A successful match can sort of be returned
+immediately, but the word pointers need to be replaced with actual
+words first.
+
+<<Return name for [[*cp]]>>=
+lu = uni_na_of(*cp);
+if(lu->len) {
+  const uint8_t *na_raw = (const uint8_t *)(uni_na_strs + lu->off);
+  unsigned int na_raw_len = lu->len * 4;
+  while(!(na_raw[na_raw_len - 1]))
+    na_raw_len--;
+  return expand_words(na_raw, na_raw_len, buf, off, buf_len);
+}
+@
+
+Failure to look up a name may be because it is an invalid code point.
+In that case, return an empty string.
+
+<<Return name for [[*cp]]>>=
+if(*cp > UNI_MAX_CP)
+  return 0;
+@
+
+Otherwise, it must be a generated name.  All generated names consist
+of the narng string for the code point's range followed by a generated
+suffix.
+
+<<Return name for [[*cp]]>>=
+int l = 0, h = uni_narng_arr_len / 2 - 1, m;
+while(l <= h) {
+  m = (l + h) / 2;
+  if(uni_narng_arr[m * 2].cp > *cp)
+    h = m - 1;
+  else if(uni_narng_arr[m * 2 + 1].cp < *cp)
+    l = m + 1;
+  else
+    break;
+}
+if(l > h) /* code points not in UnicodeData.txt at all */
+  return 0;
+m *= 2;
+unsigned int nalen = expand_words(uni_narng_strs + uni_narng_arr[m].off,
+                                  uni_narng_arr[m].len, buf, off, buf_len);
+unsigned int suflen;
+<<Compute [[suflen]] for [[*cp]]'s suffix>>
+/* shortcut for just computing length or if suffix won't fit */
+if(off < 0 && (!buf_len || !*buf_len || *buf_len <= nalen))
+  return nalen + suflen;
+/* otherwise, build suffix from stack */
+/* name was already built into output buffer by expand_words() */
+char suffix[suflen + 1];
+<<Build [[suffix]] from [[*cp]]>>
+if(off < 0) {
+  unsigned int blen = *buf_len - nalen;
+  uint8_t *bptr = *buf + nalen;
+  uni_return8_buf8((uint8_t *)suffix, suflen, &bptr, off, &blen);
+} else if(off >= 0)
+  uni_return8_buf8((uint8_t *)suffix, suflen, buf, off + nalen, buf_len);
+return nalen + suflen;
+@
+
+The suffix for most ranges is just a dash, followed by the code point
+in hex.  For Hangul syllables, though, the suffix is a space, followed
+by the broken down compoents' names.
+
+<<Compute [[suflen]] for [[*cp]]'s suffix>>=
+<<Prepare to compute [[suflen]] for Hangul syllable>>
+if(uni_narng_arr[m].cp == 0xAC00) {
+  <<Compute [[suflen]] for Hangul syllable>>
+} else
+  suflen = 1 /* - */ + (lg2(*cp) + 3) / 4 /* XXXX */;
+@
+
+<<Build [[suffix]] from [[*cp]]>>=
+if(uni_narng_arr[m].cp == 0xAC00) {
+  <<Compute [[suffix]] for Hangul syllable>>
+} else
+  sprintf(suffix, "-%X", (int)*cp);
+@
+
+For Hangul syllables, the Jamo\_Short\_Name property contains the text
+to append to the name.  First the syllable is broken down into L, V,
+and T, and then the string corresponding to each is looked up.
+
+<<Prepare to compute [[suflen]] for Hangul syllable>>=
+const uni_str_ptr_t *ls = NULL, *vs = NULL, *ts = NULL; /* shut gcc up */
+@
+
+<<Compute [[suflen]] for Hangul syllable>>=
+unsigned int jt = (*cp - 0xAC00) % 28;
+unsigned int jv = (*cp - 0xAC00) / 28;
+unsigned int jl = jv / 21;
+jv %= 21;
+ls = uni_JSN_of(0x1100 + jl);
+vs = uni_JSN_of(0x1161 + jv);
+ts = jt ? uni_JSN_of(0x11A7 + jt) : NULL;
+suflen = 1 + ls->len + vs->len + (ts ? ts->len : 0);
+@
+
+The suffix itself is just a space, followed by the L, V, and T short
+names.
+
+<<Compute [[suffix]] for Hangul syllable>>=
+suffix[0] = ' ';
+memcpy(suffix + 1, uni_JSN_strs + ls->off, ls->len);
+memcpy(suffix + 1 + ls->len, uni_JSN_strs + vs->off, vs->len);
+if(ts)
+  memcpy(suffix + 1 + ls->len + vs->len, uni_JSN_strs + ts->off, ts->len);
+@
+
+To test this, a simple program just generates every single name.  No
+verification is done; this is meant to be verified manually.
+
+<<C Test Support Executables>>=
+tstcp_na \
+@
+
+<<tstcp_na.c>>=
+<<Common C Header>>
+
+#include "uni_prop.h"
+
+int main(void)
+{
+  uint32_t cp;
+  uint8_t *buf = NULL;
+  unsigned int buf_len = 0, clen;
+  int has_more, aliases;
+  for(cp = 0; cp <= UNI_MAX_CP + 1; cp++) {
+    clen = uni_cp_to_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
+    while(!clen && aliases > 0)
+      clen = uni_cp_to_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
+    if(!clen)
+      continue;
+    printf("%04X %d %.*s\n", cp, has_more, clen, buf);
+    while(aliases > 0) {
+      clen = uni_cp_to_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
+      printf("%04X %d &%.*s\n", cp, has_more, clen, buf);
+    }
+  }
+  /* all sequences */
+  int i;
+  uint32_t seq[10];
+  for(i = 0; i < uni_naseq_arr_len; i++) {
+    const uint8_t *ep = uni_naseq_strs + uni_naseq_arr[i].off,
+                  *p = ep + uni_naseq_arr[i].len;
+    unsigned int seqlen, nalen;
+    while(p > ep) {
+      uint32_t *sp = seq;
+      *sp = uni_naseq_arr[i].cp;
+      printf("%04X", (int)*sp++);
+      nalen = *--p;
+      if(!p[-1])
+        p--;
+      seqlen = (nalen >> 6) + 1;
+      nalen = (nalen & 0x3f) + 1;
+      p -= nalen + seqlen * 2;
+      const uint16_t *seqp = (const uint16_t *)p;
+      while(seqlen > 0) {
+        *sp = uni_int_utf16_decode(seqp, &clen);
+	printf(":%04X", (int)*sp++);
+	seqp += clen;
+	seqlen -= clen;
+      }
+      clen = uni_cp_to_name(seq, (int)(sp - seq), &has_more, NULL, &buf, 0, &buf_len);
+      printf(" %d %.*s\n", has_more, clen, buf);
+    }
+  }
+  return 0;
+}
 @
 
 The name tables are not really that useful as is:  few programs
@@ -9625,15 +10122,37 @@ My initial implementation used [[gperf]], but generating a perfect
 hash for the full Unicode set took two hours on my machine, and an
 additional hour to compile.
 
+The first thing to do is generate a name table that is preprocessed
+for lookup.  The lookup algorithm is always loose.  UAX44-LM2 states
+that lookups should ignore case, whitespace, underscore, and medial
+hyphens except in U+1180.  There are 15 names with non-medial hyphens,
+but only two are actually ambiguous.  UTS18 (Regular Expressions),
+section 2.5.1 ("Individually Named Characters") acknowledges this by
+requiring hyphens only in U+1180, U+0F60, and U+0FB0.  While the
+algorithm I use violates the original loose matching algorithm, I will
+go ahead and only restrict those three.  The code could actually just
+derive this list itself by looking for duplicates after removing all
+hyphens and spaces.
+
+Note that although the tables only need to strip spaces and hyphens,
+the actual matching routine must strip any whitespace, hyphens, and
+underscores from user input.  For the ambiguous entries, the locations
+of hyphens is retained, and the ambiguity is resolved by checking for
+one at the appropriate spot.
+
+The lookup table contains all possible names:  the na property, the
+Name\_Alias property, and the naseq property.  The narng property is
+reencoded separately.  The returned value should be the code point,
+but sequences require special handling.  In this case, each sequence
+is assigned a number, and that number is added to [[UNI_CP_MAX]] to
+obtain the code point.  A separate table maps this to an actual
+sequence.
+
 <<FIXME>>=
-name (UAX44-LM2):
-  ignore case, whitespace, underscore, and medial hyphens except 1180
-name (UTS18-2.5.1):
-  ignore case, whitespace, underscore, and all hyphens except 1180,
-     0F60, 0FB0
-  allow "namespace": prefix to apply if name doesn't match otherwise
-    e.g. "LATIN LETTER".  Not sure how useful, but could make rules to
-      insert CAPITAL and LOWER into appropriate spot.
+implement reverse lookup
+  - generate sorted array of preprocessed names
+  - app should really generate hash tables itself; the lib should just
+    use bsearch (or should I support my patched cmph?)
 @
 
 ---
@@ -9854,78 +10373,6 @@ given.  Otherwise, we write the suffix, followed by a 0, and return
 the computed length.
 
 ---
-
-For Hangul, the computation of the letters to append is pretty simple,
-but the table already generated does not have the letters in the right
-order, so they are added again, but this time in all caps and in the
-right order, and without any additional data.  Note: JSN raw should
-work for this instead.
-
-<<Return Unicode name of [[cp]]>>=
-int t = (cp - 0xac00) % 28;
-int v = (cp - 0xac00) / 28;
-int l = v / 21;
-v %= 21;
-const char *ls = CHO_abbrev[l];
-const char *vs = JUNG_abbrev[v];
-const char *ts = t ? JONG_abbrev[t - 1] : "";
-@
-
-\lstset{language=make}
-<<Generate character name data>>=
-# hangul syllable lookup table
-for y in CHO JUNG JONG; do \
-  echo "static const char *$${y}_abbrev[] = {"; \
-  fgrep $${y}SEONG $(UNIJAMO) | cut -d\# -f1 | fgrep \; | \
-    while read a b; do \
-      echo " \"$$b\","; \
-    done | sed '$$s/,$$//'; \
-  echo "};"; \
-done >>$@
-@
-
-Having the letters makes computation of the full length trivial.
-
-\lstset{language=C}
-<<Return Unicode name of [[cp]]>>=
-int ll = strlen(ls);
-int vl = strlen(vs);
-int tl = strlen(ts);
-fulllen += ll + vl + tl;
-if(!len)
-  return fulllen;
-@
-
-Now to tack on what fits:  a space, followed by the L abbreviation,
-followed by the V abbreviation, followed by the T abbreviation.  Then
-we can return the computed length and it's over.
-
-<<Return Unicode name of [[cp]]>>=
-if(len > 1) {
-  *buf++ = ' ';
-  --len;
-}
-/* append L */
-if(ll > len)
-  ll = len;
-len -= ll;
-while(--ll >= 0)
-  *buf++ = *ls++;
-/* append V */
-if(vl > len)
-  vl = len;
-len -= vl;
-while(--vl >= 0)
-  *buf++ = *vs++;
-/* append T */
-if(tl > len)
-  tl = len;
-while(--tl >= 0)
-  *buf++ = *ts++;
-/* terminate and return */
-*buf = 0;
-return fulllen;
-@
 
 \lstset{language=txt}
 <<FIXME>>=
@@ -11680,25 +12127,25 @@ for an even higher level function.
 
 <<Unicode property exports>>=
 /* negative slen indicates zero termination */
-<<[[uni_str_ducet]] proto for UTF-[[32]]>>;
-<<[[uni_str_ducet]] proto for UTF-[[16]]>>;
-<<[[uni_str_ducet]] proto for UTF-[[8]]>>;
+<<[[uni_str_ducet]][[32]] proto>>;
+<<[[uni_str_ducet]][[16]] proto>>;
+<<[[uni_str_ducet]][[8]] proto>>;
 @
 
-<<[[uni_str_ducet]] proto for UTF-(@sz)>>=
+<<[[uni_str_ducet]](@sz) proto>>=
 uint32_t *uni_str_ducet<<@sz>>(const uint<<@sz>>_t *str, int slen,
                           const uni_uca_opts_t *opts, unsigned int *rlen,
 			  unsigned int *llen)
 @
 
 <<DUCET lookup functions>>=
-<<[[uni_str_ducet]] for UTF-[[32]]>>
-<<[[uni_str_ducet]] for UTF-[[16]]>>
-<<[[uni_str_ducet]] for UTF-[[8]]>>
+<<[[uni_str_ducet]][[32]]>>
+<<[[uni_str_ducet]][[16]]>>
+<<[[uni_str_ducet]][[8]]>>
 @
 
-<<[[uni_str_ducet]] for UTF-(@sz)>>=
-<<[[uni_str_ducet]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_str_ducet]](@sz)>>=
+<<[[uni_str_ducet]][[<<@sz>>]] proto>>
 {
   uint32_t *res, res_max, nres = 0;
   uni_ducet_lookup_state_t *st = NULL;
@@ -11845,23 +12292,23 @@ indicating an absolute length.
 
 <<Unicode I/O Exports>>=
 /* "int"ernal strcmp; assumes a & b are valid UTF */
-<<[[uni_int_utf_strcmp]] proto for UTF-[[32]]>>;
-<<[[uni_int_utf_strcmp]] proto for UTF-[[16]]>>;
-<<[[uni_int_utf_strcmp]] proto for UTF-[[8]]>>;
+<<[[uni_int_utf-]][[32]][[_strcmp]] proto>>;
+<<[[uni_int_utf-]][[16]][[_strcmp]] proto>>;
+<<[[uni_int_utf-]][[8]][[_strcmp]] proto>>;
 @
 
-<<[[uni_int_utf_strcmp]] proto for UTF-(@sz)>>=
+<<[[uni_int_utf-]](@sz)[[_strcmp]] proto>>=
 int uni_int_utf<<@sz>>_strcmp(const uint<<@sz>>_t *a, int alen, const uint<<@sz>>_t *b, int blen)
 @
 
 <<Unicode I/O functions>>=
-<<[[uni_int_utf_strcmp]] for UTF-[[32]]>>
-<<[[uni_int_utf_strcmp]] for UTF-[[16]]>>
-<<[[uni_int_utf_strcmp]] for UTF-[[8]]>>
+<<[[uni_int_utf-]][[32]][[_strcmp]]>>
+<<[[uni_int_utf-]][[16]][[_strcmp]]>>
+<<[[uni_int_utf-]][[8]][[_strcmp]]>>
 @
 
-<<[[uni_int_utf_strcmp]] for UTF-(@sz)>>=
-<<[[uni_int_utf_strcmp]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_int_utf-]](@sz)[[_strcmp]]>>=
+<<[[uni_int_utf-]][[<<@sz>>]][[_strcmp]] proto>>
 {
   while(alen && blen) {
     unsigned int aclen, bclen;
@@ -11908,25 +12355,25 @@ int8_t do_literal;
 @
 
 <<Unicode property exports>>=
-<<[[uni_uca_strcmp]] proto for UTF-[[32]]>>;
-<<[[uni_uca_strcmp]] proto for UTF-[[16]]>>;
-<<[[uni_uca_strcmp]] proto for UTF-[[8]]>>;
+<<[[uni_uca_strcmp]][[32]] proto>>;
+<<[[uni_uca_strcmp]][[16]] proto>>;
+<<[[uni_uca_strcmp]][[8]] proto>>;
 @
 
-<<[[uni_uca_strcmp]] proto for UTF-(@sz)>>=
+<<[[uni_uca_strcmp]](@sz) proto>>=
 int uni_uca_strcmp<<@sz>>(const uint<<@sz>>_t *a, int alen,
                      const uint<<@sz>>_t *b, int blen,
                      const uni_uca_opts_t *opts)
 @
 
 <<DUCET lookup functions>>=
-<<[[uni_uca_strcmp]] for UTF-[[32]]>>
-<<[[uni_uca_strcmp]] for UTF-[[16]]>>
-<<[[uni_uca_strcmp]] for UTF-[[8]]>>
+<<[[uni_uca_strcmp]][[32]]>>
+<<[[uni_uca_strcmp]][[16]]>>
+<<[[uni_uca_strcmp]][[8]]>>
 @
 
-<<[[uni_uca_strcmp]] for UTF-(@sz)>>=
-<<[[uni_uca_strcmp]] proto for UTF-[[<<@sz>>]]>>
+<<[[uni_uca_strcmp]](@sz)>>=
+<<[[uni_uca_strcmp]][[<<@sz>>]] proto>>
 {
   const uint<<@sz>>_t *rawa = a, *rawb = b;
   int raw_alen = alen, raw_blen = blen;
@@ -12273,12 +12720,12 @@ int uni_is_FCD8(const uint8_t *str, int len);
 @
 
 <<Unicode normalization support functions>>=
-<<[[uni_is_FCD]] for UTF-[[32]]>>
-<<[[uni_is_FCD]] for UTF-[[16]]>>
-<<[[uni_is_FCD]] for UTF-[[8]]>>
+<<[[uni_is_FCD]][[32]]>>
+<<[[uni_is_FCD]][[16]]>>
+<<[[uni_is_FCD]][[8]]>>
 @
 
-<<[[uni_is_FCD]] for UTF-(@sz)>>=
+<<[[uni_is_FCD]](@sz)>>=
 int uni_is_FCD<<@sz>>(const uint<<@sz>>_t *str, int len)
 {
   uint8_t prev = 0, curs;
@@ -13202,7 +13649,6 @@ if((f = fopen("IdnaMappingTable.txt", "r")) ||
   }
   fclose(f);
   str_to_enum(&parsed_props[prop_IDNA_Status], "disallowed");
-  parsed_props[prop_IDNA_Mapping].strs_char_size = 8;
 }
 @
 
@@ -13509,170 +13955,353 @@ for(n = n->children; n; n = n->next) {
   }
 }
 xmlFreeDoc(doc);
-parsed_props[prop_na_xml].strs_char_size = 8;
 @
 
-Some Unicode code points have multiple names, and of course some
-sequences may have the same starting index.  Both of these problems
-can be solved the same way as named sequence conflicts were solved:
-by providing a linear search list of all values with length bytes to
-skip over them.  Since this encoding needs to be done on the main
-string table as well, both tables may as well be combined in the
-process.
+Some code points have multiple entity names.  This problem can be
+solved the same way as with Name\_Alias:  prepend a length to each
+string.  As an optimization, since the word encoding is not done, and
+there is no name longer than 127 characters, the length byte has its
+high bit set.  The last string does not have a length byte; it just
+occupies the remainder of the space.
 
-One possible optimization would be to detect the lack of multiple
-entries immediately.  This can be detected either by reading an actual
-length byte, or by noting that there are no length bytes.  The latter
-requires encoding the length byte distinctly from any character in the
-name.  Since name lengths never exceed 32, the name length portion can
-be reduced by one bit, shifting the sequence count down, and leaving
-room to set the high bit for lengths.
-
-Another required modification to the length byte is that Unicode named
-sequences always have between one and four index extension characters,
-whereas this table will have between zero and two (at least using the
-current [[unicode.xml]] and the 2007 group).  Thus the index extension
-length needs to have one added to leave room for zero-length extensions.
-
-So, in order to merge the arrays and process duplicates and multiple
-values per index in the main array at the same time, the first thing
-to do is simply append the name sequence array to the main array,
-processing each entry as needed.  This processing simply adjusts the
-length byte as described above, and moves the string contents to the
-main string content array.
+<<UCD parser local functions>>=
+static int cmp_cp_name(const void *a, const void *b)
+{
+  int c = *(int32_t *)a - *(int32_t *)b;
+  return c ? c : cmp_strs(a, b);
+}
+@
 
 <<Post-process property data>>=
 prop_t *xna = &parsed_props[prop_na_xml];
-prop_t *xnaseq = &parsed_props[prop_naseq_xml];
-/* adjust counts so they have high bit set */
-/* also, set (index ext len) - 1 to (index ext len) */
-/* also, copy to xna array */
-while(xna->len + xnaseq->len > xna->max_len)
-  resize(xna->str_arr, xna->max_len *= 2);
-raw_cp_str_t *xna_str = xna->str_arr, *xnaseq_str = xnaseq->str_arr;
-for(i = 0; i < xnaseq->len; i++) {
-  int len = xnaseq_str[i].len;
-  uint32_t *p32 = xnaseq->strs + xnaseq_str[i].off;
-  uint8_t *p8 = (uint8_t *)(p32 + len);
-  while(!*--p8);
-  uint8_t nlen = *p8, extlen = (nlen >> 6) + 1;
-  nlen = (nlen & 0x3f) + 1;
-  *p8 = (nlen - 1) | (extlen << 5) | 0x80;
-  xna_str[xna->len + i] = xnaseq_str[i];
-  xna_str[xna->len + i].off = xna->strs_len;
-  while(xna->strs_len + len > xna->max_strs)
-    resize(xna->strs, xna->max_strs *= 2);
-  memcpy(xna->strs + xna->strs_len, xnaseq->strs + xnaseq_str[i].off, len * 4);
-  xna->strs_len += len;
-}
-xna->len += xnaseq->len;
-@
-
-Once the arrays have been merged, the name sequence array is no longer
-needed.  Technically, it does not need to be freed (I don't free any
-of the other arrays either, until the end of the program), but doing
-so is harmless.
-
-<<Post-process property data>>=
-free(xnaseq->strs);
-free(xnaseq_str);
-clearbuf(xnaseq, 1);
-@
-
-Next, all duplicates need to be removed.  In addition, even though the
-length byte modification eliminates the need for a length byte on
-every string, the 16-bit index extensions impose an alignment
-restriction that require padding on some elements.  If padding is
-needed, it is added in the form of a one, which cannot be a length
-byte or a valid name character.
-
-<<Post-process property data>>=
-qsort(xna_str, xna->len, sizeof(*xna_str), uni_cmp_cp);
+sort_strs = xna->strs;
+qsort(xna->str_arr, xna->len, sizeof(*xna->str_arr), cmp_cp_name);
 for(i = xna->len - 1; i > 0; i--) {
-  /* collect entries w/ same cp */
-  for(low = i - 1; low > 0; low--)
-    if(xna_str[i].cp != xna_str[low].cp)
+  unsigned int nlen = xna->str_arr[i].len;
+  for(low = i; low > 0; low--) {
+    if(xna->str_arr[low - 1].cp != xna->str_arr[i].cp)
       break;
-  if(++low == i) {
-    <<Pad unique XML name if needed>>
+    if(!cmp_strs(&xna->str_arr[low - 1], &xna->str_arr[low]))
+      continue;
+    nlen += xna->str_arr[low - 1].len + 1;
+  }
+  if(low == i)
     continue;
+  while(xna->max_strs < xna->strs_len + nlen)
+    resize(xna->strs, xna->max_strs *= 2);
+  uint8_t *strs8 = (uint8_t *)(xna->strs + xna->strs_len);
+  unsigned int strs8_len = 0;
+  for(j = low; j <= i; j++) {
+    while(j < i && !cmp_strs(&xna->str_arr[j], &xna->str_arr[j + 1]))
+      j++;
+    uint8_t *p8 = (uint8_t *)(xna->strs + xna->str_arr[j].off);
+    unsigned int len8 = xna->str_arr[j].len * 4;
+    while(!p8[len8 - 1])
+      len8--;
+    if(j != i)
+      strs8[strs8_len++] = 0x80 | (len8 - 1);
+    memcpy(strs8 + strs8_len, p8, len8);
+    strs8_len += len8;
   }
-  high = i;
-  /* mark exact duplicates as cp == ~0 */
-  /* could improve the speed of this by sorting first, but why bother? */
-  for(j = low; j < high; j++) {
-    unsigned int k;
-    if(xna_str[j].cp == (uint32_t)~0)
-      continue;
-    for(k = j + 1; k <= high; k++)
-      if(xna_str[k].cp != (uint32_t)~0 && xna_str[j].len == xna_str[k].len &&
-         !memcmp(xna->strs + xna_str[j].off, xna->strs + xna_str[k].off,
-	         xna_str[k].len))
-        xna_str[k].cp = ~0;
-  }
-  /* now create new entry w/ all unique entries from list */
-  int max_ent_len = 0;
-  for(j = low; j <= high; j++) {
-    if(xna_str[j].cp == (uint32_t)~0)
-      continue;
-    /* + 2 is for length byte & padding */
-    max_ent_len += xna_str[j].len * 4 + 2;
-  }
-  if(max_ent_len == xna_str[low].len * 4 + 2) {
-    /* only one was added, so there is only one unique name */
-    <<Pad unique XML name if needed>>
-  } else {
-    max_ent_len = (max_ent_len + 3) / 4;
-    while(xna->max_strs < xna->strs_len + max_ent_len)
-      resize(xna->strs, xna->max_strs *= 2);
-    uint8_t *p8 = (uint8_t *)(xna->strs + xna->strs_len);
-    for(j = low; j <= high; j++) {
-      if(xna_str[j].cp == (uint32_t)~0)
-        continue;
-      int elen = xna_str[j].len * 4;
-      memcpy(p8, xna->strs + xna_str[j].off, elen);
-      while(!p8[elen - 1])
-        elen--;
-      if(!(p8[elen - 1] & 0x80)) {
-	if(!(elen % 2))
-	  p8[elen++] = 0;
-        p8[elen] = 0x80 | (elen - 1);
-	elen++;
-      }
-      p8 += elen;
-    }
-    max_ent_len = p8 - (uint8_t *)(xna->strs + xna->strs_len);
-    while(max_ent_len % 4) {
-      *p8++ = 0;
-      max_ent_len++;
-    }
-    xna_str[low].off = xna->strs_len;
-    xna_str[low].len = max_ent_len / 4;
-    xna->strs_len += max_ent_len / 4;
-  }
-  /* remove all but generated entry */
-  memmove(xna_str + low + 1, xna_str + high, xna->len - high);
-  xna->len -= (high - low) + 1;
+  while(strs8_len % 4)
+    strs8[strs8_len++] = 0;
+  movebuf(xna->str_arr + low + 1, xna->str_arr + i + 1,
+          xna->len - (i + 1));
+  xna->str_arr[low].off = xna->strs_len;
+  xna->str_arr[low].len = strs8_len / 4;
+  xna->strs_len += strs8_len / 4;
+  xna->len -= i - low;
   if(!(i = low))
     break;
 }
 @
 
-<<Pad unique XML name if needed>>=
-/* no duplicates: no length byte needed, but maybe padding */
-uint8_t *p8 = (uint8_t *)(xna->strs + xna_str[low].off);
-int elen = xna_str[low].len * 4;
-while(!p8[elen - 1])
-  elen--;
-if(elen % 2)
-  p8[elen] = 1; /* force padding to 16 bits */
+<<Dump character information as C code>>=
+dump_str_tabs(xna, gen_h, tstf);
+@
+
+Some sequences have multiple entreis with the same starting character.
+There is no guarantee that there are no multiple names for the same
+sequence, either.  The encoding used for naseq above is good enough to
+capture this.
+
+<<Post-process property data>>=
+prop_t *xnaseq = &parsed_props[prop_naseq_xml];
+sort_strs = xnaseq->strs;
+qsort(xnaseq->str_arr, xnaseq->len, sizeof(*xnaseq->str_arr), cmp_cp_name);
+for(i = xnaseq->len - 1; i > 0; i--) {
+  for(j = i; j > 0 && xnaseq->str_arr[j].cp == xnaseq->str_arr[j - 1].cp &&
+             !cmp_strs(&xnaseq->str_arr[j], &xnaseq->str_arr[j - 1]); j--);
+  if(j != i) {
+    movebuf(xnaseq->str_arr + j + 1, xnaseq->str_arr + i + 1, xnaseq->len - (i + 1));
+    xnaseq->len -= i - j;
+    if(!(i -= j))
+      break;
+  }
+  while(i > 0 && xnaseq->str_arr[i].cp == xnaseq->str_arr[i - 1].cp) {
+    int jlen = xnaseq->str_arr[i - 1].len, ilen = xnaseq->str_arr[i].len;
+    while(xnaseq->max_strs < xnaseq->strs_len + ilen + jlen)
+      resize(xnaseq->strs, xnaseq->max_strs *= 2);
+    uint16_t *newseq = (uint16_t *)(xnaseq->strs + xnaseq->strs_len);
+    jlen *= 2;
+    cpybuf(newseq, xnaseq->strs + xnaseq->str_arr[i - 1].off, jlen);
+    if(!newseq[jlen - 1])
+      jlen--;
+    ilen *= 2;
+    cpybuf(newseq + jlen, xnaseq->strs + xnaseq->str_arr[i].off, ilen);
+    if(!newseq[jlen + ilen - 1])
+      ilen--;
+    if((ilen + jlen) % 2)
+      newseq[ilen++ + jlen] = 0;
+    for(j = i - 1; j > 0; j--)
+      if(cmp_strs(&xnaseq->str_arr[j], &xnaseq->str_arr[j - 1]))
+        break;
+    xnaseq->str_arr[j].len = (ilen + jlen) / 2;
+    xnaseq->str_arr[j].off = xnaseq->strs_len;
+    xnaseq->strs_len += (ilen + jlen) / 2;
+    movebuf(xnaseq->str_arr + j + 1, xnaseq->str_arr + i + 1, xnaseq->len - (i + 1));
+    xnaseq->len--;
+    i = j;
+  }
+  if(!i)
+    break;
+}
 @
 
 <<Dump character information as C code>>=
-dump_str_tabs(&parsed_props[prop_na_xml], gen_h, tstf);
+dump_str_tabs(xnaseq, gen_h, tstf);
+@
+
+Finally, although the encoding is fairly simple, a function analogous
+to the plain Unicode name lookup function is provided.
+
+<<Library [[uni]] Members>>=
+xml_cp_to_name.o
+@
+
+<<xml_cp_to_name.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+@
+
+<<Unicode property exports>>=
+/* |*seq_len| is # of chars matched; negative means possible longer match */
+/* *alias is alias #: */
+/*   if *alias is 0, returned *alias is max alias index */
+/*   if *alias is valid non-0, returned *alias is *alias - 1 */
+/*   if *alias is invalid non-0, returned *alias is -1 */
+int uni_cp_to_xml_name(const uint32_t *cp, unsigned int len, int *seq_len,
+                       int *alias, <<Buffer return parameters for UTF-[[8]]>>);
+@
+
+<<xml_cp_to_name.c>>=
+int uni_cp_to_xml_name(const uint32_t *cp, unsigned int len, int *seq_len,
+                       int *alias, <<Buffer return parameters for UTF-[[8]]>>)
+{
+  if(!len) {
+    if(seq_len)
+      *seq_len = 0;
+    if(alias && *alias)
+      *alias = -1;
+    return 0;
+  }
+  if(alias && *alias < 0) {
+    if(seq_len)
+      *seq_len = 0;
+    return 0;
+  }
+  <<Return XML name for [[*cp]]>>
+}
+@
+
+Just like with Unicode names, the first thing to do is to see if there
+is a matching sequence name.
+
+<<Return XML name for [[*cp]]>>=
+if(seq_len)
+  *seq_len = 1;
+const uni_str_ptr_t *lu = len > 1 || seq_len ? uni_naseq_xml_of(*cp) : NULL;
+if(lu && lu->len && len == 1) {
+  if(seq_len)
+    *seq_len = -1;
+} else if(lu && lu->len) {
+  const uint8_t *found_na = NULL;
+  unsigned int found_nalen = 0, found_seqlen = 0, found_alias = 0, seqlen, nalen;
+  const uint8_t *ep = uni_naseq_xml_strs + lu->off, *p = ep + lu->len;
+  const uint16_t *seqptr;
+  const uint32_t *cp2;
+  while(p > ep) {
+    nalen = *--p;
+    seqlen = (nalen >> 6) + 1;
+    nalen = (nalen & 0x3f) + 1;
+    if(!p[-1])
+      p--;
+    p -= nalen + seqlen * 2;
+    seqptr = (const uint16_t *)p;
+    int sp = 0;
+    for(cp2 = cp + 1; cp2 - cp < len; cp2++) {
+      unsigned int clen;
+      if(*cp2 != uni_int_utf16_decode(seqptr + sp, &clen))
+        break;
+      sp += clen;
+      if(sp == seqlen) {
+        if(seqlen > found_seqlen) {
+          found_na = p + seqlen * 2;
+	  found_nalen = nalen;
+	  found_seqlen = seqlen;
+	  found_alias = 0;
+	} else if(seqlen == found_seqlen) {
+	  found_alias++;
+	  if(alias && *alias == found_alias) {
+	    found_na = p + seqlen * 2;
+	    found_nalen = nalen;
+	  }
+	}
+	break;
+      }
+    }
+    /* if at end of string, mark as possibly longer */
+    if(seq_len && sp < seqlen && cp2 - cp == len)
+      *seq_len = -1;
+  }
+  if(found_na) {
+    if(alias && *alias > found_alias) {
+      *alias = -1;
+      *seq_len = 0;
+      return 0;
+    } else if(alias && !*alias)
+      *alias = found_alias;
+    else if(alias)
+      --*alias;
+    if(seq_len)
+      *seq_len *= found_seqlen + 1; /* 1 or -1 */
+    return uni_return8_buf8(found_na, found_nalen, buf, off, buf_len);
+  }
+}
+@
+
+For the single code point case, there is only one table to consult.
+It behaves much like the alias table, except the lst entry for each
+code point does not have an explicit length, and the explicit lengths
+for the others all have their high bit set.
+
+<<Return XML name for [[*cp]]>>=
+lu = uni_na_xml_of(*cp);
+if(!lu->len)
+  return 0;
+const uint8_t *str = uni_na_xml_strs + lu->off;
+if(!alias)
+  return uni_return8_buf8(*str & 0x80 ? str + 1 : str,
+                          *str & 0x80 ? (*str & 0x7f) + 1 : lu->len,
+			  buf, off, buf_len);
+int num_alias = 0;
+int alen = lu->len, retlen = 0;
+while(1) {
+  if(num_alias == *alias) {
+    retlen = uni_return8_buf8(*str & 0x80 ? str + 1 : str,
+                              *str & 0x80 ? (*str & 0x7f) + 1 : alen,
+			      buf, off, buf_len);
+    if(num_alias) {
+      --*alias;
+      return retlen;
+    }
+  }
+  if(!(*str & 0x80))
+    break;
+  alen -= (*str & 0x7f) + 2;
+  str += (*str & 0x7f) + 2;
+  num_alias++;
+}
+if(*alias) /* couldn't find requested alias */
+  *alias = -1;
+else /* set # of aliases */
+  *alias = num_alias;
+return retlen;
+@
+
+To test this, a simple program just generates every single name.  No
+verification is done; this is meant to be verified manually.
+
+<<C Test Support Executables>>=
+tstcp_xml_na \
+@
+
+<<tstcp_xml_na.c>>=
+<<Common C Header>>
+
+#include "uni_prop.h"
+
+int main(void)
+{
+  uint32_t cp;
+  uint8_t *buf = NULL;
+  unsigned int buf_len = 0, clen;
+  int has_more, aliases;
+  for(cp = 0; cp <= UNI_MAX_CP + 1; cp++) {
+    clen = uni_cp_to_xml_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
+    if(!clen)
+      continue;
+    printf("%04X %d %.*s\n", cp, has_more, clen, buf);
+    while(aliases > 0) {
+      clen = uni_cp_to_xml_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
+      printf("%04X %d &%.*s\n", cp, has_more, clen, buf);
+    }
+  }
+  /* all sequences */
+  int i;
+  uint32_t seq[10];
+  for(i = 0; i < uni_naseq_xml_arr_len; i++) {
+    const uint8_t *ep = uni_naseq_xml_strs + uni_naseq_xml_arr[i].off,
+                  *p = ep + uni_naseq_xml_arr[i].len;
+    unsigned int seqlen, nalen;
+    while(p > ep) {
+      uint32_t *sp = seq;
+      *sp = uni_naseq_xml_arr[i].cp;
+      printf("%04X", (int)*sp++);
+      nalen = *--p;
+      if(!p[-1])
+        p--;
+      seqlen = (nalen >> 6) + 1;
+      nalen = (nalen & 0x3f) + 1;
+      p -= nalen + seqlen * 2;
+      const uint16_t *seqp = (const uint16_t *)p;
+      while(seqlen > 0) {
+        *sp = uni_int_utf16_decode(seqp, &clen);
+	printf(":%04X", (int)*sp++);
+	seqp += clen;
+	seqlen -= clen;
+      }
+      clen = uni_cp_to_xml_name(seq, (int)(sp - seq), &has_more, &aliases, &buf, 0, &buf_len);
+      printf(" %d %.*s\n", has_more, clen, buf);
+      while(aliases) {
+        clen = uni_cp_to_xml_name(seq, (int)(sp - seq), &has_more, &aliases, &buf, 0, &buf_len);
+        printf("\t %d &%.*s\n", has_more, clen, buf);
+	nalen = *--p;
+	if(!p[-1])
+	  p--;
+	seqlen = (nalen >> 6) + 1;
+	nalen = (nalen & 0x3f) + 1;
+	p -= nalen + seqlen * 2;
+      }
+    }
+  }
+  return 0;
+}
 @
 
 \section{The CLDR}
+
+The CLDR and the ICU library go hand-in-hand; the CLDR is basically
+the ICU data files somewhat sloppily extracted from ICU.  It may be
+best to not support the CLDR data at all, but instead use ICU to query
+it.  A few support functions could be provided to use it along with
+the UCD (but then again, ICU has all of the UCD as well, so why bother
+with libuni at all?).  However, like the POSIX locale functions, the
+ICU functions do not provide a way to query the information needed for
+a compliant regular expression engine.  It is also a fairly large
+library, and I am unsure it does a good job of allowing minimal
+linkage.
 
 The CLDR also uses XML rather than simple tables.  Doing hand-coded
 XSLT for hundreds of data files seemed excessive, which is the main
@@ -13698,24 +14327,31 @@ chdir(CLDR_LOC);
 @
 
 The CLDR is, like most XML data, insanely complex and at times poorly
-documented.  Much of its functionality also has dubious value for
-general projects.  Part of the purpose of this project was to provide
-information not obtainable from the POSIX locale functions.  As such,
-everything will be ignored except for collation data.
+documented%
+\footnote{XML was promoted as a self-documenting data format.  The DTD
+documents the format not quite as well as a BNF grammar documents a
+programming language:  that is, not even well enough to get the syntax
+completely right (complex conditions cannot be expressed in BNF or
+DTD, so there are often exceptions written in the supplementary text).
+Like all data formats, XML needs supplementary documentation.  The
+CLDR has such documentation, but it is of medium-to-poor quality.}%
+.  Much of its functionality also has dubious value for general
+projects.  As such, the only CLDR data provided is that which supports
+localization of UCD data, plus one property that is required for
+regular expressions.
 
-Since the CLDR deals with locale data, the first thing to do is
-determine what locale is being used.  The locale name consists of a
-language identifier, followed by optional extensions.  The language
-identifier consists of a language subtag, followed by an optional
-script subtag, followed by an optional territory subtag, followed by
-optional variant subtags.  These are all case-insensitive, and are
-separated by either dashes or underscores.  The supported language
-identifier tags are listed in the supplemental metadata.  As with all
-of the CLDR data, versioning information is ignored.\footnote{One day,
-the versions of all data files used in building this library should be
-obtainable as a global variable or API call.  However, only overall
-version numbers should be used, and not the individual constituent
-file modification times.}
+The first thing necessary for localization is to determine what locale
+is being used.  The locale name consists of a language identifier,
+followed by optional extensions.  The language identifier consists of
+a language subtag, followed by an optional script subtag, followed by
+an optional territory subtag, followed by optional variant subtags.
+These are all case-insensitive, and are separated by either dashes or
+underscores.  The supported language identifier tags are listed in the
+supplemental metadata.  As with all of the CLDR data, versioning
+information is ignored.\footnote{One day, the versions of all data
+files used in building this library should be obtainable as a global
+variable or API call.  However, only overall version numbers should be
+used, and not the individual constituent file modification times.}
 
 <<Parse CLDR files>>=
 doc = xmlReadFile("common/supplemental/supplementalMetadata.xml",
@@ -13747,11 +14383,18 @@ xmlFreeDoc(doc);
 
 The data we're looking for is under the validity tag.  Each set is
 listed as a ``variable'' whose value is the whitespace-separated list
-of names.  In fact, one could make an argument that all of the
-variables of type choice are useful to add as enumerations.  The main
-argument against this is that some of the lists are rather long, and
-the enumerations' use of binary searching (rather than, say, hash
-tables) may be slow.
+of names.  Technically, they definition in [[attributeValues]] is
+used, but for those which have large lists, the value is just an
+expansion of one of these variables.  In fact, one could make an
+argument that all of the variables of type choice are useful to add as
+enumerations.  The main argument against this is that some of the
+lists are rather long, and the enumerations' use of binary searching
+(rather than, say, hash tables) may be slow.  It also violates my
+mandate of only including UCD localization information.
+
+One useful set not covered by variables is provided by the [[type]]
+attribute of [[segmentation]], which lists the valid segmentation
+types.  This is extracted as well.
 
 <<Parse CLDR supplemental metadata>>=
 else if(xml_isname(n, "validity")) {
@@ -13764,16 +14407,27 @@ else if(xml_isname(n, "validity")) {
 @
 
 <<Parse CLDR validity entries>>=
-else if(xml_isname(c, "variable")) {
+else if(xml_isname(c, "variable") || xml_isname(c, "attributeValues")) {
   char *t = xml_prop(c, "type");
-  if(!strcmp(t, "choice")) {
+  if(t && !strcmp(t, "choice")) {
     char *v = xml_prop(c, "id");
-    if(!c->children || !c->children->content || !v || v[0] != '$')
+    if(!v)
+      v = xml_prop(c, "elements");
+    if(!c->children || !c->children->content || !v)
       continue; /* should never happpen */
+    /* I guess linear search is good enough here */
+    if(strcmp(v, "$grandfathered") && /* supplements language */
+       strcmp(v, "$language") &&
+       strcmp(v, "$territory") &&
+       strcmp(v, "$script") &&
+       strcmp(v, "$variant") &&
+       strcmp(v, "$collationType") &&
+       strcmp(v, "segmentation"))
+      continue;
     char *name;
     inisize(name, strlen(v) + 5);
     memcpy(name, "CLDR_", 5);
-    strcpy(name + 5, v + 1);
+    strcpy(name + 5, *v == '$' ? v + 1 : v);
     xmlprop_free(v);
     int pno = add_prop(name);
     free(name);
@@ -13820,10 +14474,9 @@ else if(xml_isname(n, "alias")) {
   int grandf = add_prop("CLDR_grandfathered"),
       lang = add_prop("CLDR_language"),
       ter = add_prop("CLDR_territory"),
-      var = add_prop("CLDR_variant"),
-      tz = add_prop("CLDR_tzid");
+      var = add_prop("CLDR_variant");
   if(!num_val_aliases[lang] || !num_val_aliases[ter] ||
-     !num_val_aliases[var] || !num_val_aliases[tz]) {
+     !num_val_aliases[var]) {
     fputs("variable defs do not preceed aliases!\n", stderr);
     exit(1);
   }
@@ -13869,8 +14522,6 @@ else if(xml_isname(c, "territoryAlias"))
   do_attr_alias(c, ter);
 else if(xml_isname(c, "variantAlias"))
   do_attr_alias(c, var);
-else if(xml_isname(c, "zoneAlias"))
-  do_attr_alias(c, tz);
 @
 
 The easy way to do this would be to look up the value to be aliased
@@ -13901,11 +14552,13 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
   uni_valueof_t me, *fp, *tp;
   int tval;
   /* don't care about reason */
-  if(!from || !to) {
+  /* some aliases have no to.  what does that mean? */
+  if(!to) {
+#if 0
     fprintf(stderr, "Invalid %s alias %s->%s\n",
                     parsed_props[prop].name, from, to);
+#endif
     xmlprop_free(from);
-    xmlprop_free(to);
     return;
   }
   me.name = to;
@@ -13942,10 +14595,11 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
     }
   }
   if(!tp || !fp) {
+#if 0
     fprintf(stderr, "Error looking up %s for %s alias %s->%s\n",
             me.name, parsed_props[prop].name, from, to);
-    /* there are some known issues in CLDR, so just print & ignore */
-    /* builder will have to detect massive numbers of errors himself */
+#endif
+    /* there are some known issues in CLDR, so just ignore */
     xmlprop_free(from);
     xmlprop_free(to);
     return;
@@ -13994,8 +14648,6 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
   $language - und
   $script - Zzzz
   $region - ZZ
-  $currency - XXX
-  $tzid - unk
 translated region (territory?) codes:
   AA -> 958 -> AAA
   QM..QZ -> 959..972 -> QMM..QZZ
@@ -14152,8 +14804,8 @@ chdir(CLDR_LOC);
    ignore .<encoding> extension, if present
 @
 
-The main lldml files contain the actual locale data.  Every lldml file
-at least identifies itself.  All lldml files with the same identity
+The main ldml files contain the actual locale data.  Every ldml file
+at least identifies itself.  All ldml files with the same identity
 are effectively merged into a single tree.  For alias lookups and data
 merging, all available xml files are read in and keyed by their
 primary identity.
@@ -14237,62 +14889,6 @@ else if(xml_isname(n, "identity")) {
 }
 @
 
-The casing subdirectory contains internal-use-only casing rules for
-user interfaces.
-
-<<Parse CLDR files>>=
-/* casing: special casing rules */
-/* need to convert this to a binary file format */
-/* need to load at run-time based on locale var or desired locale */
-/* is this even useful?  supposedly internal-use-only */
-d = opendir("common/casing");
-if(!d) {
-  perror("CLDR casing");
-  exit(1);
-}
-chdir("common/casing");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name);
-}
-closedir(d);
-chdir(cwd);
-chdir(CLDR_LOC);
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "metadata")) {
-  for(c = n->children; c; c = c->next)
-    if(xml_isname(c, "casingData")) {
-      for(c = c->children; c; c = c->next) {
-        if(!xml_isname(c, "casingItem"))
-	  continue;
-	/* type should be enum of all potential types */
-	    /* calendar-field day-format-except-narrow */
-	    /* day-narrow day-standalone-except-narrow */
-	    /* displayName displayName-count era-abbr */
-	    /* era-name era-narrow language key */
-	    /* metazone-long month-format-except-narrow */
-	    /* month-standalone-except-narrow */
-	    /* month-narrow quarter-abbreviated */
-	    /* quarter-format-wide tense territory */
-	    /* quarter-standalone-wide script symbol */
-	    /* type metazone-short zone-exemplarCity */
-	  /* not sure if should allow "other" types */
-	/* content should be enum of values: */
-	  /* titlecase/uppercase/lowercase */
-#if 0
-        printf(" casing %s: %s\n", 
-	       xml_prop(c, "type"), /* leak */
-	       c->children->content);
-#endif
-      }
-      break;
-    }
-}
-@
-
 The collations subdirectory contains locale-specific collation order
 changes.
 
@@ -14335,6 +14931,15 @@ else if(xml_isname(n, "collations")) {
       /* ignore draft, references, alt attrs */
       /* can have more than one, but why would you? */
     } else if(xml_isname(c, "collation")) {
+      /* store in file as DUCET/rev_DUCET override tables */
+      /* just mtab version: */
+      /*   <strtab len> */
+      /*   <strtab> */
+      /*   <mtab len> */
+      /*   <mtab> */
+      /*   <rev strtab len> */
+      /*   <rev strtab> */
+      /*   <rev mtab> */
       /* ignore draft, standard, references, alt */
       if(!subl) /* technically, this isn't a req, but it's safe */
         subl = xml_prop(c, "validSubLocales");
@@ -14443,8 +15048,13 @@ else if(xml_isname(n, "collations")) {
 }
 @
 
-The main subdirectory contains common locale parameters such as
-calendar, money, and numeric format changes.
+The main subdirectory contains a number of different common locale
+parameters.  The only one we're interested in is the
+[[characters/exemplarCharacters]] property.%
+\footnote{Maybe [[delimiters/quotation]]* would be useful as well, but
+it isn't covered under my UCD-localization-only mandate.  It appears
+to be supplemental to sentence boundary determination, but it isn't
+really.}
 
 <<Parse CLDR files>>=
 /* main: "other" rules */
@@ -14465,110 +15075,51 @@ chdir(CLDR_LOC);
 @
 
 <<Parse ldml sections>>=
-else if(xml_isname(n, "dates")) {
-  /* ignore draft/standard/references/alt tags */
-  char *subl = xml_prop(n, "validSubLocales");
-  for(c = n->children; c; c = c->next) {
-    if(xml_isname(c, "alias")) {
-    } else if(xml_isname(c, "localizedPatternChars")) {
-      /* deprecated */
-      /* ignore draft/standard/references/alt */
-      if(!subl)
-        subl = xml_prop(c, "validSubLocales");
-      /* data is interleaved raw data & <cp hex=> */
-    } else if(xml_isname(c, "dateRangePattern")) {
-      /* deprecated */
-      /* ignore draft/standard/references/alt */
-      if(!subl)
-        subl = xml_prop(c, "validSubLocales");
-      /* data is interleaved raw data & <cp hex=> */
-    } else if(xml_isname(c, "calendars")) {
-      /* calendar type=gregorian */
-      /*      months */
-      /*        monthContext type="format" */
-      /*          monthWidth type="wide" */
-      /*            <month type="8">Leqeeni</month> */
-    } else if(xml_isname(c, "timeZoneNames")) {
-    }
-  }
-  xmlprop_free(subl);
-}
-@
-
-<<Parse ldml sections>>=
 else if(xml_isname(n, "alias")) {
   /* is this even used?  should it be supported? */
 }
 @
 
 <<Parse ldml sections>>=
-else if(xml_isname(n, "localeDisplayNames")) {
-  /* <languages><language type="..">...</>.... */
-  /* <scripts><script type="..">...</>... */
-  /* <territories><territory type='..'>...</>...*/
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "layout")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "contextTransforms")) {
-}
-@
-
-<<Parse ldml sections>>=
 else if(xml_isname(n, "characters")) {
   /* exemplarCharacters [type=...]>[uniset]</> */
-  /* note: this is an optional Unicode property */
+  /* store root version as cp list or rle cp list plus binary multi-lev */
+  /* store in file as :*/
+  /*   <rle cp list len> */
+  /*   <rle cp list: chars 0-31 indicate run length - 2> */
+  /*   <bin multi-lev tab> */
 }
 @
 
-<<Parse ldml sections>>=
-else if(xml_isname(n, "delimiters")) {
-}
-@
+The segmentation exceptions modify the line, paragraph, and word
+breaking rules.
 
-<<Parse ldml sections>>=
-else if(xml_isname(n, "measurement")) {
+<<Parse CLDR files>>=
+/* main: "other" rules */
+d = opendir("common/segments");
+if(!d) {
+  perror("CLDR segmentation");
+  exit(1);
 }
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "numbers")) {
-  /* <currenceis><currency type="DJF"><symbol>Fdj</symbol>...*/
+chdir("common/segments");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name);
 }
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "units")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "listPatterns")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "posix")) {
-}
+closedir(d);
+chdir(cwd);
+chdir(CLDR_LOC);
 @
 
 <<Parse ldml sections>>=
 else if(xml_isname(n, "segmentations")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "rbnf")) {
-}
-@
-
-<<Parse ldml sections>>=
-else if(xml_isname(n, "references")) {
+  /* segmentation type="<type>" type == CLDR_segmentation_t */
+  /* variables/variable id=name: ... -> set vars for rules (uniset) */
+  /* segmentRules/rule id=rule_to_replace: rule text */
+  /* store in file as overrides for main tables */
+  /* need to implement breaking alg with main tables before deciding */
+  /* need to compare root.xml with main tables */
 }
 @
 
@@ -14576,19 +15127,21 @@ else if(xml_isname(n, "references")) {
 <<FIXME>>=
 implement
 
+need to decide where data files will go (/usr/share/libuni/<locale>/<data>)
+need to decide if an index should be generated (probably yes)
+
 inheritance rules (what a pain)
   bundle:
     strip region, then script, then go to "default" & do same, then root
   item:
     strip region, then script, then go to "root alias" & do same, then root
 
-rbnf -> rbnf for generating number names from numbers
-  doctype = ldml
-segments -> patterns for text segmentation
-  doctype = ldml
-supplemental -> various
-  doctype = ldmlSupplemental
 transforms -> mappings (no real single name for each, though)
+  main:transformName(s) even does locale-specific transform name translation
+  perhaps for each transorm, add uni_[<var>_]<to>_of_<from>() and vice-versa
+  if direction="both"
+  can't just encode as table; may be multi-step (e.g. normalize before
+  & after).
 
 crappy "set" notation must be implemented for reading LDML files:
  claims UTS18-L1+RL2.5 "with recommended syntax", but then goes on
@@ -14625,11 +15178,7 @@ crappy "set" notation must be implemented for reading LDML files:
       all 3 ops are l-r and same precendence level
       & and - only operate on sets
   [^ ] for inversion
-@
-
-<<FIXME>>=
-for regex:
-  string property "exemplar" is UnicodeSet ldml/characters/exmplarCharacters
+  $<varname> needed for contexts which allow variable assignments
 @
 
 \chapter{Additional Testing}
