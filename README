@@ -5,8 +5,8 @@ still retains some weird code and comments from those projects.
 However, I have mostly cleaned this up enough for others to view it,
 if they like.
 
-You can query a large number of properties consistently (57 boolean,
-21 enumerated, 7 numeric, 19 string at the time of this writing), and
+You can query a large number of properties consistently (56 boolean,
+21 enumerated, 7 numeric, 24 string at the time of this writing), and
 if you link statically, you will only burden your executable with the
 properties you actually use.  The standard collation, normalization,
 and case conversion algorithms are also implemented.
@@ -28,19 +28,17 @@ that's a bug.
 
 It's not really meant to be stable/usable yet.  Still to do before 1.0:
   - finish collation-related code (locale support via CLDR)
-  - finish name-related code (forward and reverse lookup, at least)
   - implement more Unicode algorithms, if appropriate
   - make installation painless
   - figure out how to make shared libraries more easily without invoking
-    libtool (libtool is a pain)
+    libtool (libtool is a pain) or being Linux-specific
 
 Note that it contains no Unicode Consortium provided information; that
 is all expected to be downloaded separately by the user (as documented
 in the Build chapter).
 
 This is currently my second-largest single noweb source that I have
-yet to abandon (~275 pages).  Normally I would have split this into
+yet to abandon (~320 pages).  Normally I would have split this into
 multiple documents by now, but I don't really see an easy, clean
 split.  At least it's no longer just a (way too long) section in
 another document.
-
