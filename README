@@ -26,6 +26,10 @@ The user documentation should document every single exported symbol,
 including ones that are meant for internal use.  If any are missing,
 that's a bug.
 
+The source code is available as a PDF download as well:
+
+  https://bitbucket.org/darktjm/libuni/downloads/uni.pdf
+
 It's not really meant to be stable/usable yet.  Still to do before 1.0:
   - finish collation-related code (locale support via CLDR)
   - implement more Unicode algorithms, if appropriate
@@ -38,7 +42,7 @@ is all expected to be downloaded separately by the user (as documented
 in the Build chapter).
 
 This is currently my second-largest single noweb source that I have
-yet to abandon (~320 pages).  Normally I would have split this into
-multiple documents by now, but I don't really see an easy, clean
-split.  At least it's no longer just a (way too long) section in
-another document.
+yet to abandon (~320 pages, 40 of which are API documentation).
+Normally I would have split this into multiple documents by now, but I
+don't really see an easy, clean split.  At least it's no longer just a
+(way too long) section in another document.
