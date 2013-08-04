@@ -5697,13 +5697,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-\lstset{language=txt}
-<<FIXME>>=
-test with auxiliary/LineBreakTest.txt
-support CLDR override
-@
-
-\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/GraphemeBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5713,13 +5706,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-\lstset{language=txt}
-<<FIXME>>=
-test with auxiliary/GraphemeBreakTest.txt
-support CLDR override
-@
-
-\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/SentenceBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5729,13 +5715,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-\lstset{language=txt}
-<<FIXME>>=
-test with auxiliary/SentenceBreakTest.txt
-support CLDR override
-@
-
-\lstset{language=C}
 <<Parse UCD files>>=
 open_f("auxiliary/WordBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -5745,13 +5724,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
-\lstset{language=txt}
-<<FIXME>>=
-test with auxiliary/WordBreakText.txt
-support CLDR override
-@
-
-\lstset{language=C}
 <<Parse UCD files>>=
 open_f("EastAsianWidth.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -6056,6 +6028,1162 @@ IndicSyllabicCategory.txt: field 2 == InSC (default = Other)
 IndicMatraCategory.txt: field 2 == InMC (default = NA)
 @
 
+\subsection{Support}
+
+Some of the above properties are meant to be used as part of larger
+algorithms, rather than on their own.  A few of the default
+implementations of those algorithms are implemented here, mostly as an
+example.
+
+The first algorithm is for grapheme cluster boundary determination
+(UAX~\#29).  A grapheme cluster is essentially a logical character,
+where code points are the physical characters. They usually map to a
+single displayed glyph.  While the standard allows for locale-specific
+tailoring of this algorithm, the CLDR provides no such tailoring at
+present, so no support is provided.
+
+UAX~\#18 (Regular Expressions), RL3.2 does provide tailoring, by
+calling all multi-character collation elements grapheme clusters.
+However, I prefer calling them multi-character collation elements,
+since some common examples (like ll and ch) appear as multiple
+distinct glyphs.  On the other hand, it might be because some
+multi-character clusters have accents applied to the cluster as a
+whole rather than individual characters.  If that is a problem, the
+application can deal with breaking differently.  As stated above, this
+routine serves mostly as an example.
+
+The first two rules merely state that grapheme clusters can't escape
+the boundaries of the text.  There is no point in implementing them.
+The rest deal only with pairs of characters, so the boundary
+determination function does a switch on the first character, for those
+rules that have a first character, and then on any failed rules, the
+second character is checked.  The rules are not repeated here; look
+them up in the standard.  Instead, the implementation of each rule is
+labeled with the rule number (for UAX~\#29, revision 21).  While the
+CLDR root locale has this in a machine-readable format, it expects
+regular expressions to be used for checks.  It is better to just
+update the routine if the standard ever changes.
+
+In order to avoid looking up GCB for all middle characters twice, the
+next character's GCB property is returned, and expected to be passed
+in the next time around.  Speaking of the GCB property, its use pulls
+in a property table, so the function is in its own object file.
+
+<<Library [[uni]] Members>>=
+gcbrk.o
+@
+
+\lstset{language=C}
+<<Unicode property exports>>=
+/* prev, next = 2 chars to check between
+   prevret = previous return code, or 0 for first time
+   leg = legacy (vs. extended) clusters */
+/* return >0 iff break between prev & next */
+int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy);
+@
+
+<<gcbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy)
+{
+  uni_GCB_t pgcb = !prevret ? uni_GCB_of(prev) : prevret < 0 ? -prevret - 1 :
+                                                               prevret - 1,
+            ngcb = uni_GCB_of(next);
+  switch(pgcb) {
+    case UNI_GCB_CR:
+      if(ngcb == UNI_GCB_LF) /* GB3 */
+        return -(ngcb + 1);
+      /* fall through */
+    case UNI_GCB_LF:
+    case UNI_GCB_CN:
+      return ngcb + 1; /* GB4 */
+    case UNI_GCB_L:
+      if(ngcb == UNI_GCB_L || ngcb == UNI_GCB_V || ngcb == UNI_GCB_LV ||
+         ngcb == UNI_GCB_LVT) /* GB6 */
+	return -(ngcb + 1);
+      break;
+    case UNI_GCB_LV:
+    case UNI_GCB_V:
+      if(ngcb == UNI_GCB_V || ngcb == UNI_GCB_T) /* GB7 */
+        return -(ngcb + 1);
+      break;
+    case UNI_GCB_T:
+    case UNI_GCB_LVT:
+      if(ngcb == UNI_GCB_T) /* GB8 */
+        return -(ngcb + 1);
+      break;
+    case UNI_GCB_RI:
+      if(ngcb == UNI_GCB_RI)
+        return -(ngcb + 1);
+      break;
+    case UNI_GCB_PP:
+      if(!legacy)
+        return -(ngcb + 1); /* GB9b */
+      break;
+    default:
+      break;
+  }
+  if(ngcb == UNI_GCB_CR || ngcb == UNI_GCB_LF || ngcb == UNI_GCB_CN)
+    return ngcb + 1; /* GB5 */
+  if(ngcb == UNI_GCB_EX || /* GB9 */
+     (ngcb == UNI_GCB_SM && !legacy)) /* GB9b */
+    return -(ngcb + 1);
+  return ngcb + 1; /* GB10 */
+}
+@
+
+The next larger element of text that is useful to extract is a word.
+One way to do this is to simply assign a boolean property to each
+character which makes it part of or not part of a word, and assign
+word boundaries after any contiguous group.  UAX~\#18, RL1.4 defines
+such a class.  The only complication is that non-spacing marks inherit
+their class from their preceeding character.  This is reflected in a
+special return value.  Once again, a property table or two is pulled
+in, so the function is in its own object file.
+
+<<Unicode property exports>>=
+/* 0 means no */
+/* >0 means yes */
+/* <0 means "same as previous" */
+int uni_is_simple_word(uint32_t cp);
+@
+
+<<Library [[uni]] Members>>=
+wb_simp.o
+@
+
+<<wb_simp.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+int uni_is_simple_word(uint32_t cp)
+{
+  if(cp == 0x200C || cp == 0x200D)
+    return 1;
+  uni_gc_t gc = uni_gc_of(cp);
+  if(gc != UNI_gc_Mc && (uni_gc_trans[UNI_gc_M] & (1 << gc)))
+    return -1;
+  return !!((uni_gc_trans[UNI_gc_L] & (1 << gc)) ||
+            (uni_gc_trans[UNI_gc_N] & (1 << gc)));
+}
+@
+
+However, a slightly more sophisticated (but still useless in most
+eastern locales) algorithm is also specified by UAX~\#29.  Word
+boundaries may also be altered using locale-specific overrides. The
+CLDR provides a few, but its entire specification of word boundary
+rules expects a regular expression storage format.  This library does
+not use or implement pure regular expressions, though, so reading the
+data files will not work. Instead, the locale-specific alterations are
+provided in a different form: simple flags to enable each of the
+current overrides.  This has the huge disadvantage that future
+revisions of the CLDR will likely require additional hand-coded
+overrides, which must be detected by human perusal of the CLDR files.
+The regular expressions will not be provided as a property, either, so
+an application which needs to use the regular expression form will
+either have to use ICU or read the CLDR manually.
+
+Once again the first two rules are ignored, as they simply express
+that words cannot extend past text boundaries.  The rest of the rules
+are implemented in a switch and post-switch check, just like the
+grapheme cluster check.  In addition to using rules from UAX~\#29,
+revision 21, the CLDR overrides from CLDR version 22.1 are implemented.
+
+Rules WB6, WB7, WB11, and WB12 are difficult, though:  they require
+three characters rather than just two to make their decision.  When
+combined with WB4, essentially unlimited lookahead is required.  To
+deal with this, a special token is returned between the first
+and second character clusters.  When the next non-token is returned,
+the first token becomes the same, and all remaining tokens become
+negative (i.e., there are no breaks between tokens, but the first token
+may become a break).
+
+As with the other functions, a different property table is pulled in,
+so the function gets its own object file.
+
+<<Unicode property exports>>=
+/* prev, next = 2 chars to check between
+   prevret = previous return, 0 to start */
+/* return:
+   <-1 -> no break
+   -1,1  -> 1st -1/1 matches next break/nobreak; remaining -1/1s are no break
+   >1 -> break */
+<<Boundary determination locale flags>>
+int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+@
+
+<<Library [[uni]] Members>>=
+wbrk.o
+@
+
+<<wbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+/* extra WB values for ja locale */
+#define UNI_WB_HI UNI_NUM_WB
+#define UNI_WB_ID (UNI_WB_HI + 1)
+int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+{
+  uni_WB_t pwb, nwb = uni_WB_of(next);
+  if(prevret > 1)
+    pwb = prevret - 2;
+  else if(prevret < -1)
+    pwb = -prevret - 2;
+  else if(prevret)
+    pwb = UNI_WB_LE; /* don't care */
+  else
+    pwb = uni_WB_of(prev);
+  <<Perform word break property locale adjustments>>
+  switch(pwb) {
+    case UNI_WB_CR:
+      if(nwb == UNI_WB_LF) /* WB3 */
+        return -(nwb + 2);
+      /* fall through */
+    case UNI_WB_LF:
+    case UNI_WB_NL:
+      return nwb + 2; /* WB3a */
+    default:
+      break;
+  }
+  if(nwb == UNI_WB_Extend || nwb == UNI_WB_FO) /* WB4 */
+    return prevret && prevret <= 1 ? prevret : -(pwb + 2);
+  if(prevret == 1) /* WB5, WB6 */
+    return nwb != UNI_WB_LE ? nwb + 2 : -(nwb + 2);
+  else if(prevret == -1) /* WB11, WB12 */
+    return nwb != UNI_WB_NU ? nwb + 2 : -(nwb + 2);
+  switch((int)pwb) { /* cast is to allow UNI_WB_ID w/o warning */
+    case UNI_WB_LE:
+      switch(nwb) {
+        case UNI_WB_LE: /* WB5 */
+	case UNI_WB_NU: /* WB9 */
+	  return -(nwb + 2);
+	case UNI_WB_ML: /* WB6/WB7 */
+	case UNI_WB_MB:
+	  return 1;
+	case UNI_WB_EX: /* WB13a */
+	  return -(nwb + 2);
+	default:
+	  break;
+      }
+      break;
+    case UNI_WB_NU:
+      switch(nwb) {
+        case UNI_WB_NU: /* WB8 */
+	case UNI_WB_LE: /* WB10 */
+	  return -(nwb + 2);
+	case UNI_WB_MN: /* WB11/WB12 */
+	case UNI_WB_MB:
+	  return -1;
+	case UNI_WB_EX: /* WB13a */
+	  return -(nwb + 2);
+	default:
+	  break;
+      }
+      break;
+    case UNI_WB_KA:
+      if(nwb == UNI_WB_KA || /* WB13 */
+         nwb == UNI_WB_EX) /* WB13a */
+        return -(nwb + 2);
+       break;
+    case UNI_WB_HI:
+      if(nwb == UNI_WB_HI) /* WB13d; ja only */
+        return -(nwb + 2);
+      break;
+    case UNI_WB_ID:
+      if(nwb == UNI_WB_ID) /* WB13e; ja only */
+        return -(nwb + 2);
+      break;
+    case UNI_WB_EX:
+      if(nwb == UNI_WB_EX || /* WB13a */
+         nwb == UNI_WB_LE || nwb == UNI_WB_NU || nwb == UNI_WB_KA) /* WB13b */
+        return -(nwb + 2);
+      break;
+    case UNI_WB_RI:
+      if(nwb == UNI_WB_RI) /* WB13c */
+        return -(nwb + 2);
+      break;
+    default:
+      break;
+  }
+  if(nwb == UNI_WB_CR || nwb == UNI_WB_LF || nwb == UNI_WB_NL)
+    return nwb + 2; /* WB3b */
+  return nwb + 2; /* WB14 */
+}
+@
+
+<<Boundary determination locale flags>>=
+/* I expect more in the future, e.g. some of the recommended tailorings */
+#define UNI_BRK_LOCALE_JA    1 /* ja locale */
+#define UNI_BRK_LOCALE_POSIX 2 /* en_US_POSIX locale */
+@
+
+<<Perform word break property locale adjustments>>=
+/* FIXME: it would be faster to use updated WB tables for this */
+if(locale & UNI_BRK_LOCALE_JA) {
+#if 0
+#define is_hira(x) (uni_blk_of(x) == UNI_blk_Hiragana)
+#else
+#define is_hira(x) ((x) >= 0x3040 && (x) <= 0x309F)
+#endif
+#define is_ideo(x) ((x) == 0x3005 || (x) == 0x3007 || (x) == 0x303B || \
+                    uni_is_Ideo(x))
+  if(!prevret) {
+    if(is_hira(prev))
+      pwb = UNI_WB_HI;
+    else if(is_ideo(prev))
+      pwb = UNI_WB_ID;
+  }
+  if(is_hira(next))
+    nwb = UNI_WB_HI;
+  else if(is_ideo(next))
+    nwb = UNI_WB_ID;
+}
+if(locale & UNI_BRK_LOCALE_POSIX) {
+  if(!prevret) {
+    if(prev == ':')
+      pwb = UNI_WB_XX;
+    else if(prev == '.')
+      pwb = UNI_WB_MN;
+  }
+  if(next == ':')
+    nwb = UNI_WB_XX;
+  else if(next == '.')
+    nwb = UNI_WB_MN;
+}
+@
+
+The next larger boundary is a sentence, also specfified by UAX~\#29. 
+Again, CLDR overrides may be provided, but they are in an unusable
+format.  While the only override in the current CLDR could be
+implemented by supporting a table override, once again the override
+is just hand-coded and enabled with a flag.
+
+This break algorithm is the most complex so far.  There are patterns
+other than simply the grapheme cluster pattern that require state
+tracking, so instead of returning the previous SB property value, a
+state identifier is returned.  The only rules which separate sentences
+are SB4 and SB11.  SB4 is unconditional, so it is easy to implement.
+However, it should be noted that SB4 assumes that explicit newlines
+separate paragraphs.  SB10 and SB9 simply force all optional matches
+in SB11 to match maximally.  SB6 is easy to implement with only one
+pair.  SB8a is just a few extra terms to match with SB11. SB7 and SB8
+are the difficult ones.  SB7 needs to remember if an ATerm was
+preceeded by an Upper.  SB8 requires backtracking in a similar manner
+to the word boundary, and can be done by emitting a token where a
+split might happen, and converting that to a split if the SB8 pattern
+does not match.
+
+<<Unicode property exports>>=
+/* prev, next = 2 chars to check between
+   prevret = previous return, 0 to start */
+/* return:
+   <-1 -> no break
+   -1/1  -> 1st -1/1 matches next break/nobreak; remaining -1/1s are no break
+         -> if sign changes, then current is no break, but prev was break
+	 -> at end of string, sign of 1 is used
+   >1 -> break */
+int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+@
+
+<<Library [[uni]] Members>>=
+sbrk.o
+@
+
+<<sbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+enum sb_state {
+  sb_st_AT_CL_SP_X = 1, /* deferred */
+  sb_st_none = 2,
+  sb_st_UP, /* SB7 */
+  sb_st_UP_AT, /* SB7-SB11 */
+  sb_st_AT, /* SB6, SB8-SB11 */
+  sb_st_AT_CL, sb_st_AT_CL_SP, /* SB8-SB11 */
+  sb_st_ST, sb_st_ST_CL, sb_st_ST_CL_SP, /* SB8a-SB11 */
+  sb_st_CR, sb_st_end /* SB9-SB11 */
+};
+int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+{
+  uni_SB_t psb, nsb = uni_SB_of(next);
+  if(prevret == 1 || prevret == -1)  {
+    <<Adjust [[prevret]] at end of [[sb_st_AT_CL_SP_X]]>>
+  } else if(prevret)
+    psb = UNI_SB_XX; /* don't care */
+  else {
+    uni_SB_t tsb = nsb;
+    nsb = psb = uni_SB_of(prev);
+    <<Set default sentence state>>
+    nsb = tsb;
+  }
+  <<Perform sentence break property locale adjustments>>
+  switch(psb) {
+    case UNI_SB_CR:
+      if(nsb == UNI_SB_LF) /* SB3 */
+        return -sb_st_none;
+      /* fall through */
+    case UNI_SB_LF:
+    case UNI_SB_SE:
+      <<Set default sentence state>>
+      return prevret; /* SB4 */
+    default:
+      break;
+  }
+  if(prevret == -sb_st_CR && nsb == UNI_SB_LF)
+    return -sb_st_end; /* SB3 */
+  if(prevret == -sb_st_end || prevret == -sb_st_CR) {
+    /* SB4 */
+    <<Set default sentence state>>
+    return prevret;
+  }
+  if(nsb == UNI_SB_EX || nsb == UNI_SB_FO) { /* SB5 */
+    if(!prevret) {
+      <<Set default sentence state>>
+      return -prevret;
+    }
+    return prevret <= 1 ? prevret : -prevret;
+  }
+  switch(prevret < 0 ? -prevret : prevret) {
+    case 0:
+    case sb_st_none:
+      break;
+    case sb_st_UP:
+      if(nsb == UNI_SB_AT)
+        return -sb_st_UP_AT; /* SB7... */
+      break;
+    case sb_st_UP_AT:
+      if(nsb == UNI_SB_UP)
+        return -sb_st_UP; /* SB7 */
+      /* fall through */
+    case sb_st_AT:
+      if(nsb == UNI_SB_NU)
+        return -sb_st_none; /* SB6 */
+      if(nsb == UNI_SB_CL)
+        return -sb_st_AT_CL; /* SB8-SB11 */
+      /* fall through */
+    case sb_st_AT_CL:
+      if(nsb == UNI_SB_SP)
+        return -sb_st_AT_CL_SP; /* SB8-SB11 */
+      if(nsb == UNI_SB_CL)
+        return -sb_st_AT_CL; /* SB8-SB11 */
+      /* fall through */
+    case sb_st_AT_CL_SP:
+      switch(nsb) {
+        case UNI_SB_SP:
+	  return -sb_st_AT_CL_SP; /* SB8-SB11 */
+	case UNI_SB_LE:
+	case UNI_SB_UP:
+	case UNI_SB_SE:
+	case UNI_SB_CR:
+	case UNI_SB_LF:
+	case UNI_SB_ST:
+	case UNI_SB_AT:
+	  break;
+	case UNI_SB_LO:
+	  return -sb_st_none; /* SB8 */
+	case UNI_SB_SC:
+	  return -sb_st_AT_CL_SP_X; /* SB8/SB8a */
+	default:
+	  return sb_st_AT_CL_SP_X; /* SB8 */
+      }
+      goto at_st_common;
+    case sb_st_AT_CL_SP_X:
+      switch(nsb) {
+        case UNI_SB_UP:
+          /* return -sb_st_UP; */
+	  return -prevret; /* SB8a/SB11 */
+        case UNI_SB_LE:
+	case UNI_SB_SE:
+	case UNI_SB_CR:
+	case UNI_SB_LF:
+          /* return -sb_st_none; */
+	  return -prevret; /* SB8a/SB11 */
+        case UNI_SB_ST:
+          /* return -sb_st_ST; */
+	  return -prevret; /* SB8a/SB11 */
+        case UNI_SB_AT:
+          /* return -sb_st_AT; */
+	  return -prevret; /* SB8a/SB11 */
+        case UNI_SB_LO:
+          return -sb_st_none; /* SB8 */
+        default:
+	  return prevret; /* SB8 */
+      }
+      /* NOTREACHED */
+    case sb_st_ST:
+      if(nsb == UNI_SB_CL)
+        return -sb_st_ST_CL; /* SB8a-SB11 */
+      /* fall through */
+    case sb_st_ST_CL:
+      if(nsb == UNI_SB_SP)
+        return -sb_st_ST_CL_SP; /* SB8a-SB11 */
+      if(nsb == UNI_SB_CL)
+        return -sb_st_ST_CL; /* SB8a-SB11 */
+      /* fall through */
+    case sb_st_ST_CL_SP:
+    /* case sb_st_AT_CL_SP: */
+    at_st_common:
+      switch(nsb) {
+        case UNI_SB_SP:
+          return -sb_st_ST_CL_SP; /* SB8a-SB11 */
+        case UNI_SB_SC:
+          return -sb_st_none; /* SB8a */
+        case UNI_SB_AT:
+          return -sb_st_AT; /* SB8a */
+        case UNI_SB_ST:
+          return -sb_st_ST; /* SB8a */
+        case UNI_SB_CR:
+          return -sb_st_CR; /* SB10/SB3 */
+        case UNI_SB_SE:
+        case UNI_SB_LF:
+          return -sb_st_end; /* SB10 */
+        case UNI_SB_UP:
+          return sb_st_UP; /* SB11/SB7 */
+        default:
+          return sb_st_none; /* SB11 */
+      }
+      /* NOTREACHED */
+  }
+  /* SB12 */
+  <<Set default sentence state>>
+  return -prevret;
+}
+@
+
+<<Set default sentence state>>=
+switch(nsb) {
+  case UNI_SB_AT:
+    prevret = sb_st_AT;
+    break;
+  case UNI_SB_ST:
+    prevret = sb_st_ST;
+    break;
+  case UNI_SB_UP:
+    prevret = sb_st_UP;
+    break;
+  default:
+    prevret = sb_st_none;
+    break;
+}
+@
+
+<<Adjust [[prevret]] at end of [[sb_st_AT_CL_SP_X]]>>=
+/* only needs to be done on sign change */
+/* can't really detect sign change, though */
+psb = uni_SB_of(prev);
+switch(psb) {
+  case UNI_SB_UP:
+    prevret = sb_st_UP;
+    break;
+  case UNI_SB_LE:
+  case UNI_SB_SE:
+  case UNI_SB_CR:
+  case UNI_SB_LF:
+  /* case UNI_SB_LO: */ /* LO already mapped to sb_st_none */
+    prevret = sb_st_none;
+    break;
+  case UNI_SB_ST:
+    prevret = sb_st_ST;
+    break;
+  case UNI_SB_AT:
+    prevret = sb_st_AT;
+    break;
+  default: /* shut gcc up */
+    break;
+}
+@
+
+<<Boundary determination locale flags>>=
+#define UNI_BRK_LOCALE_EL    4 /* el locale */
+@
+
+<<Perform sentence break property locale adjustments>>=
+/* FIXME: it would be faster to use updated SB tables for this */
+if(locale & UNI_BRK_LOCALE_EL) {
+  if(!prevret) {
+    if(prev == 0x003B || prev == 0x037E)
+      psb = UNI_SB_ST;
+  }
+  if(next == 0x003B || next == 0x037E)
+    nsb = UNI_SB_ST;
+}
+@
+
+The next larger boundary is a paragraph.  There is no implementation
+here; it is generally up to the text file format to explicitly
+indicate paragraph boundaries.  When line breaks are explicit, this is
+often done using parapragh separators (gc = Zp) or multiple consective
+line separators.  When they are implicit, these methods may also be
+used, or simple line separators may function as paragraph separators
+as well.  As mentioned above, the sentence breaking algorithm assumes
+that single line separators are paragraph separators.
+
+When paragraphs are known, a common operation is to narrow the view of
+the paragraph to a limited width.  When doing so, the paragraph must
+be split into multiple lines via word wrapping (or line breaking).
+Unicode UAX~\#14 specifies a line breaking algorithm of limited use.  A
+real line breaking algorithm is very context dependent.  The only
+application that would benefit from the algorithm without the addition
+of a hyphenation dictionary is a plain text formatter, such as the
+automatic wrapping mode in a plain text editor.  Nonetheless, the
+following function implements the algorithm specified in UAX~\#14,
+revision 30.
+
+Like the boundary determination algorithms, locale-specific tailoring
+should be supported.  Once again, the CLDR does not provide tailorings
+in a usable format.  Tailorings are hand-coded and enabled using
+flags. Some of the standard-recommended tailorings involve the use of
+hyphenation dictionaries, which will likely never be implemented here.
+In fact, breaking using a hyphenation dictionary would require use of
+the same dictionary by the user as well, as Unicode provides no
+mechanism for \TeX{}-like three-parameter soft hyphens.
+
+This algorithm is much more complex than the boundary determination
+algorithms.  Like the sentence break detector, this function uses a
+state machine internally, returning state identifiers with an
+appropriate sign.  Since there are quite a few potential start
+symbols, there is not a separate state for each start symbol; insted,
+the symbol itself is the state in that case.
+
+In addition, there are three different potential return codes:  may
+break, may not break, and must break.  It is expected that mandatory
+breaks will be rare within the text being processed, so zero is
+returned to indicate that, which in turn always resets the state
+machine and requires reading of the next character's lb property twice.
+
+The number rule (LB25) that is implemented here is the pattern, not
+the list of simple rules.  This is not too difficult to implement (it
+requires backtracking, but so do some of the routines above), is
+remarked as getting better results, and is required in any case for
+the test to work.
+
+<<Unicode property exports>>=
+/* prev, next = 2 chars to check between
+   prevret = previous return, 0 to start */
+/* return:
+   <-1 -> no break
+   0 -> force break
+   -1/1  -> 1st -1/1 matches next break/nobreak; remaining -1/1 are no break
+         -> if sign changes, then current is no break, but prev was break
+	 -> at end of string, sign of -1/1 is used
+   >1 -> break */
+int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+@
+
+<<Library [[uni]] Members>>=
+lbrk.o
+@
+
+<<lbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+#define UNI_lb_HH UNI_NUM_lb
+typedef enum {
+  lb_st_reset = 0,
+  /* 2nd states */
+  lb_st_PRO_OP, /* LB25 */ /* ×× NU(NU|SY|IS)*(CL|CP)?(PR|PO)? */
+                             /* needs backtrack; break prev if next not NU */
+
+  lb_st_OP_SP, /* LB14 */ /* SP* × */
+  lb_st_QU_SP, /* LB15 */ /* SP* × OP */
+  lb_st_CLP_SP, /* LB16 */ /* SP* × NS */
+  lb_st_B2_SP, /* LB17 */ /* SP* × B2 */
+  lb_st_NU_EXT_NU, lb_st_NU_EXT_SY, lb_st_NU_EXT_IS, /* LB25 */
+                                          /* ×× (NU|SY|IS)*(CL|CP)?(PR|PO)? */
+  lb_st_NU_EXT_CL, lb_st_NU_EXT_CP, /* LB25 */ /* × (PR|PO)? */
+  lb_st_x, /* LB21a */ /* × */
+
+  lb_num_st
+} lb_state_t;
+
+int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+{
+  uni_lb_t plb, nlb = uni_lb_of(next);
+  if(prevret == -lb_st_PRO_OP) {
+    /* ret was just negated; fix it to a real value */
+    plb = uni_lb_of(prev);
+    if(plb == UNI_lb_SP)
+      prevret = -lb_st_OP_SP; /* LB14/LB7 */
+    else
+      prevret = -(lb_num_st + plb); /* LB14 */
+  } else if(prevret) {
+    int p = prevret < 0 ? -prevret : prevret;
+    if(p < lb_num_st)
+      switch(p) {
+        case lb_st_QU_SP:
+	case lb_st_CLP_SP:
+	case lb_st_B2_SP:
+	case lb_st_OP_SP:
+	  plb = UNI_lb_SP; /* some checks care */
+	  break;
+	default:
+	  plb = UNI_lb_XX; /* but most don't */
+      }
+    else
+      plb = p - lb_num_st;
+  } else {
+    plb = uni_lb_of(prev);
+    prevret = plb + lb_num_st;
+  }
+  <<Perform line break property locale adjustments>>
+  if(nlb == UNI_lb_SA) {
+    /* LB1 */
+    /* note that if prev == SA, it doesn't matter (CM/AL are the same) */
+    uni_gc_t gc = uni_gc_of(next);
+    if(gc == UNI_gc_Mn || gc == UNI_gc_Mc)
+      nlb = UNI_lb_CM;
+    else
+      nlb = UNI_lb_AL;
+  }
+  switch(plb) {
+    case UNI_lb_CR:
+      if(nlb == UNI_lb_LF) /* LB5 */
+        return -(lb_num_st + UNI_lb_LF);
+      /* fall through */
+    case UNI_lb_BK: /* LB4 */
+    case UNI_lb_LF: /* LB5 */
+    case UNI_lb_NL: /* LB5 */
+      return 0; /* LB4, LB5 */ /* this is the only place ! is returned */
+    case UNI_lb_ZW:
+      switch(nlb) {
+	case UNI_lb_BK:
+	case UNI_lb_CR:
+	case UNI_lb_LF:
+	case UNI_lb_NL:
+	case UNI_lb_ZW:
+	  return -(lb_num_st + nlb); /* LB6, LB7 */
+        case UNI_lb_SP:
+	  return -(lb_num_st + UNI_lb_ZW); /* LB8 */
+	default:
+	  return lb_num_st + nlb; /* LB8 */
+      }
+    default:
+      if(nlb == UNI_lb_CM && plb != UNI_lb_SP) { /* LB9 */
+        if(!prevret)
+	  return -(lb_num_st + plb);
+        return prevret <= 1 ? prevret : -prevret;
+      }
+      break;
+  }
+  switch(nlb) {
+    case UNI_lb_BK:
+    case UNI_lb_CR:
+    case UNI_lb_LF:
+    case UNI_lb_NL:
+    case UNI_lb_ZW:
+      return -(lb_num_st + nlb); /* LB6, LB7 */
+    /* SP of LB7 is taken care of where SP allowed */
+    default: /* shut gcc up */
+      break;
+  }
+  /* LB18 (after SP) and LB31 (unspecified) and LB20 (before/after CB) break */
+  switch(prevret < 0 ? -prevret : prevret) {
+    case lb_num_st + UNI_lb_WJ: /* LB11 */
+    case lb_num_st + UNI_lb_GL: /* LB12 */
+      return -(lb_num_st + nlb);
+#define LB20(x) do { \
+  if((x) == UNI_lb_CB) \
+    return lb_num_st + x; /* LB20 */ \
+  else \
+    return -(lb_num_st + x); \
+} while(0)
+    case lb_num_st + UNI_lb_BB:
+      LB20(nlb); /* LB21 */
+    case lb_num_st + UNI_lb_OP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_OP_SP; /* LB14/LB7 */
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      return -(lb_num_st + nlb); /* LB14 */
+    case lb_st_OP_SP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_QU_SP; /* LB14/LB7 */
+      return -(lb_num_st + nlb); /* LB14 */
+    case lb_num_st + UNI_lb_QU:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_QU_SP; /* LB15/LB7 */
+      return -(lb_num_st + nlb); /* LB19 */
+    case lb_st_QU_SP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_QU_SP; /* LB15/LB7 */
+      if(nlb == UNI_lb_OP)
+        return -(lb_num_st + nlb); /* LB15 */
+#define return_sp(x) do { \
+  if((x) == UNI_lb_SP || /* LB7 */ \
+     (x) == UNI_lb_WJ || /* LB11 */ \
+     (x) == UNI_lb_CL || (x) == UNI_lb_CP || (x) == UNI_lb_EX || \
+     (x) == UNI_lb_IS || (x) == UNI_lb_SY) /* LB13 */ \
+     return -(lb_num_st + x); \
+  return lb_num_st + x; /* LB18 */ \
+} while(0)
+      return_sp(nlb);
+    case lb_num_st + UNI_lb_CL:
+    finish_CL:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_CLP_SP; /* LB16/LB7 */
+      if(nlb == UNI_lb_NS || nlb == UNI_lb_CJ) /* LB1 */
+        return -(lb_num_st + nlb); /* LB16 */
+      break;
+    case lb_st_CLP_SP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_CLP_SP; /* LB16/LB7 */
+      if(nlb == UNI_lb_NS || nlb == UNI_lb_CJ) /* LB1 */
+        return -(lb_num_st + nlb); /* LB16 */
+      return_sp(nlb);
+    case lb_num_st + UNI_lb_CP:
+    finish_CP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_CLP_SP; /* LB16/LB7 */
+      if(nlb == UNI_lb_NS || nlb == UNI_lb_CJ) /* LB1 */
+        return -(lb_num_st + nlb); /* LB16 */
+      if(nlb == UNI_lb_AL || nlb == UNI_lb_HL || nlb == UNI_lb_NU ||
+         nlb == UNI_lb_CM || /* LB10 */
+         nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX) /* LB1 */
+	return -(lb_num_st + nlb); /* LB30 */
+      break;
+    case lb_num_st + UNI_lb_B2:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_B2_SP; /* LB17/LB7 */
+      if(nlb == UNI_lb_B2)
+        return -(lb_num_st + nlb); /* LB17 */
+      break;
+    case lb_st_B2_SP:
+      if(nlb == UNI_lb_SP)
+        return -lb_st_B2_SP; /* LB17/LB7 */
+      if(nlb == UNI_lb_B2)
+        return -(lb_num_st + nlb); /* LB17 */
+      return_sp(nlb);
+    case lb_num_st + UNI_lb_SP:
+      return_sp(nlb);
+    case lb_num_st + UNI_lb_CB:
+      if(nlb == UNI_lb_GL || /* LB12a */
+         nlb == UNI_lb_QU) /* LB19 */
+	return -(lb_num_st + nlb);
+      return_sp(nlb); /* s/LB18/LB20/ */
+    case lb_num_st + UNI_lb_HL:
+      if(nlb == UNI_lb_HY || nlb == UNI_lb_BA)
+        return -lb_st_x; /* LB21/LB21a */
+      if(nlb == UNI_lb_IN || /* LB22 */
+         nlb == UNI_lb_NU || /* LB23 */
+	 nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB28 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX || /* LB1 */
+	 nlb == UNI_lb_OP) /* LB30 */
+        return -(lb_num_st + nlb);
+      break;
+    case lb_st_x:
+      LB20(nlb); /* LB21a */
+    case lb_num_st + UNI_lb_IN:
+      if(nlb == UNI_lb_IN)
+        return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_AL:
+    case lb_num_st + UNI_lb_CM: /* LB10 */
+    case lb_num_st + UNI_lb_AI: /* LB1 */
+    case lb_num_st + UNI_lb_SG: /* LB1 */
+    case lb_num_st + UNI_lb_XX: /* LB1 */
+    case lb_num_st + UNI_lb_SA: /* LB1/LB10 */
+      if(nlb == UNI_lb_IN || /* LB22 */
+         nlb == UNI_lb_NU || /* LB23 */
+	 nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB28 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX || /* LB1 */
+	 nlb == UNI_lb_OP) /* LB30 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_ID:
+      if(nlb == UNI_lb_IN || /* LB22 */
+         nlb == UNI_lb_PO) /* LB23 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_NU:
+    finish_NU:
+      if(nlb == UNI_lb_IN || /* LB22 */
+	 nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB28 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX || /* LB1 */
+	 nlb == UNI_lb_OP) /* LB30 */
+        return -(lb_num_st + nlb);
+      if(prevret != -(lb_num_st + UNI_lb_NU) &&
+         prevret != lb_num_st + UNI_lb_NU)
+        break; /* finish_NU shouldn't try a number any more */
+      /* fall through */
+    case lb_st_NU_EXT_NU:
+    case lb_st_NU_EXT_SY:
+    case lb_st_NU_EXT_IS:
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      if(nlb == UNI_lb_SY)
+        return -lb_st_NU_EXT_SY; /* LB25 */
+      if(nlb == UNI_lb_IS)
+        return -lb_st_NU_EXT_IS; /* LB25 */
+      if(nlb == UNI_lb_CL)
+        return -lb_st_NU_EXT_CL; /* LB25 */
+      if(nlb == UNI_lb_CP)
+        return -lb_st_NU_EXT_CP; /* LB25 */
+      /* fall through */
+    case lb_st_NU_EXT_CL:
+    case lb_st_NU_EXT_CP:
+      if(nlb == UNI_lb_PR || nlb == UNI_lb_PO)
+        return -(lb_num_st + nlb); /* LB25 */
+      if(prevret == -lb_st_NU_EXT_CL)
+        goto finish_CL;
+      if(prevret == -lb_st_NU_EXT_CP)
+        goto finish_CP;
+      if(prevret == -lb_st_NU_EXT_NU)
+        goto finish_NU;
+      if(prevret == -lb_st_NU_EXT_IS)
+        goto finish_IS;
+      break; /* SY is always handled as default */
+    case lb_num_st + UNI_lb_PR:
+      if(nlb == UNI_lb_ID || nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB24 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX || /* LB1 */
+	 nlb == UNI_lb_JL || nlb == UNI_lb_JV || nlb == UNI_lb_JT ||
+	 nlb == UNI_lb_H2 || nlb == UNI_lb_H3) /* LB27 */
+	return -(lb_num_st + nlb);
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      if(nlb == UNI_lb_HY)
+        return -(lb_num_st + nlb); /* LB21/LB25 */
+      if(nlb == UNI_lb_OP)
+        return lb_st_PRO_OP; /* LB25; backtracking */
+      break;
+    case lb_st_PRO_OP:
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      if(nlb == UNI_lb_SP)
+        return -prevret; /* LB14/LB7 */
+       return -prevret; /* LB14 */
+    case lb_num_st + UNI_lb_PO:
+      if(nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB24 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX) /* LB1 */
+	return -(lb_num_st + nlb);
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      if(nlb == UNI_lb_HY)
+        return -(lb_num_st + nlb); /* LB21/LB25 */
+      if(nlb == UNI_lb_OP)
+        return lb_st_PRO_OP; /* LB25; backtracking */
+      break;
+    case lb_num_st + UNI_lb_HY:
+      if(nlb == UNI_lb_NU)
+        return -lb_st_NU_EXT_NU; /* LB25 */
+      if(nlb == UNI_lb_GL)
+        return lb_num_st + nlb; /* LB12a/LB31 */
+      break;
+    case lb_num_st + UNI_lb_JL:
+      if(nlb == UNI_lb_JL || nlb == UNI_lb_JV || nlb == UNI_lb_H2 ||
+         nlb == UNI_lb_H3 || /* LB26 */
+	 nlb == UNI_lb_IN || nlb == UNI_lb_PO) /* LB27 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_JV:
+    case lb_num_st + UNI_lb_H2:
+      if(nlb == UNI_lb_JV || nlb == UNI_lb_JT || /* LB26 */
+	 nlb == UNI_lb_IN || nlb == UNI_lb_PO) /* LB27 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_JT:
+    case lb_num_st + UNI_lb_H3:
+      if(nlb == UNI_lb_JT || /* LB26 */
+	 nlb == UNI_lb_IN || nlb == UNI_lb_PO) /* LB27 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_IS:
+    finish_IS:
+      if(nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB29 */
+	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX) /* LB1 */
+	return -(lb_num_st + nlb);
+      break;
+    case lb_num_st + UNI_lb_RI:
+      if(nlb == UNI_lb_RI) /* LB30a */
+        return -(lb_num_st + nlb);
+      break;
+    default:
+      break;
+  }
+  if(nlb == UNI_lb_SP || /* LB7 */
+     nlb == UNI_lb_WJ || /* LB11 */
+     nlb == UNI_lb_CL || nlb == UNI_lb_CP || nlb == UNI_lb_EX ||
+     nlb == UNI_lb_IS || nlb == UNI_lb_SY || /* LB13 */
+     nlb == UNI_lb_QU || /* LB19 */
+     nlb == UNI_lb_BA || nlb == UNI_lb_HY || nlb == UNI_lb_NS ||
+     nlb == UNI_lb_HH || /* LB21 */
+     nlb == UNI_lb_CJ) /* LB1/LB21 */
+    return prevret == lb_st_PRO_OP ? -prevret : -(lb_num_st + nlb);
+  if(nlb == UNI_lb_GL && plb != UNI_lb_BA) /* SP and HY already taken care of */
+    return -(lb_num_st + nlb); /* LB12a */
+  return lb_num_st + nlb; /* LB21, LB31 */
+}
+@
+
+<<Boundary determination locale flags>>=
+#define UNI_BRK_LOCALE_FI    8 /* fi locale */
+@
+
+<<Perform line break property locale adjustments>>=
+/* FIXME: it would be faster to use updated lb tables for this */
+if(locale & UNI_BRK_LOCALE_JA) {
+  if(plb == UNI_lb_CJ)
+    plb = UNI_lb_ID;
+  if(nlb == UNI_lb_CJ)
+    nlb = UNI_lb_ID;
+}
+if(locale & UNI_BRK_LOCALE_FI) {
+  if(prev == 0x2010)
+    plb = UNI_lb_HH;
+  if(next == 0x2010)
+    nlb = UNI_lb_HH;
+}
+@
+
+\subsection{Support Testing}
+
+While the machine-readable breaking rules are unusable, the test files
+are not.  A generic test driver can be used to test all of the
+breaking functions, with special asides to deal with different calling
+conventions.
+
+\lstset{language=make}
+<<C Test Support Executables>>=
+tstbrk \
+@
+
+<<Additional Tests>>=
+./tstbrk g <$(UCD_LOC)/auxiliary/GraphemeBreakTest.txt
+./tstbrk w <$(UCD_LOC)/auxiliary/WordBreakTest.txt
+./tstbrk s <$(UCD_LOC)/auxiliary/SentenceBreakTest.txt
+./tstbrk l <$(UCD_LOC)/auxiliary/LineBreakTest.txt
+@
+
+Each line of a test file is either a comment or a test case followed
+by a comment.  While the comments following test cases have a specific
+format, all comments are ignored.  The line number is tracked even for
+comments, though, so that error messages can show where the test
+failed.  The tests run very quickly, so a dot is printed after every
+10 tests to indicate that the program isn't simply exiting without
+testing.
+
+\lstset{language=C}
+<<tstbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+/* longest line == 1788 chars */
+char lbuf[4096];
+
+int main(int argc, const char **argv)
+{
+  char tst = 'g';
+  if(argc > 1)
+    tst = **++argv;
+  int lno;
+  for(lno = 1; fgets(lbuf, sizeof(lbuf), stdin); lno++) {
+    uint8_t *s = (uint8_t *)strchr(lbuf, '#');
+    if(s)
+      *s = 0;
+    for(s = (uint8_t *)lbuf; isspace(*s); s++);
+    if(!*s)
+      continue;
+    <<Process a break test line>>
+    if(!((lno + 1) % 10)) {
+      putchar('.');
+      fflush(stdout);
+    }
+  }
+  putchar('\n');
+  return 0;
+}
+@
+
+The test text is a string of code points, with marks for what the
+breaking function should return: ÷ for 1, and × for 0.  Each string is
+surrounded by ÷ to indicate the fact that breaks always occur at
+start-of-text and end-of-text, which are not implemented in the braek
+functions.
+
+The main difference between the functions, other than of course the
+specific function to call, is whether or not back tracking is
+required.  For back tracking, the expected status at the backtrack
+point is saved, and when it is resolved, it is checked.
+
+<<Process a break test line>>=
+/* ignore bot/eot marks */
+unsigned int clen;
+if(uni_utf8_decode(s, &clen) != (tst == 'l' ? L'×' : L'÷')) {
+  fprintf(stderr, "Invalid line %d: %ssot break\n", lno, tst == 'l' ? "" : "no ");
+  return 1;
+}
+for(s += clen; isspace(*s); s++);
+uint8_t *e;
+for(e = s + strlen((char *)s); isspace(e[-1]); e--);
+e += uni_utf8_prevc(e);
+if(uni_utf8_decode(e, NULL) != L'÷') {
+  fprintf(stderr, "Invalid line %d: no eot break\n", lno);
+  return 1;
+}
+while(isspace(e[-1]))
+  e--;
+uint32_t p, n, pp, pn;
+int ret = 0, pret = 0, pexp = 0;
+n = strtoul((char *)s, (char **)&s, 16);
+while(s < e) {
+  p = n;
+  while(isspace(*s))
+    s++;
+  int exp = uni_utf8_decode(s, &clen) == L'÷';
+  for(s += clen; isspace(*s); s++);
+  n = strtoul((char *)s, (char **)&s, 16);
+  switch(tst) {
+    case 'g':
+      ret = uni_gc_brk(p, n, ret, 0);
+      break;
+    case 'w':
+      ret = uni_word_brk(p, n, ret, 0);
+      break;
+    case 's':
+      ret = uni_sentence_brk(p, n, ret, 0);
+      break;
+    case 'l':
+      ret = uni_line_brk(p, n, ret, 0);
+      break;
+  }
+  int match = 0;
+  if(tst != 'g' && (ret == 1 || ret == -1)) {
+    if(!pexp) {
+      pexp = exp + 1;
+      pp = p;
+      pn = n;
+      pret = ret;
+      continue;
+    }
+    match = !exp;
+    if((tst == 's' || tst == 'l') && pret != ret) {
+      match = match && (pexp - 1);
+      pexp = 0;
+    }
+  } else if(pexp) {
+    match = (ret >= 0) == exp && exp == pexp - 1;
+    pexp = 0;
+  } else
+    match = (ret >= 0) == exp;
+  if(!match) {
+    if((ret >= 0) == exp) {
+      p = pp;
+      n = pn;
+    }
+    fprintf(stderr, "Failed line %d %04X %s %04X\n",
+                    lno, (int)p, exp ? "÷" : "×", (int)n);
+    return 1;
+  }
+}
+if(pexp && !(pexp - 1) && ((tst != 's' && tst != 'l') || pret >= 0)) {
+  fprintf(stderr, "Failed line %d %04X × %04X\n", lno, (int)pp, (int)pn);
+  return 1;
+}
+@
+
 \section{Numeric Properties}
 
 Numeric properties are a subset of enumerated properties.  The
@@ -6260,7 +7388,7 @@ information that would turn it into a string property.
 
 There is another, related file ([[CJKRadicals.txt]]) which provides
 additional interpretation for the radical numbers returned by this
-property.  Since this file's values have no proprety label, I will not
+property.  Since this file's values have no property label, I will not
 provide them as a property for now.
 
 <<UCD parser local functions>>=
@@ -6814,7 +7942,7 @@ expense of retrieval inefficiency.  Alternatively, the words could be
 stored in UTF-16 format, which is somewhat natural and nearly always
 takes up less space than UTF-32.  The same could be said of UTF-8, but
 UTF-8 is not always smaller than UTF-16, and requires more complicated
-encoding and decoding.  A proprety-wide parameter selects the format:
+encoding and decoding.  A property-wide parameter selects the format:
 UTF-16 or UTF-32.
 
 If 8-bit data is really wanted, it should probably be ASCII.  In that
@@ -7558,6 +8686,7 @@ static void dump_str_arr(prop_t *prop, FILE *gen_h, FILE *tstf)
     fprintf(tstf, "str(%s);\n", prop->name);
   }
 }
+@
 
 <<UCD parser local functions>>=
 static void dump_str_tabs(prop_t *prop, FILE *gen_h, FILE *tstf)
@@ -7868,11 +8997,12 @@ values that encode into two 16-bit values.
 #define UNI_SC_FL_TR                (1<<7)  /* tr locale */
 #define UNI_SC_FL_LOCALE            (0x07 << 5)   /* any locale flags */
 
+/* ccs below refers to combining character seqeunce */
 #define UNI_SC_FL_NOT               (1<<8)  /* applies to subsequent conditions */
-#define UNI_SC_FL_AFTER_I           (1<<9)  /* capital I in same grapheme cl. */
-#define UNI_SC_FL_AFTER_SOFT_DOTTED (1<<10) /* lower-case i in same gc */
-#define UNI_SC_FL_BEFORE_DOT        (1<<11) /* combining dot above in same gc */
-#define UNI_SC_FL_MORE_ABOVE        (1<<12) /* grave, acute, etc. in same gc */
+#define UNI_SC_FL_AFTER_I           (1<<9)  /* capital I in same ccs */
+#define UNI_SC_FL_AFTER_SOFT_DOTTED (1<<10) /* lower-case i in same ccs */
+#define UNI_SC_FL_BEFORE_DOT        (1<<11) /* combining dot above in same ccs */
+#define UNI_SC_FL_MORE_ABOVE        (1<<12) /* grave, acute, etc. in same ccs */
 #define UNI_SC_FL_FINAL_SIGMA       (1<<13) /* no following letters in same word */
 #define UNI_SC_FL_CONTEXT           (0x1f << 9) /* any condition flags */
 
@@ -11109,7 +12239,8 @@ char buf[256];
 
 int main(void)
 {
-  while(fgets(buf, 256, stdin)) {
+  int lno;
+  for(lno = 0; fgets(buf, 256, stdin); lno++) {
     <<Set [[e]] to start of name to check>>
     for(s = e; *s; s++)
       if(isupper(*s))
@@ -11117,6 +12248,7 @@ int main(void)
     uint32_t ret = uni_name_to_cp(e);
     <<Print and check [[name_to_cp]] results using [[na_seq_id]]>>
   }
+  fprintf(stderr, "Successfully looked up %d entries\n", lno);
   return 0;
 }
 @
@@ -11222,14 +12354,15 @@ cmph_rev_na.c: cmph_in.gen.mph
 	$(CMPH) -C uni_rev_na_mph -o $@ cmph_in.gen
 else
 cmph_rev_na.c: uni_prop.gen.h
-	touch $@
-cmph_supt.c: uni_prop.h
-	touch $@
+	echo >$@
 endif
 
-ifneq ($(CMPH_INCLUDE),)
 # needed for cproto.h, so may as well include everywhere
+ifneq ($(CMPH),)
+EXTRA_CFLAGS += -DUSE_CMPH
+ifneq ($(CMPH_INCLUDE),)
 EXTRA_CFLAGS += -I$(CMPH_INCLUDE)
+endif
 endif
 @
 
@@ -11239,12 +12372,13 @@ rm -f cmph_in.gen{,.mph}
 
 \lstset{language=C}
 <<cmph_supt.c>>=
+#ifdef USE_CMPH
 <<Common C Header>>
 
-#ifndef USE_CMPH
-#define USE_CMPH 1
-#endif
 #include "uni_prop.h"
+
+<<[[cmph]] name lookup support>>
+#endif
 @
 
 <<Unicode property exports>>=
@@ -11309,7 +12443,7 @@ effective, but that is an exercise for end user.
 int32_t uni_cmph_name_to_cp(const char *name);
 @
 
-<<cmph_supt.c>>=
+<<[[cmph]] name lookup support>>=
 int32_t uni_cmph_name_to_cp(const char *name)
 {
   <<Strip name before lookup>>
@@ -11356,11 +12490,9 @@ tstna_cp_cmph: LDFLAGS += $(if $(CMPH_LDFLAGS),$(CMPH_LDFLAGS),-lcmph)
 
 \lstset{language=C}
 <<tstna_cp_cmph.c>>=
+#ifdef USE_CMPH
 <<Common C Header>>
 
-#ifndef USE_CMPH
-#define USE_CMPH 1
-#endif
 #include "uni_prop.h"
 
 <<POSIX timing support>>
@@ -11417,6 +12549,7 @@ int main(void)
   fprintf(stderr, "r%ld/s b%ld/s h%ld/s %.2fx\n", tr, tbr, thr, (double)thr/(double)tbr);
   return 0;
 }
+#endif
 @
 
 \lstset{language=txt}
@@ -14810,6 +15943,10 @@ security/confusablesWholeScript.txt: propname?
   could be plain 32-bit value: <from><to><type>, but there are dup indices
 @
 
+<<FIXME>>=
+Unihan_IRGSources.txt: kIRG_* (not sure how to encode)
+@
+
 \chapter{XML Data Files}
 
 A number of data files outside of the UCD are encoded in XML.  These
@@ -15576,11 +16713,13 @@ char buf[256];
 
 int main(void)
 {
-  while(fgets(buf, 256, stdin)) {
+  int lno;
+  for(lno = 0; fgets(buf, 256, stdin); lno++) {
     <<Set [[e]] to start of name to check>>
     uint32_t ret = uni_xml_name_to_cp(e);
     <<Print and check [[name_to_cp]] results using [[na_xml_seq_id]]>>
   }
+  fprintf(stderr, "Successfully looked up %d entries\n", lno);
   return 0;
 }
 @
@@ -15606,9 +16745,7 @@ cmph_rev_xna.c: cmph_xml_in.gen.mph
 	$(CMPH) -C uni_rev_na_xml_mph -o $@ cmph_xml_in.gen
 else
 cmph_rev_xna.c: uni_prop.gen.h
-	touch $@
-cmph_xml_supt.c: uni_prop.h
-	touch $@
+	echo >$@
 endif
 @
 
@@ -15623,12 +16760,13 @@ extern const cmph_t uni_rev_na_xml_mph;
 
 \lstset{language=C}
 <<cmph_xml_supt.c>>=
+#ifdef USE_CMPH
 <<Common C Header>>
 
-#ifndef USE_CMPH
-#define USE_CMPH 1
-#endif
 #include "uni_prop.h"
+
+<<[[cmph]] XML name lookup support>>
+#endif
 @
 
 Once again, the reverse name list used for binary searching is also
@@ -15672,7 +16810,7 @@ different from the binary search version.
 int32_t uni_cmph_xml_name_to_cp(const char *name);
 @
 
-<<cmph_xml_supt.c>>=
+<<[[cmph]] XML name lookup support>>=
 int32_t uni_cmph_xml_name_to_cp(const char *name)
 {
   unsigned int nlen = strlen(name);
@@ -15717,11 +16855,9 @@ tstxml_na_cp_cmph: LDFLAGS += $(if $(CMPH_LDFLAGS),$(CMPH_LDFLAGS),-lcmph)
 
 \lstset{language=C}
 <<tstxml_na_cp_cmph.c>>=
+#ifdef USE_CMPH
 <<Common C Header>>
 
-#ifndef USE_CMPH
-#define USE_CMPH 1
-#endif
 #include "uni_prop.h"
 
 <<POSIX timing support>>
@@ -15753,6 +16889,7 @@ int main(void)
   fprintf(stderr, "b%ld/s h%ld/s %.2fx\n", tb, th, (double)th/(double)tb);
   return 0;
 }
+#endif
 @
 
 \section{The CLDR}
@@ -16646,254 +17783,6 @@ crappy "set" notation must be implemented for reading LDML files:
       & and - only operate on sets
   [^ ] for inversion
   $<varname> needed for contexts which allow variable assignments
-@
-
-\chapter{Additional Testing}
-
-Here is a master driver to call some of the above code for testing.
-
-<<xC Test Support Executables>>=
-tst \
-@
-
-\lstset{language=C}
-<<tst.c>>=
-<<Common C Header>>
-#include "uni_all.h"
-
-@
-
-For I/O, I'll just use a decent size fixed buffer, and in fact use it
-as both a UCS-32 buffer and a character buffer, allowing both at the
-same time by marking the divider with [[blen]].
-
-<<tst.c>>=
-#define BUF_SIZE 1024
-int buf[BUF_SIZE];
-int blen;
-
-#define cbuf ((char *)(buf+blen))
-#define cblen ((BUF_SIZE - blen) * sizeof(int))
-@
-
-The purpose of this program is to take Unicode characters as input,
-and do things with them.
-
-<<tst.c>>=
-int main(int argc, const char **argv)
-{
-  <<Get and show characters for [[tst]]>>
-  <<Manipulate characters for [[tst]]>>
-  return 0;
-}
-@
-
-For this program, input means command line arguments.  Characters are
-specified by either a hexadecimal code point or a Unicode character
-name.  They are all appended to [[buf]].
-
-<<Get and show characters for [[tst]]>>=
-int cp;
-
-while(--argc > 0) {
-  ++argv;
-  int l = strlen(*argv);
-  const int *mcp;
-  cp = cp_of_uni(*argv, l, &mcp);
-  if(cp >= 0) {
-    /* valid name */
-    if(!mcp)
-      buf[blen++] = cp;
-    else {
-      int i;
-      for(i = 0; i < cp; i++)
-        buf[blen++] = mcp[i];
-      cp = mcp[0];
-    }
-  } else {
-    const char *s;
-    cp = strtol(*argv, (char **)&s, 16);
-    if(!*s) {
-      /* valid hex code point */
-      buf[blen++] = cp;
-    } else {
-      /* not valid anything */
-      fprintf(stderr, "Can't parse argument %s\n", *argv);
-      exit(1);
-    }
-  }
-}
-@
-
-Next, we'll print some more information about each character.  This
-includes characters artificially added by multi-character sequences.
-
-<<Get and show characters for [[tst]]>>=
-int i;
-for(i = 0; i < blen; i++) {
-  cp = buf[i];
-  <<Show character for [[tst]]>>
-}
-@
-
-First, I'd like to see the Unicode names, as well as the hexadecimal
-code points.
-
-<<Show character for [[tst]]>>=
-printf("Character %04X\n", cp);
-if(uni_gen_name_for(cp, cbuf, cblen))
-  printf("Unicode: %s\n", cbuf);
-@
-
-Then, maybe some of the character classifications.  These are all
-printed out by the [[chartypes]] mainline, but there is no harm in
-repeating it.
-
-<<Show character for [[tst]]>>=
-fputs("Character class: ", stdout);
-#define i cp
-<<Print flags and classes of cp [[i]]>>
-#undef i
-putchar('\n');
-@
-
-Next, we'll try some normalization.  But first, we'll print the entire
-buffer out before starting, and afer each step.
-
-<<Manipulate characters for [[tst]]>>=
-#define prbuf(s) do { \
-  fputs(s":", stdout); \
-  for(i = 0; i < blen; i++) \
-    printf(" %04X", buf[i]); \
-  putchar('\n'); \
-  putchar('\''); \
-  uni_utf8_fputs(buf, blen, stdout); \
-  putchar('\''); \
-  putchar('\n'); \
-} while(0)
-prbuf("Start string");
-@
-
-Of course these are all destructive.  Another test program should
-probably do normalization on copies so that the original can be reused
-for more tests.
-
-<<Manipulate characters for [[tst]]>>=
-blen = NFD_dec(buf, blen);
-prbuf("After decomp");
-Canon_Order(buf, blen, 1);
-prbuf("After canon-order (NFD)");
-blen = NFC_comp(buf, blen, NULL);
-prbuf("After canon-comp (NFC)");
-blen = NFKD_dec(buf, blen);
-prbuf("After compat-decomp");
-Canon_Order(buf, blen, 1);
-prbuf("After canon-order (NFKD)");
-blen = NFC_comp(buf, blen, NULL);
-prbuf("After canon-comp (NFKC)");
-blen = NFKC_Casefold(buf, blen);
-prbuf("After case folding (NFKC_CF)");
-@
-
-As a more thorough character name test, we can run every single known
-character through the [[tst]] program.  This does not guarantee that
-the lists themselves are OK, or that bad names will not trigger false
-positives, but it's better than nothing.
-
-<<xTest Scripts>>=
-tstchars \
-@
-
-\lstset{language=sh}
-<<tstchars>>=
-#!/bin/sh
-<<Common NoWeb Warning>>
-@
-
-First, we'll iterate through all of the Unicode names mapping to one
-character, both forward and reverse.
-
-<<tstchars>>=
-cat charnames.uni{a,} | while IFS=, read a b; do
-  b=$(($b))
-  hb=`printf %04X $b`
-  tr=$(./tst "$a" | head -n 1)
-  tr="${tr#* }"
-  test $hb = "$tr" || echo "$a,$b $hb"
-  tr="`./tst $hb | grep -a '^Unicode:'`"
-  tr="${tr#* }"
-  test "$a" = "$tr" && continue
-  ab=`grep "^$a," charnames.uni{a,} | cut -d: -f2 | cut -d, -f2`
-  test "$ab" = "$b" || echo "$hb $a $tr"
-done
-@
-
-Next, all of the multi-character Unicoded characters.  They can only
-be tested for name interpretation, since reverse lookups on
-multi-character sequences are impossible.
-
-<<tstchars>>=
-cat charnames.uniseq | while IFS=, read a b; do
-  tr=
-  for x in $(./tst "$a" | grep -a '^Character [0-9A-F]' | cut -d\  -f2); do
-    tr=$tr,$((0x$x))
-  done
-  test ,$b = "$tr" || echo "$a,$b $tr"
-done
-@
-
-Another useful check is to ensure that the string table's strings are
-all actually unique.  This is done by traversing each hash bucket to
-see if there are any duplicates.
-
-<<makefile.rules>>=
-# explicit strs.gen dep should not be necessary, but gmake flakes on it
-hashcheck: uni_strs.o strs.gen
-	$(CC) -o $@ $(CFLAGS) $(LDFLAGS) $(EXTRA_CFLAGS) -DHASHCHECK uni_strs.c
-@
-
-<<xC Test Executables>>=
-hashcheck \
-@
-
-\lstset{language=C}
-<<uni_strs.c>>=
-#ifdef HASHCHECK
-int main(void)
-{
-    int i;
-    int err = 0;
-    for(i = 0; i < HTAB_SIZE; i++) {
-        if(!strhash[i])
-            continue;
-        int j, k;
-        for(j = strhash[i]; builtin_hashe[j - 1].nextent;
-	                                    j = builtin_hashe[j - 1].nextent) {
-            const char *js = builtin_hashe[j - 1].off + builtin_str;
-            int jl = num_before(js, NULL);
-            for(k = builtin_hashe[j - 1].nextent; k;
-	                                    k = builtin_hashe[k - 1].nextent) {
-                const char *ks = builtin_hashe[k - 1].off + builtin_str;
-                if(num_before(ks, NULL) == jl && !memcmp(js, ks, jl)) {
-                    fprintf(stderr, "duplicate string %d %d %.*s\n",
-                            builtin_hashe[j - 1].off, builtin_hashe[k - 1].off,
-                            jl, js);
-                    err = 1;
-                }
-            }
-        }
-    }
-    printf("%lu string space; %lu hash entries\n",
-           (unsigned long)builtin_str_size,
-           (unsigned long)builtin_hashe_size);
-    return err;
-}
-#endif
-@
-
-\lstset{language=txt}
-<<FIXME>>=
-Unihan_IRGSources.txt: kIRG_* (not sure how to encode)
 @
 
 \chapter{Code Index}
@@ -17825,6 +18714,197 @@ using NFKC\_CF.
 % uni_is_nl prototype
 % uni_is_bs prototype
 
+\subsection{Boundary Detection}
+
+Several of the enumerated properties are designed for boundary
+detection.  These require an additional set of rules to be useful.
+Those rules are provided in the string section, but require an
+ICU-like regular expression engine to use.  Instead, the following
+functions may be used.
+
+A grapheme cluster generally corresponds to a single user-visible
+character (glyph).  The following function can tell you if a grapheme
+cluster boundary exists between any two characters.  For improved
+performance, the return value can be passed in to [[prevret]] when
+scanning a sequential string; that is, when [[next]] from the previous
+call is passed in as [[prev]].  However, other than improved
+performance, there is no reason not to pass zero for this parameter
+every time:  the function retains and requires no state.
+
+Unicode defines two types of grapheme cluster:  legacy and extended.
+By default the extended form is detected.  Setting [[legacy]] to
+non-zero selects the legacy form.
+
+The return value is less than zero if there is no break between
+[[prev]] and [[next]], and greater than zero otherwise.
+
+% uni_gc_brk prototype
+
+What constitutes a word in text is locale and context dependent.
+Often detecting words requires a dictionary as well.  Unicode provides
+two methods of detecting words, though:  a simple one based mostly on
+the character being looked at, and a more complex one which detects
+the boundaries between words.
+
+The following function returns zero if a character is definitely not a
+word character, more than zero if the character definitely is a word
+character, and less than zero if it is a word character only if either
+the previous character is also a word character or there is no
+previous character.  Words are then defined as the longest contiguous
+string of word characters.
+
+No state is used or saved, so this function can be applied anywhere.
+Manual backtracking is, however, required when a negative value is
+returned.
+
+% uni_is_simple_word prototype
+
+Unicode also has an algorithm similar to the grapheme cluster
+algorithm:  Given two characters, find if they belong to the same word
+or not.  Non-word characters may be included in a word by this
+definition, so additional filtering may be necessary.
+
+Explicit backtracking is necessary.  It is not generally possible to
+begin detecting a word in the middle of a string.  Instead, detection
+must start either at the beginning of a string or at the last known
+good word boundary.  If the last boundary was set by backtracking, it
+is better to start one earlier.  The safest is to just always start
+two words behind the current location.  At the start of a scan, pass
+in zero for [[prevret]].  Otherwise, always pass in the previous
+return value.
+
+The return value is one of three different ranges:  less than $-1$
+indicates [[prev]] and [[next]] are in the same word; greater than $1$
+indicates [[prev]] and [[next]] are not in the same word, and $1$ and
+$-1$ indicate that the relationship is not yet known.
+
+When the relationship is not yet known, the same value is returned
+every time until the relationship is known.  For example, call the
+first pair of characters [[prev1]] and [[next1]].  After the first
+time $-1$ or $1$ is returned, any subsequent $-1$ or $1$ indicates
+that [[prev]] and [[next]] are definitely in the same word, but still
+says nothing about [[prev1]] and [[next1]].  Once a value outside of
+the $-1$ to $1$ range is returned, that value indicates the
+relationship between [[next]] and [[prev]], as well as the
+relationship between [[next1]] and [[prev1]].  If the end of string is
+reached before anything but $1$ and $-1$ has been returned, [[next1]]
+and [[prev1]] are not in the same word.
+
+For example, given the string [[c1 c2 c3 c4 c5 c6]], and passing in
+[[c1]] and [[c2]], and then [[c2]] and [[c3]], etc., to produce the
+return values [[-5 -1 -1 -1 3]] indicates that [[c1]] and [[c2]] are
+in the same word ($-5$ indicates no break).  [[c3]] starts a new word
+($-1$ is deferred until $3$ is encontered, indicating a break),
+containing [[c3]], [[c4]], and [[c5]] (subsequent $-1$ values always
+indicate no break).  [[c6]] once again starts a new word ($3$
+indicates a break).  Note that there will never be more than one
+backtrack position at once, and that the backtrack position is no
+longer needed once it is resolved.  The next $-1$ or $1$ starts a new
+backtracking session.
+
+% uni_word_brk prototype
+
+Currently, the only locale depencdencies supported must be enabled
+using explicit flags; the current locale is not checked.   The
+following flags can be set:
+
+\input{Boundary determination locale flags.tex} % C
+
+What constitutes a sentence in text is even more context and locale
+dependent.  Unicode tries to provide a standard means to do so,
+though.  Like the word boundary checker, the sentence boundary checker
+determines if a sentence break exists between two characters.
+
+Explicit backtracking is necessary.  It is not generally possible to
+begin detecting a sentence in the middle of a string.  Instead,
+detection must start either at the beginning of a string or at the
+last known good sentence boundary.  If the last boundary was set by
+backtracking, it is better to start one earlier.  The safest is to
+just always start two sentences behind the current location.  At the
+start of a scan, pass in zero for [[prevret]].  Otherwise, always pass
+in the previous return value.
+
+As with words, values less than $-1$ always indicate that [[prev]] and
+[[next]] are in the same sentence, and values greater than $1$ always
+indicate that they are not.  As with words, $1$ or $-1$, when first
+encountered, indicates an indeterminate (backtracking) position.
+Unlike words, the subsequent return values must be exactly the same
+($1$ or $-1$) to indicate that they are part of the same sentence as
+the first character.  If the return value is not the same, but also
+not $1$ or $-1$, then, as with words, the original indeterminate
+location gets the same treatment as the pair which returned different
+values.  On the other hand, if the return value is not the same, but
+it is still $1$ or $-1$, then it indicates that no break is permitted
+between the characters which returned this value, but a break
+\emph{is} required at the original indeterminate location.  Also
+unlike the word boundary detector, if no change is made before the end
+of the string, the indeterminate location's handling is determined by
+the sign of the return value.  $1$ indicates a break, and $-1$
+indicates no break.
+
+For example, given the string [[c1 c2 c3 c4 c5 c6]], and passing in
+[[c1]] and [[c2]], and then [[c2]] and [[c3]], etc., to produce the
+return values [[-5 1 1 1 -1]] indicates that [[c1]] and [[c2]] are
+in the same sentence ($-5$ indicates no break).  [[c3]] starts a new
+sentence ($1$ is deferred until $-1$ is encontered, indicating a
+break),  containing [[c3]], [[c4]], and [[c5]] (subsequent $1$ values
+always indicate no break), as well as [[c6]] (just changing $1$ to
+$-1$ indicates end of backtracking and no break).  Note that there
+will never be more than one backtrack position at once, and that the
+backtrack position is no longer needed once it is resolved.  The next
+$-1$ or $1$ starts a new backtracking session.
+
+% uni_sentence_brk prototype
+
+Unicode assumes in the above function that paragraphs are ended by
+either explicit end-of-line characters or paragraph separators.  This
+means that to use this function, if you are using doubled end-of-line
+characters to separate paragraphs, you will have to first strip the
+paragraph of all explicit newlines before detecting sentences.
+
+\subsection{Word Wrapping}
+
+Given a paragraph of text, Unicode provides an algorithm to narrow
+that text (if possible) by inserting soft line breaks within the
+paragraph.  These soft line breaks may be placed at any potential
+break point between two characters.  As mentioned above, Unicode
+assumes that paragraphs are delimited by single hard end-of-line
+characters or explicit paragraph separators, so if this algorithm is
+being used to take text that uses double-newlines to separate
+paragraphs, the explicit line separators within the paragraph must be
+stripped, first.
+
+Explicit backtracking is necessary.  It is not generally possible to
+begin detecting a potential line break in the middle of a string.
+Instead, detection must start either at the beginning of a string or
+at the last known good break point.  If the last break point was set by
+backtracking, it is better to start one earlier.  The safest is to
+just always start two break points behind the current location.  At the
+start of a scan, pass in zero for [[prevret]].  Otherwise, always pass
+in the previous return value.
+
+The return values work almost exactly like with sentences.  The only
+difference is that a return value of zero indicates that [[prev]] and
+[[next]] must always be split.  Values less than $-1$ always indicate
+that [[prev]] and [[next]] should remain together, and values greater
+than $1$ always indicate that they may be split if desired.  $1$ or
+$-1$, when first encountered, indicates an indeterminate
+(backtracking) position. The subsequent return values must be exactly
+the same ($1$ or $-1$) to indicate that they are part of the same
+sentence as the first character.  If the return value is not the same,
+but also not $1$ or $-1$, then the original indeterminate location
+gets the same treatment as the pair which returned different values.
+On the other hand, if the return value is not the same, but it is
+still $1$ or $-1$, then it indicates that no break is permitted
+between the characters which returned this value, but a break
+\emph{is} permitted at the original indeterminate location. If no
+change is made before the end of the string, the indeterminate
+location's handling is determined by the sign of the return value. $1$
+indicates a break is permitted, and $-1$ indicates no break is
+permitted.  See [[uni_sentence_brk]] for an example.
+
+% uni_line_brk prototype
+
 \section{Numeric Properties}
 
 Each numeric property \emph{NP} is supported by the following symbols:
@@ -18540,9 +19620,9 @@ possible conditions are mapped to a flag:
 
 A flag in [[UNI_SC_FL_LOCALE]] indicates that the translation only
 applies in specific locales.  The others ([[UNI_SC_FL_CONTEXT]])
-depend on context: generally the entire containing grapheme cluster,
-and possibly the next character must be known before deciding on a
-translation.
+depend on context: generally the entire containing combining character
+sequence, and possibly the next character must be known before
+deciding on a translation.
 
 Since each input code point may map to multiple translations
 (depending on the condition),  the encoding of the string is to
@@ -18659,6 +19739,11 @@ notes:
     Hangul Syllable Decomposition
     Hangul Syllable Name Generation
     Unicode Collation Algorithm (UCA)
+    Character Segmentation
+    Hangul Syllable Boundary Determination
+      subset of Character Segmentation (GB6-GB9a)
+    Word Segmentation (with limited CLDR customizaton)
+    Sentence Segmentation (with limited CLDR customizaton)
    not implemented:
     Default Case Conversion (depends on Word Segmentation, Normalization)
       toUppercase(X) : map each C in X to Uppercase_Mapping(C)
@@ -18676,14 +19761,6 @@ notes:
       isCased(X): !isLowercase(X) || !isUppercase(X) || !isTitlecase(X)
     Line Breaking Algorithm (with possible CLDR customizaton)
       complicated; see tr14 & CLDR
-    Character Segmentation (with possible CLDR customizaton)
-      complicated; see tr29 & CLDR
-    Word Segmentation (with possible CLDR customizaton)
-      complicated; see tr29 & CLDR
-    Sentence Segmentation (with possible CLDR customizaton)
-      complicated; see tr29 & CLDR
-    Hangul Syllable Boundary Determination
-      complicated; see tr29
     Default Identifier Determiniation
       ID = ID_Start { ID_Continue }
       XID = XID_Start { XID_Continue }
@@ -18694,7 +19771,7 @@ notes:
       !(gc in Private_Use, Surrogate, Control)
     Pattern Syntax Determination
       Pattern_White_Space == space/separator
-      Patter_Syntax == syntactic chars
+      Pattern_Syntax == syntactic chars
       other = literals or identifiers
     Identifier Normalization
     Identifer Case Folding
