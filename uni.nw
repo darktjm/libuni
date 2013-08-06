@@ -380,13 +380,20 @@ int uni_utf16_encode(uint16_t *buf, uint32_t cp, int bige)
 
 <<Unicode I/O Exports>>=
 /* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 2 words available */
-int32_t uni_utf16_decode(const uint16_t *s, unsigned int *nread, int bige);
+/* if len is too short, 0 is returned in *nread */
+int32_t uni_utf16_decode(const uint16_t *s, unsigned int len,
+                         unsigned int *nread, int bige);
 @
 
 <<Unicode I/O functions>>=
-int32_t uni_utf16_decode(const uint16_t *s, unsigned int *nread, int bige)
+int32_t uni_utf16_decode(const uint16_t *s, unsigned int len,
+                         unsigned int *nread, int bige)
 {
+  if(!len) {
+    if(nread)
+      *nread = 0;
+    return -1;
+  }
   uint16_t w = bige ? be16toh(*s) : le16toh(*s);
   if(nread)
     *nread = 1;
@@ -394,6 +401,11 @@ int32_t uni_utf16_decode(const uint16_t *s, unsigned int *nread, int bige)
     return w;
   if(w >= 0xdc00)
     return -1;
+  if(len < 2) {
+    if(nread)
+      *nread = 0;
+    return -1;
+  }
   uint16_t w2 = bige ? be16toh(s[1]) : le16toh(s[1]);
   if(w2 >= 0xe000 || w2 < 0xdc00)
     return -1;
@@ -557,35 +569,51 @@ int uni_utf8_encode(uint8_t *buf, uint32_t cp)
 
 <<Unicode I/O Exports>>=
 /* this function returns -1 on errors */
-/* if the buffer may be invalid, ensure at least 4 chars available */
-int32_t uni_utf8_decode(const uint8_t *s, unsigned int *nread);
+/* if the buffer is too short, 0 is returned in *nread */
+int32_t uni_utf8_decode(const uint8_t *s, unsigned int len, unsigned int *nread);
 @
 
 <<Unicode I/O functions>>=
-int32_t uni_utf8_decode(const uint8_t *s, unsigned int *nread)
+int32_t uni_utf8_decode(const uint8_t *s, unsigned int len, unsigned int *nread)
 {
-  if(nread)
-    *nread = 1;
-  if(*s < 0x7f)
+  if(!len) {
+    if(nread)
+      *nread = 0;
+    return -1;
+  }
+  if(*s < 0x80) {
+    if(nread)
+      *nread = 1;
     return *s;
+  }
   uint32_t c = *s++, ec;
   if((c & 0xf8) == 0xf0) {
+    if(len < 4) {
+      if(nread)
+        *nread = 0;
+      return -1;
+    }
     c &= 0x07;
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 1;
       return -1;
-    if(nread)
-      *nread = 2;
+    }
     c = (c << 6) + (ec & 0x3f);
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 2;
       return -1;
-    if(nread)
-      *nread = 3;
+    }
     c = (c << 6) + (ec & 0x3f);
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 3;
       return -1;
+    }
     if(nread)
       *nread = 4;
     c = (c << 6) + (ec & 0x3f);
@@ -593,16 +621,25 @@ int32_t uni_utf8_decode(const uint8_t *s, unsigned int *nread)
       return -1;
     return c;
   } else if((c & 0xf0) == 0xe0) {
+    if(len < 3) {
+      if(nread)
+        *nread = 0;
+      return -1;
+    }
     c &= 0x0f;
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 1;
       return -1;
-    if(nread)
-      *nread = 2;
+    }
     c = (c << 6) + (ec & 0x3f);
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 2;
       return -1;
+    }
     if(nread)
       *nread = 3;
     c = (c << 6) + (ec & 0x3f);
@@ -610,18 +647,29 @@ int32_t uni_utf8_decode(const uint8_t *s, unsigned int *nread)
       return -1;
     return c;
   } else if((c & 0xe0) == 0xc0) {
+    if(len < 2) {
+      if(nread)
+        *nread = 0;
+      return -1;
+    }
     c &= 0x1f;
     ec = *s++;
-    if((ec & 0xc0) != 0x80)
+    if((ec & 0xc0) != 0x80) {
+      if(nread)
+        *nread = 1;
       return -1;
+    }
     if(nread)
       *nread = 2;
     c = (c << 6) + (ec & 0x3f);
     if(c < 0x80)
       return -1;
     return c;
-  } else
+  } else {
+    if(nread)
+      *nread = 1;
     return -1;
+  }
 }
 @
 
@@ -1112,10 +1160,10 @@ if(uf->enctype == 32) {
   cp = uni_utf32_decode((uint32_t *)ra, uf->bige);
   l = 4;
 } else if(uf->enctype == 16) {
-  cp = uni_utf16_decode((uint16_t *)ra, &l, uf->bige);
+  cp = uni_utf16_decode((uint16_t *)ra, (uf->ralen - uf->raptr) / 2, &l, uf->bige);
   l *= 2;
 } else
-  cp = uni_utf8_decode(ra, &l);
+  cp = uni_utf8_decode(ra, uf->ralen - uf->raptr, &l);
 if(l > uf->ralen - uf->raptr) {
   uf->ralen = uf->raptr = 0;
   return -2;
@@ -1392,7 +1440,7 @@ uint32_t uni_valid_utf16_decode(const uint16_t *s, unsigned int *nread, int bige
 
 uint32_t uni_valid_utf8_decode(const uint8_t *s, unsigned int *nread)
 {
-  if(*s < 0x7f) {
+  if(*s < 0x80) {
     if(nread)
       *nread = 1;
     return *s;
@@ -7111,7 +7159,7 @@ point is saved, and when it is resolved, it is checked.
 <<Process a break test line>>=
 /* ignore bot/eot marks */
 unsigned int clen;
-if(uni_utf8_decode(s, &clen) != (tst == 'l' ? L'×' : L'÷')) {
+if(uni_utf8_decode(s, 4, &clen) != (tst == 'l' ? L'×' : L'÷')) {
   fprintf(stderr, "Invalid line %d: %ssot break\n", lno, tst == 'l' ? "" : "no ");
   return 1;
 }
@@ -7119,20 +7167,20 @@ for(s += clen; isspace(*s); s++);
 uint8_t *e;
 for(e = s + strlen((char *)s); isspace(e[-1]); e--);
 e += uni_utf8_prevc(e);
-if(uni_utf8_decode(e, NULL) != L'÷') {
+if(uni_utf8_decode(e, 4, NULL) != L'÷') {
   fprintf(stderr, "Invalid line %d: no eot break\n", lno);
   return 1;
 }
 while(isspace(e[-1]))
   e--;
-uint32_t p, n, pp, pn;
+uint32_t p, n, pp = 0, pn = 0; /* init to shut gcc up */
 int ret = 0, pret = 0, pexp = 0;
 n = strtoul((char *)s, (char **)&s, 16);
 while(s < e) {
   p = n;
   while(isspace(*s))
     s++;
-  int exp = uni_utf8_decode(s, &clen) == L'÷';
+  int exp = uni_utf8_decode(s, 4, &clen) == L'÷';
   for(s += clen; isspace(*s); s++);
   n = strtoul((char *)s, (char **)&s, 16);
   switch(tst) {
@@ -15195,15 +15243,17 @@ int main(int argc, const char **argv)
     /* assume utf-8 input */
     if(!*lbuf || *lbuf == '\n')
       continue;
+    unsigned int slen = strlen(s);
     for(s = lbuf, buf32len = 0; *s; buf32len++) {
       unsigned int len;
-      uint32_t c = uni_utf8_decode((uint8_t *)s, &len);
+      uint32_t c = uni_utf8_decode((uint8_t *)s, slen, &len);
       if(c == '\n')
         break;
       if(buf32len == buf32max)
         resize(buf32, (buf32max *= 2));
       buf32[buf32len] = c;
       s += len;
+      slen -= len;
     }
     if(nstrs == maxstrs)
       resize(strs, (maxstrs *= 2));
@@ -15366,12 +15416,28 @@ least be simulated using regular expressions.}
 \begin{itemize}
 \item Given a collation element, list all collation elements which
 have the same key (i.e., determine its collation equivalence class).
-This is required for regular expressions.
+This is required for regular expressions.  Then again, regex could
+just store the DUCET value for the element, and look up DUCET for
+every single character that needs to match.  The primary advantage of
+a reverse table for this is in the case where the equivalence class
+contains very few elements; in that case, the literal elements can be
+matched instead, much more efficiently.  One aspect that this library
+already provides that others do not is the ability to detect
+multi-character collation elements, given the first character of such
+an element.  Without that, even this approach would not be possible.
 \item Given two collation elements, list all collation elements which
-lie between them.  This is required for regular expressions.
+lie between them.  This is required for regular expressions.  Then
+again, regex could just store the DUCET values for each end of the
+range, and look up DUCET for every single character that needs to
+match.  The only advantage of a reverse table for this is if the range
+is small, or the range translates directly to a code point range.  In
+either case, a literal match test is more efficient.
 \item Reorder elements.  This is required for static CLDR support.
+Then again, the reverse table generated for that purpose doesn't need
+to be exported.
 \item Reorder element blocks.  This is required for static and dynamic
-CLDR support.
+CLDR support.  Then again, I really need to analyze the table better.
+If possible, a simple translation table may suffice.
 \end{itemize}
 
 At the minimum, these functions all require a lookup table ordered by
@@ -17732,6 +17798,8 @@ else if(xml_isname(n, "segmentations")) {
 implement
 
 need to decide where data files will go (/usr/share/libuni/<locale>/<data>)
+  then again, if the total locale data size is small enough, I guess it
+  could just go in the binary library as well.
 need to decide if an index should be generated (probably yes)
 
 inheritance rules (what a pain)
@@ -17969,21 +18037,23 @@ Unicode code point).
 
 Similarly, conversion of UTF-32 to and from UTF-16BE and UTF-16LE is
 done using the following functions.  At least two words must be
-available in the encoder's return buffer.  If the buffer may be
-invalid, ensure that at least two words are available in the decoder's
-input buffer as well (padding with zero is safe).  The results and
+available in the encoder's return buffer, unless [[uni_utf16_enclen]]
+is used to compute the output buffer length.  If the input buffer to
+the decoder may be invalid, ensure that at least two words are
+available as well (padding with zero is safe).  The results and
 parameters have the same meaning as for the utf32 functions above,
-except that the decoder also returns the number of words it read from
-the buffer in [[*nread]] (optionally, if [[nread]] is non-[[NULL]]).
+except that the decoder also takes the length of [[s]] (in words), and
+returns the number of words it read from the buffer in [[*nread]]
+(optionally, if [[nread]] is non-[[NULL]]).  If [[s]] is too short,
+[[*nread]] is always zero.
 
 % uni_utf16_encode prototype
 % uni_utf16_decode prototype
 
 Similarly, conversion of UTF-32 to and from UTF-8 is done using the
 following functions.  At least 4 bytes must be available in the
-encoder's return buffer.  If the buffer may be invalid, ensure that at
-least 4 characters are available in the decoder's input buffer
-(padding with zero is safe).  The results and parameters have the same
+encoder's return buffer, unless [[uni_utf8_enclen]] is used to compute
+the output buffer length.  The results and parameters have the same
 meaning as for the utf16 functions above.
 
 % uni_utf8_encode prototype
@@ -19729,6 +19799,7 @@ Document:
 
 \end{document}
 
+\input{begin-hidden.tex} %%% doc
 notes:
   page 99: Named Unicode Algorithms
    implemented:
@@ -19744,6 +19815,7 @@ notes:
       subset of Character Segmentation (GB6-GB9a)
     Word Segmentation (with limited CLDR customizaton)
     Sentence Segmentation (with limited CLDR customizaton)
+    Line Breaking Algorithm (with limited CLDR customizaton)
    not implemented:
     Default Case Conversion (depends on Word Segmentation, Normalization)
       toUppercase(X) : map each C in X to Uppercase_Mapping(C)
@@ -19759,8 +19831,6 @@ notes:
       isTitlecase(X): X == toTitlecase(X)
       isCasefolded(X): X == toCasefold(X)
       isCased(X): !isLowercase(X) || !isUppercase(X) || !isTitlecase(X)
-    Line Breaking Algorithm (with possible CLDR customizaton)
-      complicated; see tr14 & CLDR
     Default Identifier Determiniation
       ID = ID_Start { ID_Continue }
       XID = XID_Start { XID_Continue }
@@ -19795,3 +19865,4 @@ Completely untouched & undocumented files:
     IVD_Collections.txt
     IVD_Sequences.txt
     IVD_Stats.txt
+\input{end-hidden.tex} %%% doc
