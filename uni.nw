@@ -1868,6 +1868,7 @@ and are prefixed with [[UNI_SOP_]].  Where two operation names are
 given, either will work.}
 \end{quote}
 % End-doc op-table
+
 \caption{\label{tab:setop}Set Operations}
 \end{table}
 \end{itemize}
@@ -9259,7 +9260,7 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
   if(!mr) {
     uni_multi_tab_lookup(simple, cp * 4, &mr, 0);
     *ret = NULL;
-    return mr ? ((uni_frac_t *)mr)->num : cp;
+    return mr && ((uni_frac_t *)mr)->num ? ((uni_frac_t *)mr)->num : cp;
   }
   uni_str_ptr_t *v = (void *)mr;
   const uint16_t *str = strs + v->off;
@@ -9290,7 +9291,7 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
   if(!ncond) {
     uni_multi_tab_lookup(simple, cp * 4, &mr, 0);
     *ret = NULL;
-    return mr ? ((uni_frac_t *)mr)->num : cp;
+    return mr && ((uni_frac_t *)mr)->num ? ((uni_frac_t *)mr)->num : cp;
   }
   *ret = ncond + 1;
   return *ncond & UNI_SC_FL_LEN_MASK;
@@ -9336,16 +9337,74 @@ int uni_<<@type>><<@sz>>(uint32_t cp, uint32_t cond, <<Buffer return parameters 
 <<[[uni_case_convert]] support for [[tc]]>>
 @
 
-These provide support for single-character conversion.  Normally, this
-is sufficient.  For users too lazy to loop over a string themselves,
-here are some string case conversion functions.  There are actually
-some additional functions which can be performed when doing a full
-string conversion.  All of the non-locale context flags can be
-resolved, for example.  Title case always requires word boundary
-detection, as well.  In fact, context requries word boundary detection
-as well.  Boundary detection pulls in a table.  In fact, title case
-conversion requires all of the conversion tables as well, so these
-functions are placed in a separate object file.
+These only convert; they don't check to see if a character \emph{is} a
+certain case.  One way to do this is to check the gc property; in
+fact, this I recommend this, since that returns \emph{which} case the
+character is, rather than requiring three tests.  However, Unicode has
+a different definition in mind: checking if the result of conversion
+matches the input.
+
+<<Unicode property exports>>=
+/* return: -1 = unknown due to cond; 0 = no, 1 = yes */
+int uni_case_check(uint32_t cp, uint32_t cond, const uint32_t *simple,
+                   const uint32_t *special, const uint16_t *strs);
+@
+
+<<[[uni_case_convert]] support for (@type)>>=
+int uni_is_<<@type>>(uint32_t cp, uint32_t cond);
+<<[[uni_is_]][[<<@type>>]] macro>>
+@
+
+<<[[uni_is_]](@type) macro>>=
+#define uni_is_<<@type>>(cp, cond) \
+  uni_case_check(cp, cond, uni_s<<@type>>_mtab, uni_<<@type>>_mtab, \
+                  uni_<<@type>>_strs)
+@
+
+<<[[uni_is_]][[tc]] macro>>=
+#define uni_is_tc(cp, cond) \
+  (uni_case_check(cp, cond, uni_stc_mtab, uni_tc_mtab, uni_tc_strs) || \
+   uni_case_check(cp, cond, uni_suc_mtab, uni_uc_mtab, uni_uc_strs))
+@
+
+<<case.c>>=
+int uni_case_check(uint32_t cp, uint32_t cond, const uint32_t *simple,
+                   const uint32_t *special, const uint16_t *strs)
+{
+  const uint16_t *rbuf;
+  int32_t ret = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
+  if(ret < 0)
+    return ret;
+  if(!rbuf)
+    return ret == cp;
+  if(ret == 1 || (ret == 2 && uni_is_surrogate(*rbuf)))
+    return cp == uni_int_utf16_decode(rbuf, NULL);
+  return 1;
+}
+@
+
+Unicode also provides a generic ``cased'' condition; this means that
+some case conversion may succeed.  Naturally, this pulls in all three
+conversion tables.
+
+<<Unicode property exports>>=
+/* return: -1 = unknown due to cond; 0 = no, 1 = yes */
+int uni_is_cased(uint32_t cp, uint32_t cond);
+#define uni_is_cased(cp, cond) \
+  (!uni_case_check(cp, cond, uni_stc_mtab, uni_tc_mtab, uni_tc_strs) && \
+   !uni_case_check(cp, cond, uni_suc_mtab, uni_uc_mtab, uni_uc_strs) && \
+   !uni_case_check(cp, cond, uni_suc_mtab, uni_uc_mtab, uni_lc_strs))
+@
+
+These provide support for single-character conversion and detection. 
+Normally, this is sufficient.  For users too lazy to loop over a
+string themselves, here are some string case conversion and detection
+functions. There are actually some additional functions which can be
+performed when doing a full string conversion.  All of the non-locale
+context flags can be resolved, for example.  Title case always
+requires word boundary detection, as well.  In fact, regular context
+requries word boundary detection as well.  Boundary detection pulls in
+a table.  Title case and full case checking also pull in all tables.
 
 While the lower-case and upper-case conversion functions are identical
 except for the tables, the title-case conversion function is only
@@ -9353,19 +9412,34 @@ mostly identical.  Rather than duplicate the code, a single function
 is used for both upper and lower case, whereas macro tricks are used
 to get the title case converter.
 
+Also, most of the logic of checking case is identical to the logic of
+converting case, so the code is shared for that, as well.
+
 <<Unicode property exports>>=
 /* return is length of output */
 /* cond does not support query; only locale cond flags are used */
 <<[[uni_str_case_convert]][[32]] proto>>;
 <<[[uni_str_case_convert]][[16]] proto>>;
 <<[[uni_str_case_convert]][[8]] proto>>;
+/* return is 0 for no, 1 for yes */
+/* cond does not support query; only locale cond flags are used */
+<<[[uni_str_case_check]][[32]] proto>>;
+<<[[uni_str_case_check]][[16]] proto>>;
+<<[[uni_str_case_check]][[8]] proto>>;
 @
 
 <<[[uni_str_case_convert]](@sz) proto>>=
 int uni_str_case_convert<<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
-                           uint32_t cond, <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
-                           const uint32_t *simple, const uint32_t *special,
-		           const uint16_t *strs)
+                            uint32_t cond, <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
+                            const uint32_t *simple, const uint32_t *special,
+		            const uint16_t *strs)
+@
+
+<<[[uni_str_case_check]](@sz) proto>>=
+int uni_str_case_check<<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
+                          uint32_t cond,
+                          const uint32_t *simple, const uint32_t *special,
+		          const uint16_t *strs)
 @
 
 <<[[uni_str_]](@type)(@sz) proto>>=
@@ -9373,31 +9447,52 @@ int uni_str_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
                          uint32_t cond, <<Buffer return parameters for UTF-[[<<@sz>>]]>>)
 @
 
+<<[[uni_str_is_]](@type)(@sz) proto>>=
+int uni_str_is_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
+                            uint32_t cond)
+@
+
 <<[[uni_case_convert]](@sz) support>>=
-<<[[uni_str_case_convert]] support for [[<<@type>>]]>>
+<<[[uni_str_case_convert_check]] support for [[<<@type>>]]>>
 @
 
-<<[[uni_str_case_convert]] support for (@type)>>=
+<<[[uni_str_case_convert_check]] support for (@type)>>=
 <<[[uni_str_]][[<<@type>>]][[<<@sz>>]] proto>>;
-<<Generic [[str_case_convert]] for [[<<@type>>]]>>
+<<[[uni_str_is_]][[<<@type>>]][[<<@sz>>]] proto>>;
+<<Generic [[str_case_convert_check]] for [[<<@type>>]]>>
 @
 
-<<Generic [[str_case_convert]] for (@type)>>=
+<<Unicode property exports>>=
+<<[[uni_str_case_convert]][[32]] proto>>;
+<<[[uni_str_case_convert]][[16]] proto>>;
+<<[[uni_str_case_convert]][[8]] proto>>;
+<<[[uni_str_is_]][[cased]][[32]] proto>>;
+<<[[uni_str_is_]][[cased]][[16]] proto>>;
+<<[[uni_str_is_]][[cased]][[8]] proto>>;
+@
+
+<<Generic [[str_case_convert_check]] for (@type)>>=
 #define uni_str_<<@type>><<@sz>>(s, slen, cond, buf, off, buf_len) \
   uni_str_case_convert<<@sz>>(s, slen, cond, buf, off, buf_len, \
                      uni_s<<@type>>_mtab, uni_<<@type>>_mtab, uni_<<@type>>_strs)
+#define uni_str_is_<<@type>><<@sz>>(s, slen, cond) \
+  uni_str_case_check<<@sz>>(s, slen, cond, \
+                   uni_s<<@type>>_mtab, uni_<<@type>>_mtab, uni_<<@type>>_strs)
 @
 
-<<Generic [[str_case_convert]] for [[tc]]>>=
+<<Generic [[str_case_convert_check]] for [[tc]]>>=
 @
 
 <<case.c>>=
-<<[[Generic]] [[uni_str_case_convert]][[32]]>>
-<<[[Generic]] [[uni_str_case_convert]][[16]]>>
-<<[[Generic]] [[uni_str_case_convert]][[8]]>>
-<<[[Titlecase]] [[uni_str_case_convert]][[32]]>>
-<<[[Titlecase]] [[uni_str_case_convert]][[16]]>>
-<<[[Titlecase]] [[uni_str_case_convert]][[8]]>>
+<<[[Generic]] [[uni_str_case_convert_check]][[32]]>>
+<<[[Generic]] [[uni_str_case_convert_check]][[16]]>>
+<<[[Generic]] [[uni_str_case_convert_check]][[8]]>>
+<<[[Titlecase]] [[uni_str_case_convert_check]][[32]]>>
+<<[[Titlecase]] [[uni_str_case_convert_check]][[16]]>>
+<<[[Titlecase]] [[uni_str_case_convert_check]][[8]]>>
+<<[[Cased]] [[uni_str_case_check]][[32]]>>
+<<[[Cased]] [[uni_str_case_check]][[16]]>>
+<<[[Cased]] [[uni_str_case_check]][[8]]>>
 @
 
 <<(@type) [[uni_str_case_convert]] proto>>=
@@ -9408,42 +9503,102 @@ int uni_str_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
 <<[[uni_str_]][[tc]][[<<@sz>>]] proto>>
 @
 
-<<(@type) [[uni_str_case_convert]](@sz)>>=
+<<(@type) [[uni_str_case_convert_check]](@sz)>>=
 <<[[<<@type>>]] [[uni_str_case_convert]] proto>>
 {
   unsigned int rlen = 0;
   <<Initialize string case conversion>>
   
   while(slen) {
-    <<Convert a charcter's case into output, updating [[rlen]]>>
+    <<Convert a character's case into output, updating [[rlen]]>>
   }
   <<Clean up after string case conversion>>
   return rlen;
 }
 @
 
-Empty input produces empty output.  This is the only degenerate case.
+<<(@type) [[uni_str_case_check]] proto>>=
+<<[[uni_str_case_check]][[<<@sz>>]] proto>>
+@
 
-<<Initialize string case conversion>>=
-if(!slen)
-  return 0;
+<<[[Titlecase]] [[uni_str_case_check]] proto>>=
+<<[[uni_str_is_]][[tc]][[<<@sz>>]] proto>>
+@
+
+<<[[Cased]] [[uni_str_case_check]] proto>>=
+<<[[uni_str_is_]][[cased]][[<<@sz>>]] proto>>
+@
+
+<<(@type) [[uni_str_case_convert_check]](@sz)>>=
+<<[[<<@type>>]] [[uni_str_case_check]][[<<@sz>>]]>>
+@
+
+<<(@type) [[uni_str_case_check]](@sz)>>=
+<<[[<<@type>>]] [[uni_str_case_check]] proto>>
+{
+  <<Initialize string case checking>>
+  
+  while(slen) {
+    <<Convert a character's case, returning 1 if changed>>
+  }
+  <<Return default case check for [[<<@type>>]]>>
+}
+@
+
+<<Return default case check for (@type)>>=
+return 1;
+@
+
+<<Return default case check for [[Cased]]>>=
+return 0;
 @
 
 In order to avoid having to declare separate noweb macros for every
 case, the C preprocessor is used to select which code to include.
 
+<<Initialize string case checking>>=
+#undef USE_CHECK_CODE
+#define USE_CHECK_CODE 2
+<<Initialize string case conversion>>
+@
+
+<<Convert a character's case, returning 1 if changed>>=
+<<Convert a character's case into output, updating [[rlen]]>>
+@
+
 <<Initialize string case conversion>>=
+#if USE_CHECK_CODE == 2
+#undef USE_CHECK_CODE
+#define USE_CHECK_CODE 1
+#else
+#undef USE_CHECK_CODE
+#endif
 <<Use code for [[<<@type>>]] case conversion>>
 @
 
 <<Use code for (@type) case conversion>>=
 #undef USE_TC_CODE
+#undef USE_ALL_CODE
 @
 
 <<Use code for [[Titlecase]] case conversion>>=
-#ifndef USE_TC_CODE
+#undef USE_TC_CODE
 #define USE_TC_CODE 1
-#endif
+#undef USE_ALL_CODE
+@
+
+<<Use code for [[Cased]] case conversion>>=
+<<Use code for [[Titlecase]] case conversion>>
+#define USE_ALL_CODE 1
+@
+
+Empty input produces empty output (length zero).  For the case
+checkers, empty strings always return false (zero as well).  This is
+the only degenerate case.
+
+<<Initialize string case conversion>>=
+if(!slen)
+  return 0;
 @
 
 No check is made to ensure that the input string does not overlap the
@@ -9454,6 +9609,7 @@ used for [[s]], meaning that care will be taken to not corrupt the
 output if the input gets overwritten.
 
 <<Initialize string case conversion>>=
+#ifndef USE_CHECK_CODE
 uint<<@sz>>_t *stmp = NULL;
 
 if(!s) {
@@ -9462,19 +9618,12 @@ if(!s) {
   cpybuf(stmp, *buf + (off > 0 ? off : 0), slen);
   s = stmp;
 }
+#endif
 @
 
 <<Clean up after string case conversion>>=
 if(stmp)
   free(stmp);
-@
-
-Note that the only conditional flags respected are the locale ones.
-Unlike the single-character conversion functions, no facility is
-provided to check if setting them would result in different output.
-
-<<Initialize string case conversion>>=
-cond &= UNI_SC_FL_LOCALE;
 @
 
 While producing output, the output buffer parameters need to be
@@ -9483,15 +9632,15 @@ For static buffers, this requires managing a separate buffer pointer
 and length.
 
 <<Initialize string case conversion>>=
+#ifndef USE_CHECK_CODE
 uint<<@sz>>_t *sbuf = *buf;
 unsigned int sblen = *buf_len;
-@
 
-<<Initialize string case conversion>>=
 if(off < 0) {
   buf = &sbuf;
   buf_len = &sblen;
 }
+#endif
 @
 
 Since many of the case conversion flags require knowledge of a
@@ -9503,17 +9652,17 @@ determined by the character count to the next start.
 <<Initialize string case conversion>>=
 int gc_res = 0;
 int next_gc = 0;
-unsigned int clen, prev_cp_len;
+unsigned int clen, next_cp_len;
 /* warning: _int_ may over-read buffer with invalid UTF input */
-uint32_t prev_cp = uni_int_utf<<@sz>>_decode(s, &clen);
-prev_cp_len = clen;
+uint32_t next_cp = uni_int_utf<<@sz>>_decode(s, &clen);
+next_cp_len = clen;
 @
 
-<<Convert a charcter's case into output, updating [[rlen]]>>=
+<<Convert a character's case into output, updating [[rlen]]>>=
 /* warning: _int_ may over-read buffer with invalid UTF input */
-uint32_t cp = next_gc ? uni_int_utf<<@sz>>_decode(s, &clen) : prev_cp;
+uint32_t cp = next_gc ? uni_int_utf<<@sz>>_decode(s, &clen) : next_cp;
 if(!next_gc)
-  clen = prev_cp_len;
+  clen = next_cp_len;
 if(clen > slen) /* should never happen with valid UTF input */
   slen = 0;
 else {
@@ -9532,20 +9681,25 @@ of a word.  However, the word boundary determination algorithm only
 flags changes at the start of words, so a simplified ``anything but
 alphabetic'' end-of-word boundary is determined, instead.
 
+Note that the only user-supplied conditional flags respected are the
+locale ones.  Unlike the single-character conversion functions, no
+facility is provided to check if setting them would result in
+different output.
+
 <<Find next grapheme cluster boundary for case conversion>>=
-cond = 0;
+cond &= UNI_SC_FL_LOCALE;
 while(1) {
-  <<Set casing condition flags for [[prev_cp]]>>
+  <<Set casing condition flags for [[next_cp]]>>
   if(next_gc == slen) {
     cond |= UNI_SC_FL_FINAL_SIGMA;
     break;
   }
   /* warning: _int_ may over-read buffer with invalid UTF input */
   uint32_t ncp = uni_int_utf<<@sz>>_decode(s + next_gc, &clen);
-  gc_res = uni_gc_brk(prev_cp, ncp, gc_res, 0);
+  gc_res = uni_gc_brk(next_cp, ncp, gc_res, 0);
 #if 0
   /* finding word break is pointless, since it happens too late */
-  word_res = uni_word_brk(prev_cp, ncp, word_res, 0);
+  word_res = uni_word_brk(next_cp, ncp, word_res, 0);
   if(word_res > 0)
     cond |= UNI_SC_FL_FINAL_SIGMA;
 #else
@@ -9556,8 +9710,8 @@ while(1) {
       cond |= UNI_SC_FL_FINAL_SIGMA;
   }
 #endif
-  prev_cp = ncp;
-  prev_cp_len = clen;
+  next_cp = ncp;
+  next_cp_len = clen;
   if(gc_res > 0)
     break;
   next_gc += clen;
@@ -9566,23 +9720,23 @@ while(1) {
 }
 @
 
-<<Set casing condition flags for [[prev_cp]]>>=
-if(prev_cp == 'I')
+<<Set casing condition flags for [[next_cp]]>>=
+if(next_cp == 'I')
   cond |= UNI_SC_FL_AFTER_I;
-else if(prev_cp == 'i')
+else if(next_cp == 'i')
   cond |= UNI_SC_FL_AFTER_SOFT_DOTTED;
-else if(prev_cp == 0x0307) /* COMBINING DOT ABOVE */
+else if(next_cp == 0x0307) /* COMBINING DOT ABOVE */
   cond |= UNI_SC_FL_BEFORE_DOT;
 /* note: this is supposed to be more generic */
 /* "any combining mark above" */
 /* but it's just for Lithuanian, and I'm using their list */
-else if(prev_cp == 0x0300 || /* COMBINING GRAVE ACCENT */
-        prev_cp == 0x0301 || /* COMBINING ACUTE ACCENT */
-	prev_cp == 0x0303 || /* COMBINING TILDE */
+else if(next_cp == 0x0300 || /* COMBINING GRAVE ACCENT */
+        next_cp == 0x0301 || /* COMBINING ACUTE ACCENT */
+	next_cp == 0x0303 || /* COMBINING TILDE */
 	/* unsure about these two */
 	/* but I doubt a Lithuanian will ever complain */
-	prev_cp == 0x0328 || /* COMBINING OGONEK */
-	prev_cp == 0x1DCE) /* COMBINING OGONEK ABOVE */
+	next_cp == 0x0328 || /* COMBINING OGONEK */
+	next_cp == 0x1DCE) /* COMBINING OGONEK ABOVE */
   cond |= UNI_SC_FL_MORE_ABOVE;
 @
 
@@ -9595,6 +9749,7 @@ extensions are generally ignored, only the two cluster start
 characters are compared.
 
 <<Special casing conditions>>=
+
 /* additional casing conditions when doing string-at-time */
 #define UNI_SC_FL_JA    (1<<4) /* ja locale */
 #define UNI_SC_FL_POSIX (1<<3) /* en_US_POSIX locale */
@@ -9621,7 +9776,7 @@ int word_res = 0;
 #ifdef USE_TC_CODE
 next_word = prev_word;
 if(next_gc != slen) {
-  word_res = uni_word_brk(cp, prev_cp, word_res, locale);
+  word_res = uni_word_brk(cp, next_cp, word_res, locale);
   prev_word = word_res > 0;
 }
 #endif
@@ -9634,23 +9789,39 @@ conversion depending on whether or not the character is at the start
 of a word.  Fallback for title casing is upper casing, and then the
 original character.
 
-<<Convert a charcter's case into output, updating [[rlen]]>>=
+<<Convert a character's case into output, updating [[rlen]]>>=
 int32_t rlen1;
 const uint16_t *rbuf;
-#ifndef USE_TC_CODE
+#ifndef USE_TC_CODE /* also always defined when USE_ALL_CODE */
 rlen1 = uni_case_convert(cp, cond, &rbuf, simple, special, strs);
 #else
+#ifdef USE_ALL_CODE
+int did_uc = 0, did_lc = 0;
+/* doing tc below, even if tc not explicitly used */
+#endif
 if(next_word) {
   next_word = 0;
   rlen1 = uni_case_convert(cp, cond, &rbuf, uni_stc_mtab, uni_tc_mtab,
                             uni_tc_strs);
-  if(!rbuf && rlen1 == cp)
+  if(!rbuf && rlen1 == cp) {
+#ifdef USE_ALL_CODE
+    did_uc = 1;
+#endif
     rlen1 = uni_case_convert(cp, cond, &rbuf, uni_suc_mtab, uni_uc_mtab,
                               uni_uc_strs);
-} else
+  }
+} else {
+#ifdef USE_ALL_CODE
+  did_lc = 1;
+#endif
   rlen1 = uni_case_convert(cp, cond, &rbuf, uni_slc_mtab, uni_lc_mtab,
                             uni_lc_strs);
+}
 #endif
+@
+
+<<Convert a character's case into output, updating [[rlen]]>>=
+#ifndef USE_CHECK_CODE
 if(rbuf)
   rlen1 = uni_return16_buf<<@sz>>(rbuf, rlen1, buf, off, buf_len);
 else
@@ -9671,6 +9842,43 @@ if(off < 0) {
   off += rlen1;
 }
 rlen += rlen1;
+#endif
+@
+
+<<Convert a character's case into output, updating [[rlen]]>>=
+#ifdef USE_CHECK_CODE
+<<Check [[rbuf]]/[[rlen1]] for case conversion>>
+#ifdef USE_ALL_CODE
+if(!did_lc) {
+  rlen1 = uni_case_convert(cp, cond, &rbuf, uni_slc_mtab, uni_lc_mtab,
+                            uni_lc_strs);
+  <<Check [[rbuf]]/[[rlen1]] for case conversion>>
+}
+if(!did_uc) {
+  rlen1 = uni_case_convert(cp, cond, &rbuf, uni_suc_mtab, uni_uc_mtab,
+                            uni_uc_strs);
+  <<Check [[rbuf]]/[[rlen1]] for case conversion>>
+}
+#endif
+#endif
+@
+
+<<Check [[rbuf]]/[[rlen1]] for case conversion>>=
+if((!rbuf && rlen1 != cp) ||
+   (rbuf && ((rlen1 != 1 && (rlen1 != 2 || !uni_is_surrogate(*rbuf))) ||
+             cp != uni_int_utf16_decode(rbuf, NULL))))
+#ifdef USE_ALL_CODE
+  return 1;
+#else
+  return 0;
+#endif
+@
+
+<<FIXME>>=
+provide test data & driver
+  current test is done externally, with simple driver to call all str
+  functions (so char functions are completely untested).  Need test
+  text to test conditional flags better and test locale flags
 @
 
 For more case transformation fun, there is [[CaseFolding.txt]].  It
@@ -9731,6 +9939,9 @@ are provided for Turkic locales as well.
 <<[[uni_case_convert]][[32]] cf support>>
 <<[[uni_case_convert]][[16]] cf support>>
 <<[[uni_case_convert]][[8]] cf support>>
+int uni_is_<<@type>>(uint32_t cp);
+#define uni_is_<<@type>>(cp) \
+  uni_case_check(cp, <<@cond>>, uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
 @
 
 <<[[uni_case_convert]](@sz) cf support>>=
@@ -9744,12 +9955,20 @@ int uni_str_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
 #define uni_str_<<@type>><<@sz>>(s, slen, buf, off, buf_len) \
   uni_str_case_convert<<@sz>>(s, slen, <<@cond>>, buf, off, buf_len, \
                             uni_scf_mtab, uni_cf_mtab, uni_cf_strs)
+int uni_str_is_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen);
+#define uni_str_is_<<@type>><<@sz>>(s, slen) \
+  uni_str_case_check<<@sz>>(s, slen, <<@cond>>, uni_scf_mtab, uni_cf_mtab, \
+                          uni_cf_strs)
 @
 
 <<Unicode property exports>>=
 <<[[uni_case_convert]] cf support for [[cf]] using condition [[0]]>>
 /* in turkic locales */
 <<[[uni_case_convert]] cf support for [[tcf]] using condition [[UNI_SC_FL_TR]]>>
+@
+
+<<FIXME>>=
+provide test data & driver (see other uni_case_convert stuff)
 @
 
 [[DerivedNormalizationProps.txt]] contains the final case folding
@@ -18863,6 +19082,7 @@ XIDS\\
 
 {\small Note: NFD\_QC and NFKD\_QC are actually enumerated properties
 with only two values: Y and N.}
+
 \caption{\label{tab:boolprop}Boolean properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
@@ -18873,6 +19093,7 @@ The following functions perform a generic bit operation (see table
 \ref{tab:setop2} for a complete list of operations).
 
 \input{op-table.tex} %%% doc
+
 \caption{\label{tab:setop2}Set Operations}
 \end{table}
 
@@ -19038,6 +19259,7 @@ ID\_Restrict\_Type&&&\\
 \end{tabular}
 
 {\small Note: age and ccc are technically numeric properties.}
+
 \caption{\label{tab:enumprop}Enumerated properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
@@ -19312,6 +19534,7 @@ stc&scf&bmg&\\
 
 {\small Note: slc, suc, stc, scf, and bmg are technically string
 properties.}
+
 \caption{\label{tab:numprop}Numeric properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
@@ -19384,6 +19607,7 @@ Name\_Alias&\emph{na\_seq}&\emph{na\_xml}&\emph{na\_xml\_seq}\\
 \small{Property names in italics are non-standard properties.}
 
 \small{na, Name\_Alias, and scx are technically ``other'' properties.}
+
 \caption{\label{tab:stringprop}String Properties (Unicode canonical short name)}
 \end{centering}
 \end{table}
@@ -19603,17 +19827,16 @@ decomposition (NFD), canonical composition (NFC), compatibility
 decomposition (NFKD), compatibility composition (NFKC), and
 compatibility decomposition with case folding (NFKC\_CF).
 
-There are three function pairs for each normalization type.
+There are three functions for each normalization type.
 \input{UTF buffer return.tex} %%% doc
 
-For each return type, input may be specified in one of two ways.  The
-first way is to use a separate input buffer, [[ibuf]].  The second way
-is to use the output buffer.  Use [[NULL]] for [[ibuf]] to select the
-latter.  This causes the input text to be duplicated into newly
-allocated memory for the duration of the transformation.  The only way
-to avoid this duplication is to call with [[ibuf]] pointing to the
-output buffer.  However, this is unsafe as no attempt is made to
-ensure the output does not overwrite the input.
+Overlap of the input buffer ([[ibuf]]) and the output buffer
+([[*buf]]) is not generally supported; if the input is overwritten
+during conversion, the output may be affected.  However, if the input
+and output buffer are identical, [[NULL]] may be specified for
+[[ibuf]], which indicates that the output position (including offset,
+if specified) is also the location of the input.  This is usually done
+by allocating new memory and copying the input buffer first.
 
 % uni_NFD32 prototype
 % uni_NFD16 prototype
@@ -19647,7 +19870,7 @@ these can safely be removed before the next pass.
 % uni_Canon_Order16 prototype
 % uni_Canon_Order8 prototype
 
-\label{FCD} In some cases, a chain of transformations begins with NFD
+\label{FCD}In some cases, a chain of transformations begins with NFD
 normalization.  However, subsequent steps may succeed even without
 fully normalized text.  In particular, if the next step is canonically
 closed, it can perform the normalization as part of its
@@ -19697,9 +19920,10 @@ The raw decomposition data is not meant to be used directly.  Instead,
 the following wrapper functions are provided.  They perform just the
 decomposition step for the decomposition normal forms; canonical
 ordering needs to be performed manually afterwards.  Like the full
-normalization functions, they come in two varieties:  ones which
-modify ("t"ransform) the input, and those which generate output
-separately.  The return value is the length after transformation.
+normalization functions, they do not support input and output overlap,
+but do support [[NULL]] for [[ibuf]] to indicate that input and output
+locations are identical.  The return value is the length after
+transformation.
 
 % uni_NFD_dec32 prototype
 % uni_NFD_dec16 prototype
@@ -19708,16 +19932,29 @@ separately.  The return value is the length after transformation.
 % uni_NFKD_dec16 prototype
 % uni_NFKD_dec8 prototype
 
-Raw decomposition data is stored in [[uni_dm_strs]].  This includes
-the raw dm property, as well as two pseudo properties.  The
-canon\_decomp property contains only full (recursive) canonical
-decompositions, and the compat\_decomp property contains only full
-(recursive) compatibility decompositions when they differ from the
-canon\_decomp result.  The raw dm property is not recursively/fully
-decomposed.  The length field cannot be used raw; a flag is ored into
-the upper bit.  This flag eliminates the need for a dt property lookup
-to determine if an entry is canonical or compatibility: compatibilty
-decompositions have this flag set.
+The NFKC\_CF property does not describe the full NFKC\_CF
+transformation.  Instead, it provides only the steps up to and
+including decomposition.  The full transformation requires canonical
+ordering and composition, which are performed by the [[uni_NFKC_CF]]
+functions listed in the previous section.  For just the case folding
+and decomposition steps, the following functions are similar to the
+[[_dec]] functions above.
+
+% uni_NFKC_Casefold32 prototype
+% uni_NFKC_Casefold16 prototype
+% uni_NFKC_Casefold8 prototype
+
+Raw decomposition data (except for NFKC\_CF, which is a normal string
+property) is stored in [[uni_dm_strs]].  This includes the raw dm
+property, as well as two pseudo properties.  The canon\_decomp
+property contains only full (recursive) canonical decompositions, and
+the compat\_decomp property contains only full (recursive)
+compatibility decompositions when they differ from the canon\_decomp
+result.  The raw dm property is not recursively/fully decomposed.  The
+length field cannot be used raw; a flag is ored into the upper bit.
+This flag eliminates the need for a dt property lookup to determine if
+an entry is canonical or compatibility: compatibilty decompositions
+have this flag set.
 
 Lookup with the multi-level tables is simplified with some
 preprocessor macros, which return the associated string's offset and
@@ -19962,28 +20199,23 @@ provide all possible translations, each preceeded by their length.  The
 condition flags for that interpretation are then or-ed into the length.
 
 The actual lc, uc, and tc properties combine the slc, suc, and stc
-lookups with the contents of the lc, uc, and tc string tables.  To do a
-lookup, the [[uni_case_convert]] functions are provided.  A [[cond]]
-of [[~0]] indicates that the caller does not know the current
-conditions.  The return is the number of potential words in the result
-(perhaps even zero), or -1 if no change needs to be made (i.e. the
-result is [[cp]], encoded appropriately), or -2 if the condition is
-currently unknown, but may affect the result.  For a return value of
--2, the function should be called again with a valid set of condition
-flags.  Note that the passed-in condition flags should never set
-[[UNI_SC_FL_NOT]]; just leave a flag unset if it is not in effect.
+lookups with the contents of the lc, uc, and tc string tables, and may
+vary depending on context.  To do a lookup, the following functions
+are provided.  A [[cond]] of [[~0]] indicates that the caller does not
+know the current context conditions.  The return is $-1$ if the
+condition is unknown, but may affect the result.  In that case, the
+function should be called again, but with valid [[cond]] flags.
+Otherwise, it is the length of the result, with the output placed in
+the output buffer.
 
-There are three functions.
+There are three functions per case conversion type.
 \input{UTF buffer return.tex} %%% doc
 
-% uni_case_convert32 prototype
-% uni_case_convert16 prototype
-% uni_case_convert8 prototype
-
-To make this a little easier, wrapper macros are provided which select
-the correct set of needed tables.  Note that if the [[uni_tc]]
-functions return their input unmodified, the caller must manually fall
-back to the [[uni_uc]] functions.
+Note that the passed-in condition flags should never set
+[[UNI_SC_FL_NOT]]; just leave a flag unset if it is not in effect.
+Also, if the title casing functions ([[tc]]) return the input code
+point, the user must manually call the upper-case ([[uc]]) function
+for the final result.
 
 % uni_lc32 prototype
 % uni_uc32 prototype
@@ -19994,6 +20226,13 @@ back to the [[uni_uc]] functions.
 % uni_lc8 prototype
 % uni_uc8 prototype
 % uni_tc8 prototype
+
+These functions are actually preprocessor macros which use a generic
+function that takes the tables to query:
+
+% uni_case_convert32 prototype
+% uni_case_convert16 prototype
+% uni_case_convert8 prototype
 
 Case folding converts to a canonical desired case, usually lower-case.
 Like the plain case conversion properties, there are two cases:
@@ -20022,19 +20261,25 @@ wrapper functions above filter the low-level cf property based on the
 desired locale information.
 
 The case conversion functions above are for one character at a time.
-To convert a full string, use one of the following functions.
-Behavior of these functions is undefined if [[s]] overlaps the output
-buffer ([[*buf]]).  If an in-place conversion is desired, pass in
-[[NULL]] for [[s]]; in that case, the input starts at the same place
-as the output.  As with the above functions, a generic function is
-provided that works for anything but title casing.  All but the case
-folding functions take a [[cond]] parameter to provide context, but
-unlike those, the context of each string is expected to be
-indepenedent, and only the locale-related flags are respected.
+To convert a full string, use one of the following functions.  Behavior
+of these functions is undefined if [[s]] overlaps the output buffer
+([[*buf]]).  If an in-place conversion is desired, pass in [[NULL]]
+for [[s]]; in that case, the input starts at the same place as the
+output.  All but the case folding functions take a [[cond]] parameter
+to provide context.
 
-% uni_str_case_convert32 prototype
-% uni_str_case_convert16 prototype
-% uni_str_case_convert8 prototype
+Unlike the character conversion functions, the title case conversion
+function uses the upper-case and lower-case conversions as necessary
+according to the full title case conversion algorithm.  That is, words
+only have their first character capitalized, and everything else is
+converted to lower-case.
+
+Also unlike the character conversion functions, the special value
+[[~0]] is not supported for [[cond]]; it is not possible to query
+whether or not context would alter the result.  In fact, only
+locale-related flags are respected, and all others are filtered out
+and generated internally based on the string contents.
+
 % uni_str_lc32 prototype
 % uni_str_lc16 prototype
 % uni_str_lc8 prototype
@@ -20051,13 +20296,79 @@ indepenedent, and only the locale-related flags are respected.
 % uni_str_tcf16 prototype
 % uni_str_tcf8 prototype
 
-The only other case conversion string property is NFKC\_CF, which is a
-plain string property.  However, for convenience, lookup functions
-similar to the decomposition functions are provided as well.
+All but the title-case functions above are actually preprocessor
+macros which use generic functions to perform their task, given the
+tables to query:
 
-% uni_NFKC_Casefold32 prototype
-% uni_NFKC_Casefold16 prototype
-% uni_NFKC_Casefold8 prototype
+% uni_str_case_convert32 prototype
+% uni_str_case_convert16 prototype
+% uni_str_case_convert8 prototype
+
+There are also test functions for determining if a character or string
+would change if converted to a case.  Normally, it would be more
+efficient to check the gc property for the character, but this is does
+not necessarily match Unicode's strict definition of casing.  The
+following functions opreate with one input character, and its full
+context.  They return $-1$ if the context is insufficient, $0$ if the
+character would change if the conversion function would apply, and $1$
+othewise.  The [[uni_is_cased]] function, on the other hand, returns
+$1$ if any of the conversion functions might change the character, and
+$0$ (or $-1$, if unknown) otherwise.
+
+Unlike the conversion functions, the title casing ([[tc]]) function
+properly falls back to the upper-case ([[uc]]) table if there is no
+direct title-casing mapping.  However, the user must manually switch
+between title-casing and lower-casing ([[lc]]) depending on the
+location within a word.
+
+These are actually preprocessor macros, and the title-casing ([[tc]])
+and any-casing ([[cased]]) functions may evaluate their parameters
+more than once.
+
+% uni_is_lc prototype
+% uni_is_uc prototype
+% uni_is_tc prototype
+% uni_is_cf prototype
+% uni_is_tcf prototype
+% uni_is_cased prototype
+
+The preprocessor macros use the following generic function with the
+appropriate tables.
+
+% uni_case_check prototype
+
+The string equivalents of the above functions check if any part of the
+string would change if a conversion function were applied.
+
+% uni_str_is_lc8 prototype
+% uni_str_is_lc16 prototype
+% uni_str_is_lc32 prototype
+% uni_str_is_uc8 prototype
+% uni_str_is_uc16 prototype
+% uni_str_is_uc32 prototype
+% uni_str_is_tc8 prototype
+% uni_str_is_tc16 prototype
+% uni_str_is_tc32 prototype
+% uni_str_is_cf8 prototype
+% uni_str_is_cf16 prototype
+% uni_str_is_cf32 prototype
+% uni_str_is_tcf8 prototype
+% uni_str_is_tcf16 prototype
+% uni_str_is_tcf32 prototype
+% uni_str_is_cased8 prototype
+% uni_str_is_cased16 prototype
+% uni_str_is_cased32 prototype
+
+Again, the lower-case, upper-case and case folding functions are
+actually macros, which use the generic functions taking a table:
+
+% uni_str_case_check8 prototype
+% uni_str_case_check16 prototype
+% uni_str_case_check32 prototype
+
+The only other case conversion string property is NFKC\_CF, which is a
+normal string property.  See the normalization and decompostion
+sections for additional functions related to this property.
 
 \subsection{Other String Properties}
 
@@ -20093,7 +20404,12 @@ functions which implement them.  The Bidirectional Algorithm (UBA) and
 the Standard Compression Scheme for Unicode (SCSU) are not
 implemented, and there are no plans to ever implement them.
 
-\begin{table}
+<<FIXME>>=
+Should probably implement UBA anyway, to ensure that data files are
+usable, and to exercise BidiTest.txt (see tr9)
+@
+
+\begin{table}[htb]
 \begin{centering}
 \begin{tabular}{ll}
 \bf{Name}&\bf{Implementation}\\
@@ -20103,8 +20419,9 @@ Normalization&[[uni_]]\{[[NFD]],[[NFKD]],[[NFC]],[[NFKC]]\}\{[[8]],[[16]],[[32]]
 Hangul Syllable Composition&[[uni_hangul_syllable_comp]]\\
 Hangul Syllable Decomposition&[[uni_hangul_syllable_decomp]]\\
 Hangul Syllable Name Generation&[[uni_cp_to_name]], [[uni_name_rng_to_cp]]\\
-Default Case Conversion&[[uni_str_]]\{[[lc]],[[uc]],[[tc]],[[cf]]\}\{[[8]],[[16]],[[32]]\}\\
-Default Case Detection&\\
+Default Case Conversion*&[[uni_str_]]\{[[lc]],[[uc]],[[tc]],[[cf]]\}\{[[8]],[[16]],[[32]]\},\\
+&[[uni_NFKC_CF]]\{[[8]],[[16]],[[32]]\}\\
+Default Case Detection*&[[uni_str_is_]]\{[[lc]],[[uc]],[[tc]],[[cf]],[[cased]]\}\{[[8]],[[16]],[[32]]\}\\
 Default Caseless Matching&\\
 Line Breaking Algorithm*&[[uni_line_brk]]\\
 Character Segmentation&[[uni_gc_brk]]\\
@@ -20116,13 +20433,13 @@ Alternative Identifier Determination&\\
 Pattern Syntax Determination&\\
 Identifier Normalization&\\
 Identifier Case Folding&\\
-Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{8,16,32\},\\
-&[[uni_str_ducet]]\{8,16,32\},\\
+Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
+&[[uni_str_ducet]]\{[[8]],[[16]],[[32]]\},\\
 &[[uni_uca_ducet_cmp]]\\
 \end{tabular}
 \end{centering}
 
-\small{* With CLDR localization support}
+\small{* With localization support}
 
 \caption{\label{tab:unialg}Named Unicode Algorithms}
 \end{table}
@@ -20133,24 +20450,6 @@ Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{8,16,32\},\\
 
 \input{begin-hidden.tex} %%% doc
 notes:
-    Default Case Conversion
-      toNFKC_Casefold(X): map each C in X to NFKC_Casefold(C), and then NFC
-        (ick!  can at least skip decomp of NFC)
-	uni_full_NFKC_Casefold{8,16,32}()
-    Default Case Detection
-       note: maybe just add "checK" flag to conversion functions?
-      isLowercase(X): X == toLowercase(X)
-        uni_str_is_lc{8,16,32}()
-      isUppercase(X): X == toUppercase(X)
-        uni_str_is_uc{8,16,32}()
-      isTitlecase(X): X == toTitlecase(X)
-        uni_str_is_tc{8,16,32}()
-      isCasefolded(X): X == toCasefold(X)
-        uni_str_is_cf{8,16,32}()
-	uni_str_is_tcf{8,16,32}()
-      isCased(X): !isLowercase(X) || !isUppercase(X) || !isTitlecase(X)
-        uni_is_Cased{8,16,32}()
-	  note: probably needs special implementation
     Default Caseless Matching
      simple strcasecmp(X, Y): toCasefold(X) == toCasefold(Y)
        uni_strcasecmp{8,16,32}()
@@ -20183,11 +20482,6 @@ notes:
         uni_is_PWS()/uni_is_PS() good enough?
     Identifier Normalization
     Identifer Case Folding
-   won't implement:
-    Bidirectional Algorithm (UBA)
-      but should probably do it anyway, to ensure that data files are
-      usable, and to exercise BidiTest.txt (see tr9)
-    Standard Compression Scheme for Unicode (SCSU)
 
 Completely untouched & undocumented files:
   IDNA:
