@@ -77,6 +77,25 @@ and the Standard Compression Scheme for Unicode (SCSU).  Several of
 these have additional modifications for localization using the Common
 Locale Data Repository (CLDR).
 
+\vspace{0.75in}
+
+This document is \copyright{} 2012--2013 Thomas J. Moore.  This
+document is licensed under the Apache License, Version 2.0 (the
+``License''); you may not use this document except in compliance with
+the License. You may obtain a copy of the License at
+\url{http://www.apache.org/licenses/LICENSE-2.0}.  Unless required by
+applicable law or agreed to in writing, software distributed under the
+License is distributed on an ``AS IS'' BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for
+the specific language governing permissions and limitations under the
+License. 
+
+\vspace{0.25in}
+
+This document was generated from the following sources, all of which are
+attached to the original electronic forms of this document:
+\input{Sources.tex} % txt
+
 \end{abstract}
 
 % Begin-doc Introduction
@@ -2046,20 +2065,14 @@ if(op == UNI_SOP_NIL) {
 if(op == UNI_SOP_ALL) {
   *res_len = UNI_MAX_CP / <<@sz>> + 1;
   *res_low = 0;
-  if(!*res_max)
-    inisize(*res, (*res_max = *res_len));
-  else if(*res_max < *res_len)
-    resize(*res, (*res_max = *res_len));
+  check_size(*res, *res_max, *res_len);
   memset(*res, ~0, *res_len * <<@sz>> / 8);
   return;
 }
 if(op == UNI_SOP_A) {
   *res_len = a_len;
   *res_low = a_low;
-  if(!*res_max)
-    inisize(*res, (*res_max = a_len));
-  else if(*res_max < a_len)
-    resize(*res, (*res_max = a_len));
+  check_size(*res, *res_max, a_len);
   if(*res != a)
     cpybuf(*res, a, *res_len);
   return;
@@ -2067,10 +2080,7 @@ if(op == UNI_SOP_A) {
 if(op == UNI_SOP_B) {
   *res_len = b_len;
   *res_low = b_low;
-  if(!*res_max)
-    inisize(*res, (*res_max = b_len));
-  else if(*res_max < b_len)
-    resize(*res, (*res_max = b_len));
+  check_size(*res, *res_max, b_len);
   if(*res != b)
     cpybuf(*res, b, *res_len);
   return;
@@ -2118,13 +2128,7 @@ if(a_low > 0 && zz_op) {
   uint32_t need = a_low / <<@sz>>;
   did_start = 1;
   *res_low = 0;
-  if(!*res_max)
-    inisize(*res, (*res_max = need + 4));
-  else if(*res_max < need) {
-    while(*res_max < need)
-      *res_max *= 2;
-    resize(*res, *res_max);
-  }
+  check_size(*res, *res_max, need);
   if(need > 0)
     memset(*res, ~0, need * sizeof(**res));
 }
@@ -2178,13 +2182,7 @@ if(!r) {
     did_start = 1;
     *res_low = i;
   }
-  if(!*res_max)
-    inisize(*res, (*res_max = 4));
-  else if(*res_max <= (i - *res_low) / <<@sz>>) {
-    while(*res_max <= (i - *res_low) / <<@sz>>)
-      *res_max *= 2;
-    resize(*res, *res_max);
-  }
+  check_size(*res, *res_max, (i - *res_low) / <<@sz>>);
   if(last_zero) {
     memset(&UNI_BSET_AELT(*res, last_zero), 0, (i - *res_low - last_zero) / 8);
     last_zero = 0;
@@ -2236,13 +2234,7 @@ if(!did_start) {
   *res_low = i;
 }
 uint32_t tot = i - *res_low + skip;
-if(!*res_max)
-  inisize(*res, (*res_max = tot > <<@sz>> ? tot / <<@sz>> : 4));
-else if(*res_max <= tot / <<@sz>>) {
-  while(*res_max <= tot / <<@sz>>)
-    *res_max *= 2;
-  resize(*res, *res_max);
-}
+check_size(*res, *res_max, tot / <<@sz>>);
 if(last_zero) {
   memset(&UNI_BSET_AELT(*res, last_zero), 0, (i - *res_low - last_zero) / 8);
   last_zero = 0;
@@ -2563,8 +2555,7 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
       curhigh = nexthigh;
     } else if(curlow >= 0) {
       /* store & finish current range */
-      if(tab_len == max_tab)
-        resize(tab, max_tab *= 2);
+      check_size(tab, max_tab, tab_len + 1);
       tab[tab_len].low = curlow;
       tab[tab_len++].high = curhigh;
       curlow = -1;
@@ -2578,9 +2569,8 @@ void uni_chrrng_setop(const uni_chrrng_t *a, uint32_t a_len, uni_set_op_t op,
     curhigh = UNI_MAX_CP;
   }
   /* store & finish the current range */
-  if(curlow >= 0) {	
-    if(tab_len == max_tab)
-      resize(tab, max_tab *= 2);
+  if(curlow >= 0) {
+    check_size(tab, max_tab, tab_len + 1);
     tab[tab_len].low = curlow;
     tab[tab_len++].high = curhigh;
   }
@@ -3448,8 +3438,7 @@ while(1) {
     low += 8 << sh[l];
   } else if(ptr == (uint32_t)~0) {
     if(!in_r) {
-      if(rno == ret_max)
-        resize(*ret, ret_max *= 2);
+      check_size(*ret, ret_max, rno + 1);
       (*ret)[rno].low = low;
       in_r = 1;
     }
@@ -3460,8 +3449,7 @@ while(1) {
     for(i = 0; i < bsz[nl] * 8 && low <= high; i++, low++)
       if(!UNI_BSET_IS_SET(rdat, i) != !in_r) {
 	if(!in_r) {
-	  if(rno == ret_max)
-	    resize(*ret, ret_max *= 2);
+	  check_size(*ret, ret_max, rno + 1);
 	  (*ret)[rno].low = low;
 	  in_r = 1;
 	} else {
@@ -3487,8 +3475,7 @@ if(in_r) {
   else
     (*ret)[rno++].high = UNI_MAX_CP; /* or ~0? */
 } else if(inv && high < UNI_MAX_CP) { /* or ~0? */
-  if(rno == ret_max)
-    resize(*ret, ret_max *= 2);
+  check_size(*ret, ret_max, rno + 1);
   (*ret)[rno].low = low;
   (*ret)[rno++].high = UNI_MAX_CP;  /* or ~0? */
 }
@@ -3946,8 +3933,7 @@ static void split_line(char *buf)
     *nf = 0;
     if(line_comment)
       return;
-    if(num_fields == max_fields)
-      resize(fields, (max_fields *= 2));
+    check_size(fields, max_fields, num_fields + 1);
     fields[num_fields++] = f;
     if(!fc)
       return;
@@ -3987,10 +3973,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   split_line(lbuf);
   if(num_fields < 2)
     continue;
-  if(!max_prop_aliases)
-    inisize(prop_aliases, (max_prop_aliases = 128));
-  if(max_prop_aliases == num_prop_aliases)
-    resize(prop_aliases, (max_prop_aliases *= 2));
+  check_size(prop_aliases, max_prop_aliases, num_prop_aliases + 1);
   prop_aliases[num_prop_aliases].short_name = strdup(fields[0]);
   prop_aliases[num_prop_aliases].long_name = strdup(fields[1]);
   /* there are no comments on alias lines, so field count is correct */
@@ -4107,7 +4090,7 @@ static int add_prop(const char *name)
         return added_names_p[m];
     }
     if(maxparsed == nparsed) {
-      resize(parsed_props, (maxparsed *= 2));
+      check_size(parsed_props, maxparsed, nparsed + 1);
       <<Resize prop-associated arrays>>
     }
     i = nparsed;
@@ -4115,13 +4098,11 @@ static int add_prop(const char *name)
     <<Clear prop-associated array[i]>>
     nparsed++;
     if(num_added_names == max_added_names) {
-      if(!max_added_names) {
-        inisize(added_names, (max_added_names = 10));
+      check_size(added_names, max_added_names, num_added_names + 1);
+      if(!added_names_p)
 	inisize(added_names_p, max_added_names);
-      } else {
-        resize(added_names, (max_added_names *= 2));
+      else
 	resize(added_names_p, max_added_names);
-      }
     }
     if(l < num_added_names) {
       movebuf(added_names + l + 1, added_names + l, num_added_names - l);
@@ -4199,8 +4180,7 @@ static void add_bool_rng(prop_t *p, uint32_t low, uint32_t high)
   if(p->len && p->rng[p->len - 1].high == low - 1)
     p->rng[p->len - 1].high = high;
   else {
-    if(p->len == p->max_len)
-      resize(p->rng, (p->max_len *= 2));
+    check_size(p->rng, p->max_len, p->len + 1);
     p->rng[p->len].low = low;
     p->rng[p->len].high = high;
     ++p->len;
@@ -4733,7 +4713,7 @@ data types which require more.  For these, larger types are needed.
 For 16 bits, the [[low]] field can be split as well.  For 32 bits, if
 they are unique, it is unlikely that long ranges (if any ranges at
 all) exist.  For this reason, a low+length approach is used instead;
-this splits the [[low]] field to make room for a [[length]] field
+this splits the [[low]] field to make room for a [[len]] field
 (which is the length of the range minus one).
 
 <<[[uni_chrrng_dat16_t]]>>=
@@ -4902,10 +4882,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     exit(1);
   }
   int idx = (int)(*ret - prop_aliases);
-  if(!max_val_aliases[idx])
-    inisize(val_aliases[idx], (max_val_aliases[idx] = 16));
-  if(max_val_aliases[idx] == num_val_aliases[idx])
-    resize(val_aliases[idx], (max_val_aliases[idx] *= 2));
+  check_size(val_aliases[idx], max_val_aliases[idx], num_val_aliases[idx] + 1);
   val_aliases[idx][num_val_aliases[idx]].short_name = strdup(fields[1]);
   val_aliases[idx][num_val_aliases[idx]].long_name = strdup(fields[2]);
   /* there are no comments on alias lines, so field count is correct */
@@ -5360,8 +5337,7 @@ for(i = 0; i < nparsed; i++) {
     continue;
   if(index)
     fputs(",\n", pnf);
-  if(num_prop_ptrs >= max_prop_ptrs - 4)
-    resize(prop_ptrs, max_prop_ptrs *= 2);
+  check_size(prop_ptrs, max_prop_ptrs, num_prop_ptrs + 4);
   fprintf(pnf, "\t{{\"%s\"", name);
   prop_ptrs[num_prop_ptrs].name = strdup(name);
   prop_ptrs[num_prop_ptrs++].val = index;
@@ -5466,8 +5442,7 @@ static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
      p->rng_dat8[p->len - 1].dat == val)
     p->rng_dat8[p->len - 1].high = high;
   else {
-    if(p->len == p->max_len)
-      resize(p->rng_dat8, (p->max_len *= 2));
+    check_size(p->rng_dat8, p->max_len, p->len + 1);
     p->rng_dat8[p->len].low = low;
     p->rng_dat8[p->len].high = high;
     p->rng_dat8[p->len].dat = val;
@@ -6047,11 +6022,16 @@ for(i = 0; i < nparsed; i++) {
     fputs("};\n", of);
     fclose(of);
     fprintf(gen_h, "extern const uni_chrrng_dat8_t uni_%s_rng[];\n"
-		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
-		   "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
+		   "#define uni_%s_rng_len %d /* %d lookups max */\n",
 		   name, name, parsed_props[i].len,
-		   lg2(parsed_props[i].len + 1), name, name,
-		   parsed_props[i].def);
+		   lg2(parsed_props[i].len + 1));
+    if(enum_vals[i])
+      fprintf(gen_h, "#define uni_%s_of(x) "
+                                   "(uni_%s_t)uni_x_of(x, uni_%s_mtab, %d)\n",
+		     name, name, name, parsed_props[i].def);
+    else
+      fprintf(gen_h, "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
+		     name, name, parsed_props[i].def);
     print_mtab(name, parsed_props[i].mt, gen_h);
     fprintf(tstf, "dat8(%s, %d);\n", name, parsed_props[i].def);
   }
@@ -7319,8 +7299,7 @@ static void add_dat32_rng(prop_t *p, uint32_t low, uint32_t high,
     }
   }
   while(1) {
-    if(p->len == p->max_len)
-      resize(p->rng_dat32, (p->max_len *= 2));
+    check_size(p->rng_dat32, p->max_len, p->len + 1);
     p->rng_dat32[p->len].dat = dat;
     p->rng_dat32[p->len].low = low;
     ++p->len;
@@ -7409,8 +7388,8 @@ Numeric properties from [[UnicodeData.txt]] are ccc (field 4) and nv
 (field 9)%
 \footnote{[[extracted/DerivedNumericValues.txt]] might be a better
 source for nv, as it includes Unihan data.}%
-.  Since ccc has aliases, it is already added as an
-enumeration.  The nv field is already in normal rational form.
+.  Since ccc has aliases, it is already added as an enumeration.  The
+nv field is already in normal rational form.
 
 <<Initialize UCD files>>=
 decl_num(nv);
@@ -7467,8 +7446,7 @@ static void split_line_tab(char *buf)
     buf = nf + 1;
     while(nf > f && isspace(nf[-1])) --nf;
     *nf = 0;
-    if(num_fields == max_fields)
-      resize(fields, (max_fields *= 2));
+    check_size(fields, max_fields, num_fields + 1);
     fields[num_fields++] = f;
     if(!fc)
       return;
@@ -7781,13 +7759,11 @@ static void add_str_rng(prop_t *p, uint32_t low, uint32_t high, const uint32_t *
     inisize(p->str_arr, (p->max_len = 8));
     inisize(p->strs, (p->max_strs = 32));
   }
-  while(off + len > p->max_strs)
-    resize(p->strs, (p->max_strs *= 2));
+  check_size(p->strs, p->max_strs, off + len);
   cpybuf(p->strs + off, val, len);
   p->strs_len += len;
   for(; low <= high; low++) {
-    if(p->len == p->max_len)
-      resize(p->str_arr, (p->max_len *= 2));
+    check_size(p->str_arr, p->max_len, p->len + 1);
     p->str_arr[p->len].cp = low;
     p->str_arr[p->len].off = off;
     p->str_arr[p->len].len = len;
@@ -8243,9 +8219,9 @@ qsort(dmf_prop->str_arr, dmf_prop->len, sizeof(*dmf_prop->str_arr), cmp_cp_flg);
 uni_str_arr_t *dec;
 inisize(dec, dmf_prop->len);
 /* the easy table: canon full mapping is all w/ flags == 0 */
-open_wf(cf, "uni_canon_decomp_arr.gen.c");
+open_wf(cdf, "uni_canon_decomp_arr.gen.c");
 fputs("#include \"uni_prop.h\"\n\n"
-      "const uni_str_arr_t uni_canon_decomp_arr[] = {\n\t", cf);
+      "const uni_str_arr_t uni_canon_decomp_arr[] = {\n\t", cdf);
 uint32_t curent;
 for(i = 0; dmf_prop->str_arr[i].flags; i++);
 for(curent = 0; i < dmf_prop->len; i++, curent++) {
@@ -8254,11 +8230,11 @@ for(curent = 0; i < dmf_prop->len; i++, curent++) {
   dec[curent].len = dmf_prop->str_arr[i].len;
   while(i < dmf_prop->len - 1 && dmf_prop->str_arr[i + 1].flags)
     ++i;
-  fprintf(cf, "{ 0x%04X, %d, %d }%s", (int)dec[curent].cp, (int)dec[curent].off,
+  fprintf(cdf, "{ 0x%04X, %d, %d }%s", (int)dec[curent].cp, (int)dec[curent].off,
                                       (int)dec[curent].len,
 				      i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
 }
-fclose(cf);
+fclose(cdf);
 fprintf(gen_h, "extern const uni_str_arr_t uni_canon_decomp_arr[];\n"
 	       "#define uni_canon_decomp_arr_len %d /* %d lookups max */\n",
 	       curent, lg2(curent + 1));
@@ -8403,14 +8379,14 @@ const char *strs_name;
 @
 
 <<Parse UCD files>>=
-#define dm_prop(p) do { \
+#define do_dm_prop(p) do { \
   prop_t *_p = &parsed_props[add_prop(#p)]; \
   _p->strs_name = "dm"; \
   enable_str_mt(_p); \
 } while(0)
-dm_prop(canon_decomp);
-dm_prop(compat_decomp);
-dm_prop(dm);
+do_dm_prop(canon_decomp);
+do_dm_prop(compat_decomp);
+do_dm_prop(dm);
 @
 
 <<Additional property type names>>=
@@ -8675,8 +8651,7 @@ for(i = prop_ddm->len - 1; i > 0; i--) {
   int len = 0;
   for(j = low; j <= i; j++)
     len += prop_ddm->str_arr[j].len + 1;
-  while(prop_ddm->max_strs < prop_ddm->strs_len + len)
-    resize(prop_ddm->strs, prop_ddm->max_strs *= 2);
+  check_size(prop_ddm->strs, prop_ddm->max_strs, prop_ddm->strs_len + len);
   for(j = low, len = 0; j <= i; j++) {
     movebuf(prop_ddm->strs + prop_ddm->strs_len + len,
             prop_ddm->strs + prop_ddm->str_arr[j].off,
@@ -8844,8 +8819,8 @@ for(i = cm_prop->len - 1; i > 0; i--) {
                 (jb > 0xFFFF  && jc > 0xFFFF)))
     continue; /* note: in UCD 6.2, this path always taken if j == i */
   /* leave room for 2* (B+C) and possible padding zeroes (B+C again) */
-  while(cm_prop->strs_len + 4 * (i - j + 1) > cm_prop->max_strs)
-    resize(cm_prop->strs, (cm_prop->max_strs *= 2));
+  check_size(cm_prop->strs, cm_prop->max_strs,
+             cm_prop->strs_len + 4 * (i - j + 1));
   uint32_t *dest = cm_prop->strs + cm_prop->strs_len;
   for(k = j, off = 0; k <= i; k++) {
     if((dest[off++] = cm_prop->strs[cm_prop->str_arr[k].off]) > 0xFFFF)
@@ -9262,7 +9237,7 @@ static int32_t uni_case_convert(uint32_t cp, uint32_t cond,
     *ret = NULL;
     return mr && ((uni_frac_t *)mr)->num ? ((uni_frac_t *)mr)->num : cp;
   }
-  uni_str_ptr_t *v = (void *)mr;
+  const uni_str_ptr_t *v = (const void *)mr;
   const uint16_t *str = strs + v->off;
   if(!(*str & ~UNI_SC_FL_LEN_MASK) && v->len == (*str & UNI_SC_FL_LEN_MASK) + 1) {
     /* no conditions */
@@ -9971,6 +9946,729 @@ int uni_str_is_<<@type>><<@sz>>(const uint<<@sz>>_t *s, unsigned int slen);
 provide test data & driver (see other uni_case_convert stuff)
 @
 
+Once case folding is done, the obvious thing to do is compare the
+results.   The following function combines the two steps in a way that
+does not require intermediate storage.
+
+<<[[uni_case_convert]](@sz) cf support>>=
+int uni_<<@type>>_strcmp<<@sz>>(const uint<<@sz>>_t *a, unsigned int alen,
+                            const uint<<@sz>>_t *b, unsigned int blen);
+#define uni_<<@type>>_strcmp<<@sz>>(a, alen, b, blen) \
+  uni_either_cf_strcmp<<@sz>>(a, alen, b, blen, <<@cond>>)
+@
+
+<<Unicode property exports>>=
+<<[[uni_either_cf_strcmp]][[32]] proto>>;
+<<[[uni_either_cf_strcmp]][[16]] proto>>;
+<<[[uni_either_cf_strcmp]][[8]] proto>>;
+@
+
+<<[[uni_either_cf_strcmp]](@sz) proto>>=
+int uni_either_cf_strcmp<<@sz>>(const uint<<@sz>>_t *a, unsigned int alen,
+                              const uint<<@sz>>_t *b, unsigned int blen,
+			      uint32_t cond)
+@
+
+<<case.c>>=
+<<[[uni_either_cf_strcmp]][[32]]>>
+<<[[uni_either_cf_strcmp]][[16]]>>
+<<[[uni_either_cf_strcmp]][[8]]>>
+@
+
+<<[[uni_either_cf_strcmp]](@sz)>>=
+<<[[uni_either_cf_strcmp]][[<<@sz>>]] proto>>
+{
+  const uint16_t *arbuf = NULL, *brbuf = NULL;
+  uint32_t arlen = 0, brlen = 0;
+  uint32_t ac, bc;
+  while((alen || arlen) && (blen || brlen)) {
+    <<Get next case folded character from [[a]] using [[uni_cf]]>>
+    <<Get next case folded character from [[b]] using [[uni_cf]]>>
+    if(ac > bc)
+      return 1;
+    if(ac < bc)
+      return -1;
+  }
+  return blen ? -1 : alen > 0;
+}
+@
+
+<<Get next case folded character from (@ab) using (@stab)>>=
+if(!<<@ab>>rlen) {
+  unsigned int clen;
+  <<Get case conversion result for next character using [[<<@stab>>]]>>
+  if(clen > <<@ab>>len)
+    return a == <<@ab>> ? 2 : -2; /* invalid input always mismatches */
+  <<@ab>>len -= clen;
+  <<@ab>> += clen;
+}
+if(!<<@ab>>rbuf) {
+  <<@ab>>c = <<@ab>>rlen;
+  <<@ab>>rlen = 0;
+} else {
+  unsigned int clen;
+  <<@ab>>c = uni_int_utf16_decode(<<@ab>>rbuf, &clen);
+  <<@ab>>rbuf += clen;
+  <<@ab>>rlen -= clen;
+}
+@
+
+<<Get case conversion result for next character using (@stab)>>=
+<<@ab>>rlen = uni_case_convert(uni_int_utf<<@sz>>_decode(<<@ab>>, &clen), cond,
+                             &<<@ab>>rbuf, uni_scf_mtab, <<@stab>>_mtab,
+			     <<@stab>>_strs);
+@
+
+If the inputs are not stored in a form for which the case folding
+transformation is valid, normalization needs to be done first.  In
+fact, the Unicode standard expects normalization to performed both
+before \emph{and after} case folding.  The simpler of these two
+requires canonical normalization before and after, and the more
+complex requires canonical, followed by case folding, followed by
+compatibility, followed by case folding, followed by compatibility
+again.  In order to reduce the complexity of these ridiculous
+transformations, a few observations are made:
+
+\begin{itemize}
+\item Case folding applies one character at a time, so canonical
+ordering does not affect case folding.  Likewise, decomposition
+applies one character at a time, so canonical ordering does not affect
+decomposition.  Thus, rather than decomposing, ordering, folding,
+decomposing, and then ordering again, the first ordering can be
+removed.  Similarly, for compatibility comparison, both inner
+decompositions' ordering step can be skipped.
+\item Since the result for any particular character of the entire
+sequence of decompositions and case folding is independent of context,
+a table can be pre-built with the results.  A similar table has
+already been provided by the UCD for NFKC\_CF transformation; this
+would just provide tables for NFD\_CF and NFKD\_CF transformations.
+Note that the UCD-provided NFKC\_CF table also removes default
+ignorable code points.  If it were not for that, the NFKC\_CF table
+would in fact provide exactly what's needed for NFKD\_CF (this table
+is misnamed; it does the decomposition and case folding, but does not
+perform the final ordering and composition steps needed for NFKC\_CF).
+\end{itemize}
+
+In other words, it is possible to create a pair of new string
+properties which perform all steps of the transformation except for
+canonical ordering.  The first of these to generate is the canonical
+decomposition form.  This performs NFD, case folding, and NFD again.
+For the first step, the NFD decomposition table is scanned.  Any
+decomposition is then case folded one character at a time.  For those
+characters which do not decompose, the case folding tables are scanned
+at the same time, so those entries are added to the table as well.
+Technically the latter could be skipped, and a failure to look up a
+code point in the generated table would fall back to normal case
+folding.
+
+The format of the table is similar to the long-form case conversion
+tables: length words with flags, followed by strings.  However, to
+save a little space, if there is only one string, with no flags, of
+length one, no length word is stored.  Even if that string ends up as
+two 16-bit words, the surrogate initiators cannot be confused with
+length words if explicitly checked for.
+
+Note that decompositions which are not explicitly stored cannot be
+case converted.  Currently, this is the set of Hangul syllable
+characters.  Since none of the L, V, and T elements have case
+translations, this should be fine.  However, the lookup routine needs
+to be aware that zero means that Hangul syllable decomposition needs
+to happen.
+
+<<Initialize UCD files>>=
+decl_str(NFD_CF);
+@
+
+<<Parse UCD files>>=
+prop_NFD_CF = add_prop("NFD_CF");
+prop_t *nfd_cf = &parsed_props[prop_NFD_CF];
+prop_t *cf = &parsed_props[prop_cf];
+prop_t *scf = &parsed_props[prop_scf];
+nfd_cf->max_len = dmf_prop->max_len;
+inisize(nfd_cf->str_arr, nfd_cf->max_len);
+nfd_cf->max_strs = cf->max_strs;
+inisize(nfd_cf->strs, nfd_cf->max_strs);
+/* prepare for merging and searching; may already be in order */
+qsort(dmf_prop->str_arr, dmf_prop->len, sizeof(*dmf_prop->str_arr), cmp_cp_flg);
+{
+  unsigned int nfdi, cfi, scfi;
+  uint32_t prev_cp = 0;
+
+  for(nfdi = 0; dmf_prop->str_arr[nfdi].flags; nfdi++);
+  for(cfi = scfi = 0; nfdi < dmf_prop->len || cfi < cf->len || scfi < scf->len; ) {
+    check_size(nfd_cf->str_arr, nfd_cf->max_len, nfd_cf->len + 1);
+    raw_cp_str_t *nent = &nfd_cf->str_arr[nfd_cf->len++];
+    nent->off = nfd_cf->strs_len;
+    /* prefer nfd over all */
+    if(nfdi < dmf_prop->len &&
+       (cfi == cf->len ||
+        dmf_prop->str_arr[nfdi].cp <= cf->str_arr[cfi].cp) &&
+       (scfi == scf->len ||
+        dmf_prop->str_arr[nfdi].cp <= scf->rng_dat32[scfi].low +
+	                              scf->rng_dat32[scfi].len)) {
+      <<Copy and case-fold decomposition [[nfdi]] into [[nent]]/[[nfd_cf]]>>
+      if(cfi < cf->len && dmf_prop->str_arr[nfdi].cp == cf->str_arr[cfi].cp)
+        cfi++;
+      if(scfi < scf->len &&
+         dmf_prop->str_arr[nfdi].cp == scf->rng_dat32[scfi].low +
+                                       scf->rng_dat32[scfi].len)
+        scfi++;
+      while(++nfdi < dmf_prop->len && dmf_prop->str_arr[nfdi].flags);
+    /* prefer cf over scf */
+    } else if(cfi < cf->len &&
+              (scfi == scf->len ||
+ 	       cf->str_arr[cfi].cp <= scf->rng_dat32[scfi].low +
+	                              scf->rng_dat32[scfi].len)) {
+      <<Copy full case fold entry into [[nent]]/[[nfd_cf]]>>
+      if(scfi < scf->len && cf->str_arr[cfi].cp == scf->rng_dat32[scfi].low +
+                                                   scf->rng_dat32[scfi].len)
+        scfi++;
+      cfi++;
+    /* fall back to scf */
+    } else {
+      <<Copy simple case fold entry into [[nent]]/[[nfd_cf]]>>
+      if(cp == scf->rng_dat32[scfi].low + scf->rng_dat32[scfi].len)
+        scfi++;
+    }
+    prev_cp = nent->cp;
+  }
+}
+@
+
+<<Copy and case-fold decomposition (@deci) into [[nent]]/(@prop)>>=
+/* + 1 to allow for len/flag word */
+unsigned int out_len = dmf_prop->str_arr[<<@deci>>].len + 1;
+/* * 2 to allow room for tcf */
+out_len = out_len * 2 + <<@prop>>->strs_len;
+check_size(<<@prop>>->strs, <<@prop>>->max_strs, out_len);
+nent->cp = dmf_prop->str_arr[<<@deci>>].cp;
+/* plain */
+unsigned int off = <<@prop>>->strs_len++; /* where to put len */
+int has_turk = 0;
+const uint32_t *str = dmf_prop->strs + dmf_prop->str_arr[<<@deci>>].off;
+for(i = 0; i < dmf_prop->str_arr[<<@deci>>].len; i++) {
+  <<Case fold [[str + i]] into [[<<@prop>>]] for non-Turkic>>
+}
+unsigned int slen = <<@prop>>->strs_len - off - 1;
+for(i = slen; i > 0; i--)
+  if(<<@prop>>->strs[off + i] > 0xffff)
+    slen++;
+if(slen > UNI_SC_FL_LEN_MASK) {
+  fprintf(stderr, "<<@prop>> overflow %04X %d\n", nent->cp, slen);
+  exit(1);
+}
+<<@prop>>->strs[off] = slen;
+/* turkic */
+if(has_turk) {
+  off = <<@prop>>->strs_len++; /* where to put len & flags */
+  for(i = 0; i < dmf_prop->str_arr[<<@deci>>].len; i++) {
+    <<Case fold [[str + i]] into [[<<@prop>>]] for Turkic>>
+  }
+  slen = <<@prop>>->strs_len - off - 1;
+  for(i = slen; i > 0; i--)
+    if(<<@prop>>->strs[off + i] > 0xffff)
+      slen++;
+  if(slen > UNI_SC_FL_LEN_MASK) {
+    fprintf(stderr, "<<@prop>> overflow %04X %d\n", nent->cp, slen);
+    exit(1);
+  }
+  <<@prop>>->strs[off] = slen | UNI_SC_FL_AZ | UNI_SC_FL_TR;
+}
+if(<<@prop>>->strs_len == nent->off + 2 &&
+   !(<<@prop>>->strs[nent->off] & UNI_SC_FL_TR)) {
+  <<@prop>>->strs_len--;
+  <<@prop>>->strs[nent->off] = <<@prop>>->strs[nent->off + 1];
+}
+nent->len = <<@prop>>->strs_len - nent->off;
+@
+
+<<Case fold (@char pointer) into (@prop) for non-Turkic>>=
+raw_cp_str_t *cfs = bsearch(<<@char pointer>>, cf->str_arr, cf->len,
+	                    sizeof(*cf->str_arr), uni_cmp_cp);
+if(cfs) {
+  const uint32_t *cfstr = cf->strs + cfs->off;
+  unsigned int cflen = cfs->len;
+  if(*cfstr & UNI_SC_FL_TR) {
+    cflen -= (*cfstr & UNI_SC_FL_LEN_MASK) + 1;
+    cfstr += (*cfstr & UNI_SC_FL_LEN_MASK) + 1;
+    has_turk = 1;
+  }
+  if(cflen) {
+    if(cflen != (*cfstr & UNI_SC_FL_LEN_MASK) + 1)
+      has_turk = 1;
+    cflen = *cfstr & UNI_SC_FL_LEN_MASK;
+    cfstr++;
+    if(cflen > 1) {
+      out_len += cflen - 1;
+      check_size(<<@prop>>->strs, <<@prop>>->max_strs, out_len);
+    }
+    while(cflen) {
+      <<@prop>>->strs[<<@prop>>->strs_len++] = *cfstr++;
+      cflen--;
+    }
+    continue;
+  }
+  /* else drop through and try scf */
+}
+uni_chrrng_dat32_t *res, scp;
+scp.low = *(<<@char pointer>>);
+scp.len = 0;
+res = bsearch(&scp, scf->rng_dat32, scf->len, sizeof(scp), uni_cmprng_dat32);
+<<@prop>>->strs[<<@prop>>->strs_len++] =
+  res ? num_of(res->dat) : *(<<@char pointer>>);
+@
+
+<<UCD parser local functions>>=
+static uint32_t num_of(uint32_t d32)
+{
+  /* wtf, C?  You used to be so cool.. */
+  /* this removes gcc's "type punned pointer" warning when casting directly */
+  /* gcc doesn't even like (void *)&d32; it needs an intermediary like p */
+  /* if this compiles to more than a single instruction, the compiler is stupid */
+  void *p = &d32;
+
+  return ((uni_frac_t *)p)->num;
+}
+@
+
+<<Case fold (@char pointer) into (@prop) for Turkic>>=
+raw_cp_str_t *cfs = bsearch(<<@char pointer>>, cf->str_arr, cf->len,
+	                    sizeof(*cf->str_arr), uni_cmp_cp);
+if(cfs) {
+  const uint32_t *cfstr = cf->strs + cfs->off;
+  unsigned int cflen = cfs->len;
+  if(!(*cfstr & UNI_SC_FL_TR) &&
+     cflen > (*cfstr & UNI_SC_FL_LEN_MASK) + 1) {
+    cflen -= (*cfstr & UNI_SC_FL_LEN_MASK) + 1;
+    cfstr += (*cfstr & UNI_SC_FL_LEN_MASK) + 1;
+  }
+  cflen = *cfstr & UNI_SC_FL_LEN_MASK;
+  cfstr++;
+  if(cflen > 1) {
+    out_len += cflen - 1;
+    check_size(<<@prop>>->strs, <<@prop>>->max_strs, out_len);
+  }
+  while(cflen) {
+    <<@prop>>->strs[<<@prop>>->strs_len++] = *cfstr++;
+    cflen--;
+  }
+} else {
+  uni_chrrng_dat32_t *res, scp;
+  scp.low = *(<<@char pointer>>);
+  scp.len = 0;
+  res = bsearch(&scp, scf->rng_dat32, scf->len, sizeof(scp), uni_cmprng_dat32);
+  <<@prop>>->strs[<<@prop>>->strs_len++] =
+    res ? num_of(res->dat) : *(<<@char pointer>>);
+}
+@
+
+<<Copy full case fold entry into [[nent]]/[[nfd_cf]]>>=
+nent->cp = cf->str_arr[cfi].cp;
+check_size(nfd_cf->strs, nfd_cf->max_strs,
+           cf->str_arr[cfi].len + nfd_cf->strs_len);
+if(cf->str_arr[cfi].len == 2 &&
+   !(cf->strs[cf->str_arr[cfi].off] & UNI_SC_FL_TR)) {
+  nfd_cf->strs[nfd_cf->strs_len] = cf->strs[cf->str_arr[cfi].off + 1];
+  nent->len = 1;
+} else {
+  cpybuf(nfd_cf->strs + nfd_cf->strs_len, cf->strs + cf->str_arr[cfi].off,
+         cf->str_arr[cfi].len);
+  nent->len = cf->str_arr[cfi].len;
+}
+nfd_cf->strs_len += nent->len;
+/* if turkic only, add scf */
+if(cf->strs[nent->off] == (UNI_SC_FL_TR | UNI_SC_FL_AZ | (nent->len - 1)) &&
+   scfi < scf->len && cf->str_arr[cfi].cp >= scf->rng_dat32[scfi].low) {
+  check_size(nfd_cf->strs, nfd_cf->max_strs, nfd_cf->strs_len + 2);
+  nfd_cf->strs[nfd_cf->strs_len++] = 1;
+  nfd_cf->strs[nfd_cf->strs_len++] = num_of(scf->rng_dat32[scfi].dat);
+  nent->len += 2;
+}
+@
+
+<<Copy simple case fold entry into [[nent]]/[[nfd_cf]]>>=
+uint32_t cp = prev_cp + 1;
+if(cp < scf->rng_dat32[scfi].low)
+  cp = scf->rng_dat32[scfi].low;
+check_size(nfd_cf->strs, nfd_cf->max_strs, nfd_cf->strs_len + 1);
+nent->cp = cp;
+nent->len = 1;
+nfd_cf->strs[nfd_cf->strs_len++] = num_of(scf->rng_dat32[scfi].dat);
+@
+
+The final NFD pass consists of NFD decomposition followed by canonical
+ordering.  The canonical ordering needs to be done externally.  The
+decomposition can be skipped if the above table already produces
+normalized output.  The following code verifies that this is, in fact,
+the case.  If the UCD ever fails this test, all changed entries will
+have to be reallocated and fixed.
+
+<<Parse UCD files>>=
+for(i = 0; i < nfd_cf->len; i++) {
+  const uint32_t *str = nfd_cf->strs + nfd_cf->str_arr[i].off;
+  unsigned int tlen = nfd_cf->str_arr[i].len - 1, slen;
+  
+  <<Check if [[str]] is canonically decomposed>>
+  if(!tlen)
+    continue;
+  <<Check if [[str]] is canonically decomposed>>
+}
+@
+
+<<Check if [[str]] is canonically decomposed>>=
+slen = tlen ? *str++ & UNI_SC_FL_LEN_MASK : *str > 0xffff ? 2 : 1;
+if(!tlen)
+  tlen++;
+for(; slen; slen--, tlen--, str++) {
+  if(*str > 0xffff)
+    slen--;
+  raw_cp_str_t *dec = bsearch(str, dmf_prop->str_arr, dmf_prop->len,
+                              sizeof(*dmf_prop->str_arr), uni_cmp_cp);
+  if(dec) {
+    while(dec > dmf_prop->str_arr && dec[-1].cp == dec->cp)
+      dec--;
+    if(!dec->flags) {
+      fprintf(stderr, "FIXME: nfd_cf %04X %04X\n", nfd_cf->str_arr[i].cp, *str);
+      exit(1);
+    }
+  }
+}
+@
+
+The second of these to generate is the compatibility decomposition
+form.  This performs NFD, followed by case folding, followed by NFKD,
+followed by case folding again, followed by NFKD again.  The first two
+steps have already been performed to generate the above table, so that
+is mostly copied into the result while applying NFKD and case folding.
+At the same time, the NFKD table is used to fill in any gaps.  Using
+the tables generated above means that it is unnecessary to fill in
+gaps using the case folding tables (although, again, technically this
+could just fall back to the case folding tables and not store them
+explicitly anyway).
+
+<<Initialize UCD files>>=
+decl_str(NFKD_CF);
+@
+
+<<Parse UCD files>>=
+prop_NFKD_CF = add_prop("NFKD_CF");
+prop_t *nfkd_cf = &parsed_props[prop_NFKD_CF];
+nfkd_cf->max_len = nfd_cf->max_len;
+inisize(nfkd_cf->str_arr, nfkd_cf->max_len);
+nfkd_cf->max_strs = cf->max_strs;
+inisize(nfkd_cf->strs, nfkd_cf->max_strs);
+{
+  unsigned int nfdi, nfkdi;
+
+  for(nfkdi = 0; dmf_prop->str_arr[nfkdi].flags != 1; nfkdi++);
+  for(nfdi = 0; nfkdi < dmf_prop->len || nfdi < nfd_cf->len; ) {
+    check_size(nfkd_cf->str_arr, nfkd_cf->max_len, nfkd_cf->len + 1);
+    raw_cp_str_t *nent = &nfkd_cf->str_arr[nfkd_cf->len++];
+    /* FIXME: share string table with nfd_cf? */
+    nent->off = nfkd_cf->strs_len;
+    /* start with nfd_cf */
+    if(nfdi < nfd_cf->len &&
+       (nfkdi == dmf_prop->len ||
+        nfd_cf->str_arr[nfdi].cp <= dmf_prop->str_arr[nfkdi].cp)) {
+      <<Copy, compatibility decompose and case fold [[nfd_cf]] entry into [[nent]]/[[nfkd_cf]]>>
+      if(dmf_prop->str_arr[nfkdi].cp == nfd_cf->str_arr[nfdi].cp)
+        while(++nfkdi < dmf_prop->len && dmf_prop->str_arr[nfkdi].flags != 1);
+      nfdi++;
+    /* othewise, there's a plain nfkd entry waiting */
+    } else {
+      <<Copy and case-fold decomposition [[nfkdi]] into [[nent]]/[[nfkd_cf]]>>
+      while(++nfkdi < dmf_prop->len && dmf_prop->str_arr[nfkdi].flags != 1);
+    }
+  }
+}
+@
+
+<<Copy, compatibility decompose and case fold [[nfd_cf]] entry into [[nent]]/[[nfkd_cf]]>>=
+unsigned int out_len = nfd_cf->str_arr[nfdi].len + nfkd_cf->strs_len;
+check_size(nfkd_cf->strs, nfkd_cf->max_strs, out_len);
+nent->cp = nfd_cf->str_arr[nfdi].cp;
+/* plain */
+int has_turk = 0;
+const uint32_t *str = nfd_cf->strs + nfd_cf->str_arr[nfdi].off;
+unsigned int slen = nfd_cf->str_arr[nfdi].len;
+if(slen != 1) {
+  if(*str & UNI_SC_FL_TR) {
+    has_turk = 1;
+    slen -= (*str & UNI_SC_FL_LEN_MASK) + 1;
+    str += (*str & UNI_SC_FL_LEN_MASK) + 1;
+  }
+  if(slen)
+    slen = *str++ & UNI_SC_FL_LEN_MASK;
+}
+unsigned int off;
+int no_plain = !slen; /* needs nfkc(X) entry if no plain */
+if(no_plain)
+  fprintf(stderr, "%04X\n", nent->cp);
+if(!no_plain) {
+#undef DO_TURKIC
+  <<Compatibility decompose and case fold [[str]]>>
+}
+/* turkic */
+if(has_turk) {
+#define DO_TURKIC 1
+  <<Compatibility decompose and case fold [[str]]>>
+#undef DO_TURKIC
+}
+nent->len = nfkd_cf->strs_len - nent->off;
+if(nent->len == 2 && !(nfkd_cf->strs[nent->off] & UNI_SC_FL_TR)) {
+  nfkd_cf->strs_len--;
+  nent->len--;
+  nfkd_cf->strs[nent->off] = nfkd_cf->strs[nent->off + 1];
+}
+@
+
+<<Compatibility decompose and case fold [[str]]>>=
+off = nfkd_cf->strs_len++; /* where to put len */
+for(i = 0; i < slen; i++) {
+  raw_cp_str_t *dm = bsearch(str + i, dmf_prop->str_arr, dmf_prop->len,
+	                     sizeof(*dmf_prop->str_arr), uni_cmp_cp);
+  if(dm) {
+    /* only look for compatibility decomps */
+    /* there shouldn't be any canon decomps anyway */
+    while(dm > dmf_prop->str_arr && dm[-1].cp == dm->cp)
+      dm--;
+    if(!dm->flags)
+      dm++;
+    if(dm->flags != 1)
+      dm = NULL;
+  }
+  if(dm) {
+    const uint32_t *dmstr = dmf_prop->strs + dm->off;
+    if(dm->len > 1) {
+      out_len += dm->len - 1;
+      check_size(nfkd_cf->strs, nfkd_cf->max_strs, out_len);
+    }
+    for(j = 0; j < dm->len; j++) {
+#ifdef DO_TURKIC
+      <<Case fold [[dmstr + j]] into [[nfkd_cf]] for Turkic>>
+#else
+      <<Case fold [[dmstr + j]] into [[nfkd_cf]] for non-Turkic>>
+#endif
+    }
+  } else
+    nfkd_cf->strs[nfkd_cf->strs_len++] = str[i];
+}
+slen = nfkd_cf->strs_len - off - 1;
+for(i = slen; i > 0; i--)
+  if(nfkd_cf->strs[off + i] > 0xffff)
+    slen++;
+if(slen > UNI_SC_FL_LEN_MASK) {
+  fprintf(stderr, "nfkd_cf overflow %04X %d\n", nent->cp, slen);
+  exit(1);
+}
+#ifdef DO_TURKIC
+slen |= UNI_SC_FL_TR | UNI_SC_FL_AZ;
+#endif
+nfkd_cf->strs[off] = slen;
+@
+
+Once again, the final NFKD decomposition step can be skipped if the
+result is already fully decomposed.  The following code verifies this.
+
+<<Parse UCD files>>=
+for(i = 0; i < nfkd_cf->len; i++) {
+  const uint32_t *str = nfkd_cf->strs + nfkd_cf->str_arr[i].off;
+  unsigned int tlen = nfkd_cf->str_arr[i].len - 1, slen;
+  
+  <<Check if [[str]] is compatibility decomposed>>
+  if(!tlen)
+    continue;
+  <<Check if [[str]] is compatibility decomposed>>
+}
+@
+
+<<Check if [[str]] is compatibility decomposed>>=
+slen = tlen ? *str++ & UNI_SC_FL_LEN_MASK : *str > 0xffff ? 2 : 1;
+if(!tlen)
+  tlen++;
+for(; slen; slen--, tlen--, str++) {
+  if(*str > 0xffff)
+    slen--;
+  raw_cp_str_t *dec = bsearch(str, dmf_prop->str_arr, dmf_prop->len,
+                              sizeof(*dmf_prop->str_arr), uni_cmp_cp);
+  if(dec) {
+    while(dec > dmf_prop->str_arr && dec[-1].cp == dec->cp)
+      dec--;
+    if(!dec->flags || dec->flags == 1) {
+      fprintf(stderr, "FIXME: nfkd_cf %04X %04X\n", nfkd_cf->str_arr[i].cp, *str);
+      exit(1);
+    }
+  }
+}
+@
+
+Once finished, they can be dumped.
+
+<<Dump character information as C code>>=
+dump_str_tabs(nfd_cf, gen_h, tstf);
+dump_str_tabs(nfkd_cf, gen_h, tstf);
+@
+
+<<Parse UCD files>>=
+enable_str_mt_p(prop_NFD_CF);
+enable_str_mt_p(prop_NFKD_CF);
+@
+
+<<FIXME>>=
+share string tables with NFKD_CF or other _decs?
+@
+
+Given the above properties, string comparison is pretty simple.  The
+main complication is that any character with non-zero canonical
+combining class requires accumulation of any adjacent characters with
+non-zero ccc, followed by the canonical ordering step.  The only time
+this can be skipped is if the entire group matches exactly.
+
+<<[[uni_case_convert]](@sz) cf support>>=
+<<[[uni_case_convert]] cf support using [[NFD]]>>
+<<[[uni_case_convert]] cf support using [[NFKD]]>>
+@
+
+<<[[uni_case_convert]] cf support using (@norm)>>=
+int uni_<<@norm>>_<<@type>>_strcmp<<@sz>>(const uint<<@sz>>_t *a, unsigned int alen,
+                                   const uint<<@sz>>_t *b, unsigned int blen);
+#define uni_<<@norm>>_<<@type>>_strcmp<<@sz>>(a, alen, b, blen) \
+  uni_norm_cf_strcmp<<@sz>>(a, alen, b, blen, <<@cond>>, \
+                            uni_<<@norm>>_CF_mtab, uni_<<@norm>>_CF_strs)
+@
+
+<<Unicode property exports>>=
+<<[[uni_norm_cf_strcmp]][[32]] proto>>;
+<<[[uni_norm_cf_strcmp]][[16]] proto>>;
+<<[[uni_norm_cf_strcmp]][[8]] proto>>;
+@
+
+<<[[uni_norm_cf_strcmp]](@sz) proto>>=
+int uni_norm_cf_strcmp<<@sz>>(const uint<<@sz>>_t *a, unsigned int alen,
+                            const uint<<@sz>>_t *b, unsigned int blen,
+			    uint32_t cond,
+			    const uint32_t *ncf_mtab, const uint16_t *ncf_strs)
+@
+
+<<case.c>>=
+<<[[uni_norm_cf_strcmp]][[32]]>>
+<<[[uni_norm_cf_strcmp]][[16]]>>
+<<[[uni_norm_cf_strcmp]][[8]]>>
+@
+
+<<[[uni_norm_cf_strcmp]](@sz)>>=
+<<[[uni_norm_cf_strcmp]][[<<@sz>>]] proto>>
+{
+  const uint16_t *arbuf = NULL, *brbuf = NULL;
+  uint32_t arlen = 0, brlen = 0;
+  uint32_t ac, bc;
+  uint32_t abuf[4], *abuf_more = NULL, bbuf[4], *bbuf_more = NULL;
+  /* 8 bits for ccc, 24 bits for index into buf */
+  uint32_t accc[4], *accc_more = NULL, bccc[4], *bccc_more = NULL;
+  unsigned int abuf_len = 0, bbuf_len = 0, abuf_ptr = 0, bbuf_ptr = 0,
+               abuf_max = 0, bbuf_max = 0;
+  while((alen || arlen) && (blen || brlen)) {
+    <<Get next normalized, case folded character from [[a]] using [[ncf]]>>
+    <<Get next normalized, case folded character from [[b]] using [[ncf]]>>
+    if(ac > bc) {
+      <<Free normalization buffers, if allocated>>
+      return 1;
+    }
+    if(ac < bc) {
+      <<Free normalization buffers, if allocated>>
+      return -1;
+    }
+  }
+  <<Free normalization buffers, if allocated>>
+  return blen ? -1 : alen > 0;
+}
+@
+
+<<Free normalization buffers, if allocated>>=
+if(abuf_more)
+  free(abuf_more);
+if(bbuf_more)
+  free(bbuf_more);
+if(accc_more)
+  free(accc_more);
+if(bccc_more)
+  free(bccc_more);
+@
+
+<<Get next normalized, case folded character from (@ab) using (@stab)>>=
+if(<<@ab>>buf_ptr == <<@ab>>buf_len) {
+  <<Get next case folded character from [[<<@ab>>]] using [[<<@stab>>]]>>
+  uni_ccc_t ccc = uni_ccc_of(<<@ab>>c);
+  if(ccc) {
+    <<@ab>>ccc[0] = ccc;
+    <<@ab>>buf[0] = <<@ab>>c;
+    <<@ab>>buf_len = 1;
+    while(<<@ab>>len || <<@ab>>rlen) {
+      if(<<@ab>>buf_len == 4) {
+        <<@ab>>buf_more = malloc(8 * sizeof(*<<@ab>>buf_more));
+	<<@ab>>ccc_more = malloc(8 * sizeof(*<<@ab>>ccc_more));
+	<<@ab>>buf_max = 8;
+	if(!<<@ab>>buf_more || !<<@ab>>ccc_more) {
+	  /* no way to indicate mem errors; just return mismatch */
+	  <<Free normalization buffers, if allocated>>
+	  return a == <<@ab>> ? 3 : -3;
+	}
+	memcpy(<<@ab>>buf_more, <<@ab>>buf, sizeof(<<@ab>>buf));
+	memcpy(<<@ab>>ccc_more, <<@ab>>ccc, sizeof(<<@ab>>ccc));
+      } else if(<<@ab>>buf_len == <<@ab>>buf_max) {
+        <<@ab>>buf_max *= 2;
+	uint32_t *t = realloc(<<@ab>>buf_more, <<@ab>>buf_max * sizeof(*t));
+	if(!t) {
+	  <<Free normalization buffers, if allocated>>
+	  return a == <<@ab>> ? 3 : -3;
+	}
+	<<@ab>>buf_more = t;
+	t = realloc(<<@ab>>ccc_more, <<@ab>>buf_max * sizeof(*t));
+	if(!t) {
+	  <<Free normalization buffers, if allocated>>
+	  return a == <<@ab>> ? 3 : -3;
+	}
+	<<@ab>>ccc_more = t;
+      }
+      <<Get next case folded character from [[<<@ab>>]] using [[<<@stab>>]]>>
+      ccc = uni_ccc_of(<<@ab>>c);
+      if(<<@ab>>buf_len < 4) {
+        <<@ab>>buf[<<@ab>>buf_len] = <<@ab>>c;
+	<<@ab>>ccc[<<@ab>>buf_len] = ccc;
+      } else {
+        <<@ab>>buf_more[<<@ab>>buf_len] = <<@ab>>c;
+	<<@ab>>ccc_more[<<@ab>>buf_len] = ccc;
+      }
+      <<@ab>>buf_len++;
+      if(!ccc)
+        break;
+    }
+    uint32_t *cccp = <<@ab>>buf_len > 4 ? <<@ab>>ccc_more : <<@ab>>ccc;
+    unsigned int i;
+    /* set back pointer for after sort */
+    /* also makes sort stable */
+    for(i = 0; i < <<@ab>>buf_len; i++) {
+      if(!cccp[i]) /* last one may be 0 */
+        break;
+      /* << 23 instead of 24 to allow signed compares */
+      cccp[i] = (cccp[i] << 23) | i; /* sort by ccc first, then index */
+    }
+    qsort(cccp, i, sizeof(*cccp), uni_cmp_cp);
+    <<@ab>>buf_ptr = 0;
+  }
+}
+if(<<@ab>>buf_ptr != <<@ab>>buf_len) {
+  uint32_t *cccp = <<@ab>>buf_len > 4 ? <<@ab>>ccc_more : <<@ab>>ccc;
+  uint32_t *bp = <<@ab>>buf_len > 4 ? <<@ab>>buf_more : <<@ab>>buf;
+  
+  if(cccp[<<@ab>>buf_ptr])
+    <<@ab>>c = bp[cccp[<<@ab>>buf_ptr] & ((1 << 23) - 1)];
+  else
+    <<@ab>>c = bp[<<@ab>>buf_ptr];
+  <<@ab>>buf_ptr++;
+}
+@
+
 [[DerivedNormalizationProps.txt]] contains the final case folding
 method%
 \footnote{The FC\_NFKC property is related to case folding, but is
@@ -9996,21 +10694,6 @@ dump_str_tabs(&parsed_props[prop_NFKC_CF], gen_h, tstf);
 
 <<Parse UCD files>>=
 enable_str_mt_p(prop_NFKC_CF);
-@
-
-It might also quite useful for the other case folding techniques to
-include normalization.  This saves a pass in the transformation step.
-There are a number of combinations:  NFC\_CF, NFC\_SCF,
-NFKC\_SCF.  Whether or not any of those combinations should include
-removal of default ignorable code points is difficult to tell.
-
-\lstset{language=txt}
-<<FIXME>>=
- combine case folding and normalization here
-   create string tabs NFC_CF, NFC_SCF, NFKC_SCF(?),
-                      NFD_CF, NFD_SCF, NFKD_CF, NFKD_SCF
-   functions:
-     uni_NF{C,KC,D,KD}_{S,}CF{8,16,32}(...)
 @
 
 \subsection{Additional Support for Normalization}
@@ -10222,8 +10905,8 @@ static int cmpcc(const void *a, const void *b)
   const struct ccs *p1 = (const struct ccs *)a;
   const struct ccs *p2 = (const struct ccs *)b;
   if(p1->ccc != p2->ccc)
-    return p1->ccc - p2->ccc;
-  return p1->opos - p2->opos;
+    return (int32_t)p1->ccc - (int32_t)p2->ccc;
+  return (int)p1->opos - (int)p2->opos;
 }
 @
 
@@ -10517,6 +11200,96 @@ should probably be fixed to be less expensive.
 }
 @
 
+String comparison using this method should be supported as well.  While
+this method technically requires canonical composition as its last
+step and canonical decomposition as its first step, both of these can
+be skipped when simply using the method for string comparison. Here
+are the steps, in detail:
+
+\begin{enumerate}
+\item Decomposition using the canonical decomposition tables.
+\item Canonical ordering.
+\item Decomposition, default ignorable removal, and case folding using
+the NFKC\_CF table
+\item Decomposition using the canonical decomposition tables.
+\item Canonical ordering.
+\item Canonical composition.
+\end{enumerate}
+
+The second step does not affect the third step, since decomposition
+applies to individual characters without context.  It can be dropped,
+since the fifth step repeats the process.  The first step does not
+affect the third step, because the third step performs the same
+transformation, and more.  The fourth step does not have any effect,
+because the third step produces fully decomposed text.  The last step
+is losslessly reversible using decomposition, so for comparison, there
+is no need to compose, either.  That leaves only two steps:  applying
+the NFKC\_CF table, and applying canonical ordering.  That means that
+the comparison function using NFKC\_CF is identical to the normalizing
+case folding functions above, except in how to use the tables.
+
+<<Unicode property exports>>=
+<<[[uni_NFKC_CF_strcmp]][[32]] proto>>;
+<<[[uni_NFKC_CF_strcmp]][[16]] proto>>;
+<<[[uni_NFKC_CF_strcmp]][[8]] proto>>;
+@
+
+<<[[uni_NFKC_CF_strcmp]](@sz) proto>>=
+int uni_NFKC_CF_strcmp<<@sz>>(const uint<<@sz>>_t *a, unsigned int alen,
+                             const uint<<@sz>>_t *b, unsigned int blen)
+@
+
+<<case.c>>=
+<<[[uni_NFKC_CF_strcmp]][[32]]>>
+<<[[uni_NFKC_CF_strcmp]][[16]]>>
+<<[[uni_NFKC_CF_strcmp]][[8]]>>
+@
+
+<<[[uni_NFKC_CF_strcmp]](@sz)>>=
+<<[[uni_NFKC_CF_strcmp]][[<<@sz>>]] proto>>
+{
+  const uint16_t *arbuf = NULL, *brbuf = NULL;
+  uint32_t arlen = 0, brlen = 0;
+  uint32_t ac, bc;
+  uint32_t abuf[4], *abuf_more = NULL, bbuf[4], *bbuf_more = NULL;
+  /* 8 bits for ccc, 24 bits for index into buf */
+  uint32_t accc[4], *accc_more = NULL, bccc[4], *bccc_more = NULL;
+  unsigned int abuf_len = 0, bbuf_len = 0, abuf_ptr = 0, bbuf_ptr = 0,
+               abuf_max = 0, bbuf_max = 0;
+  while((alen || arlen) && (blen || brlen)) {
+    <<Get next normalized, case folded character from [[a]] using [[uni_NFKC_CF]]>>
+    <<Get next normalized, case folded character from [[b]] using [[uni_NFKC_CF]]>>
+    if(ac > bc) {
+      <<Free normalization buffers, if allocated>>
+      return 1;
+    }
+    if(ac < bc) {
+      <<Free normalization buffers, if allocated>>
+      return -1;
+    }
+  }
+  <<Free normalization buffers, if allocated>>
+  return blen ? -1 : alen > 0;
+}
+@
+
+<<Get case conversion result for next character using [[uni_NFKC_CF]]>>=
+uint32_t lucp = uni_int_utf<<@sz>>_decode(<<@ab>>, &clen);
+const uni_str_ptr_t *p = uni_NFKC_CF_of(lucp);
+if(!p->off && !p->len) {
+  <<@ab>>rbuf = NULL;
+  <<@ab>>rlen = lucp;
+} else {
+  <<@ab>>rbuf = uni_NFKC_CF_strs + p->off;
+  <<@ab>>rlen = p->len;
+}
+@
+
+<<FIXME>>=
+add NFD_CF and NFKD_CF as generic normalization routines?
+What about NFC_CF and NFKC_CF w/o ignorable removal?
+@
+
 \subsection{Generic Normalized Unicode Input}
 
 To make things even easier, we can make a function which returns a
@@ -10545,6 +11318,11 @@ int32_t uni_fgetc_norm(uni_file_t *uf, uni_normtype_t nt)
 {
   <<Get normalized character>>
 }
+@
+
+<<FIXME>>=
+add NFD_CF and NFKD_CF to generic normalization routines?
+What about NFC_CF and NFKC_CF w/o ignorable removal?
 @
 
 A simple function which returns a normalized character requires that
@@ -11035,8 +11813,7 @@ for(i = na_alias->len - 1; i > 0; i--) {
   }
   if(low == i)
     continue;
-  while(na_alias->max_strs < na_alias->strs_len + nlen)
-    resize(na_alias->strs, na_alias->max_strs *= 2);
+  check_size(na_alias->strs, na_alias->max_strs, na_alias->strs_len + nlen);
   uint8_t *strs8 = (uint8_t *)(na_alias->strs + na_alias->strs_len);
   unsigned int strs8_len = 0;
   for(j = low; j <= i; j++) {
@@ -11148,8 +11925,7 @@ qsort(na_seq->str_arr, na_seq->len, sizeof(*na_seq->str_arr), uni_cmp_cp);
 for(i = na_seq->len - 1; i > 0; i--) {
   while(i > 0 && na_seq->str_arr[i].cp == na_seq->str_arr[i - 1].cp) {
     int jlen = na_seq->str_arr[i - 1].len, ilen = na_seq->str_arr[i].len;
-    while(na_seq->max_strs < na_seq->strs_len + ilen + jlen)
-      resize(na_seq->strs, na_seq->max_strs *= 2);
+    check_size(na_seq->strs, na_seq->max_strs, na_seq->strs_len + ilen + jlen);
     uint16_t *newseq = (uint16_t *)(na_seq->strs + na_seq->strs_len);
     jlen *= 2;
     cpybuf(newseq, na_seq->strs + na_seq->str_arr[i - 1].off, jlen);
@@ -11210,8 +11986,7 @@ static void collect_words(prop_t *words, prop_t *na, uint32_t *strs,
   for(i = 0; i < na->len; i++) {
     <<For each word [[ws]] .. [[we]]>>
       if((we - ws) > 2) {
-        if(words->max_len == words->len)
-          resize(words->str_arr, words->max_len *= 2);
+        check_size(words->str_arr, words->max_len, words->len + 1);
         words->str_arr[words->len].cp = 0; /* avoid valgrind warning */
         words->str_arr[words->len].off = ws - (uint8_t *)strs;
         words->str_arr[words->len].len = we - ws;
@@ -11271,9 +12046,8 @@ prop_t *na = &parsed_props[prop_na], *na_rng = &parsed_props[prop_na_rng];
 prop_t words;
 clearbuf(&words, 1);
 /* collect all words as pointers into na_strs */
-while(na->max_strs < na->strs_len + na_seq->strs_len + na_alias->strs_len +
-                     na_rng->strs_len)
-  resize(na->strs, na->max_strs *= 2);
+check_size(na->strs, na->max_strs, na->strs_len + na_seq->strs_len +
+                                   na_alias->strs_len + na_rng->strs_len);
 inisize(words.str_arr, words.max_len = 100);
 collect_words(&words, na, na->strs, 0, NT_NAME);
 collect_words(&words, na_seq, na->strs, na->strs_len, NT_SEQ);
@@ -11315,8 +12089,7 @@ for(i = 0; i < words.len; i++) {
       break;
   /* copy unique word into words_strs and adjust pointers */
   int wlen = (words.str_arr[i].len + 3) / 4;
-  while(words.strs_len + wlen > words.max_strs)
-    resize(words.strs, words.max_strs *= 2);
+  check_size(words.strs, words.max_strs, words.strs_len + wlen);
   words.strs[words.strs_len + wlen - 1] = 0;
   memcpy(words.strs + words.strs_len, na_strs + words.str_arr[i].off,
          words.str_arr[i].len);
@@ -11970,8 +12743,7 @@ for(i = 0; i < na_alias->len; i++) {
   while(!src[srclen - 1])
     srclen--;
   for(low = 0; low < srclen; low += src[low] + 2) {
-    if(rev_na->len == rev_na->max_len)
-      resize(rev_na->str_arr, rev_na->max_len *= 2);
+    check_size(rev_na->str_arr, rev_na->max_len, rev_na->len + 1);
     rev_na->str_arr[rev_na->len].off = dstlen / 4;
     rev_na->str_arr[rev_na->len].cp = na_alias->str_arr[i].cp;
     rev_na->str_arr[rev_na->len].flags = 0;
@@ -12011,8 +12783,7 @@ for(i = 0; i < na_seq->len; i++) {
     if(!src[low - 1])
       low--;
     low -= elen;
-    if(rev_na->len == rev_na->max_len)
-      resize(rev_na->str_arr, rev_na->max_len *= 2);
+    check_size(rev_na->str_arr, rev_na->max_len, rev_na->len + 1);
     rev_na->str_arr[rev_na->len].off = dstlen / 4;
     rev_na->str_arr[rev_na->len].flags = 0;
     <<Add [[src[i]]] sequence from [[na_seq]] at [[low[seqlen]]] to [[na_seq_id]]>>
@@ -12030,10 +12801,8 @@ for(i = 0; i < na_seq->len; i++) {
 @
 
 <<Add [[src[i]]] sequence from (@seq) at [[low[seqlen]]] to (@id)>>=
-if(<<@id>>->len == <<@id>>->max_len)
-  resize(<<@id>>->str_arr, <<@id>>->max_len *= 2);
-if(<<@id>>->strs_len + 1 + seqlen > <<@id>>->max_strs)
-  resize(<<@id>>->strs, <<@id>>->max_strs *= 2);
+check_size(<<@id>>->str_arr, <<@id>>->max_len, <<@id>>->len + 1);
+check_size(<<@id>>->strs, <<@id>>->max_strs, <<@id>>->strs_len + 1 + seqlen);
 <<@id>>->str_arr[<<@id>>->len].cp = <<@id>>->len;
 <<@id>>->str_arr[<<@id>>->len].off = <<@id>>->strs_len;
 <<@id>>->str_arr[<<@id>>->len].flags = 0;
@@ -12099,8 +12868,7 @@ for(i = rev_na->len - 1; i > 0; i--)
         hloc++;
     }
     sort_words = &revwords;
-    if(na_hyphen->len == na_hyphen->max_len)
-      resize(na_hyphen->rng_dat32, na_hyphen->max_len *= 2);
+    check_size(na_hyphen->rng_dat32, na_hyphen->max_len, na_hyphen->len + 1);
     na_hyphen->rng_dat32[na_hyphen->len].dat = hloc;
     na_hyphen->rng_dat32[na_hyphen->len].len = 0;
     if(ac == '-') {
@@ -12283,6 +13051,7 @@ static void dump_wordord_strs(prop_t *p, FILE *gen_h)
                                        (int)ent->len,
 				       i < p->len - 1 ? ",\n\t" : "\n};\n");
   }
+  free(ostr_arr);
   fclose(rt);
   fprintf(gen_h, "extern const uni_str_arr_t uni_%s_arr[];\n"
 	         "#define uni_%s_arr_len %d /* %d lookups max */\n",
@@ -13169,7 +13938,6 @@ decl_str(DUCET_CLDR);
 @
 
 <<Parse UCD files>>=
-<<Prepare for reading DUCET>>
 static uint32_t ducet_vartop, cldr_vartop;
 ducet_vartop = parse_ducet("allkeys.txt", (prop_DUCET = add_prop("DUCET")));
 cldr_vartop = parse_ducet("CollationAuxiliary/allkeys_CLDR.txt",
@@ -13319,11 +14087,6 @@ use this technique are not suppressed.
 % however, l4=0 weight rule is violated on 12 entries:
 %  0600 0601 0602 0603 0604 0605 06DD 2061 2062 2063 2064 110BD
 %   all of these are Cc or Cf, but have l4 == cp
-
-<<Prepare for reading DUCET>>=
-/* sort dmf for decomp lookup */
-qsort(dmf_prop->str_arr, dmf_prop->len, sizeof(*dmf_prop->str_arr), cmp_cp_flg);
-@
 
 <<Prepare for DUCET post-processing>>=
 prop_t *dmf_prop = &parsed_props[add_prop("dm_full")];
@@ -13542,10 +14305,8 @@ for(i = prop->len - 1; i > 0; i--) {
   uint32_t len = 0;
   for(j = low; j <= i; j++)
     len += prop->str_arr[j].len;
-  while(prop->max_strs < prop->strs_len + len) {
-    resize(prop->strs, (prop->max_strs *= 2));
-    ducet_strs = prop->strs; /* for sort & abbrev */
-  }
+  check_size(prop->strs, prop->max_strs, prop->strs_len + len);
+  ducet_strs = prop->strs; /* for sort & abbrev */
   cpybuf(ducet_strs + prop->strs_len,
          ducet_strs + prop->str_arr[low].off,
 	 prop->str_arr[low].len);
@@ -13978,10 +14739,8 @@ if(st->l4_ffff)
 <<Mangle DUCET return value>>=
 if(var_mode == UNI_DUCET_VAR_MODE_SHIFT_TRIMMED) {
   if(l4 == 0xffff) {
-    if(!st->l4_ffff_max)
-      inisize(st->l4_ffff, st->l4_ffff_max = 10);
-    if(st->l4_ffff_len == st->l4_ffff_max)
-      resize(st->l4_ffff, st->l4_ffff_max *= 2);
+    /* FIXME: return error instead of exiting */
+    check_size(st->l4_ffff, st->l4_ffff_max, st->l4_ffff_len + 1);
     st->l4_ffff[st->l4_ffff_len++] = l123;
     <<Skip [[l4_ffff]] member>>
   } else if(st->l4_ffff_len) {
@@ -14138,20 +14897,16 @@ if(st->bt)
 <<Private DUCET lookup globals>>=
 static void add_bt(uint32_t c, uni_ducet_lookup_state_t *st)
 {
-  if(!st->bt)
-    inisize(st->bt, (st->max_bt = 5));
-  if(st->num_bt == st->max_bt)
-    resize(st->bt, (st->max_bt *= 2));
+  /* FIXME: return error instead of exiting */
+  check_size(st->bt, st->max_bt, st->num_bt + 1);
   st->bt[st->num_bt++] = c;
 }
 
 static void add_bt_buf(const uint32_t *buf, uint32_t len,
                        uni_ducet_lookup_state_t *st)
 {
-  if(!st->bt)
-    inisize(st->bt, (st->max_bt = 5));
-  while(st->num_bt + len > st->max_bt)
-    resize(st->bt, (st->max_bt *= 2));
+  /* FIXME: return error instead of exiting */
+  check_size(st->bt, st->max_bt, st->num_bt + len);
   cpybuf(st->bt + st->num_bt, buf, len);
   st->num_bt += len;
 }
@@ -14651,7 +15406,8 @@ case DUCET_lookup_reorder:
     uint32_t ccc = c == UNI_DUCET_LOOKUP_END ? 0 : uni_ccc_of(c);
     uint32_t i;
     if(st->maxbuf == st->buflen) {
-      resize(st->buf, st->maxbuf *= 2);
+      /* FIXME: return error instead of exiting */
+      check_size(st->buf, st->maxbuf, st->buflen + 1);
       resize(st->ccc_buf, st->maxbuf);
     }
     st->buf[st->buflen] = c;
@@ -14927,8 +15683,8 @@ uint32_t *uni_str_ducet<<@sz>>(const uint<<@sz>>_t *str, int slen,
         continue;
     }
     if(lev123 || lev4) {
-      if(nres >= res_max - 1)
-        resize(res, (res_max *= 2));
+      /* FIXME: return error instead of exiting */
+      check_size(res, res_max, nres + 2);
       res[nres++] = lev123;
       if(use_lev4)
         res[nres++] = lev4;
@@ -15188,8 +15944,8 @@ int uni_uca_strcmp<<@sz>>(const uint<<@sz>>_t *a, int alen,
 while(ret<<@ab>> != UNI_DUCET_LOOKUP_NONE && !(lev123<<@ab>> & UNI_DUCET_LEV1_MASK)) {
   /* save l2+ keys obtained so far if non-zero */
   if(lev4<<@ab>> || lev123<<@ab>> & ~(UNI_DUCET_LEV1_MASK | 3)) {
-    if(duc_len<<@ab>> >= max_duc<<@ab>> - 1)
-      resize(duc<<@ab>>, max_duc<<@ab>> *= 2);
+    /* FIXME: return error instead of exiting */
+    check_size(duc<<@ab>>, max_duc<<@ab>>, duc_len<<@ab>> + 2);
     duc<<@ab>>[duc_len<<@ab>>++] = lev123<<@ab>>;
     if(has_l4)
       duc<<@ab>>[duc_len<<@ab>>++] = lev4<<@ab>>;
@@ -15281,8 +16037,7 @@ for(i = 0; i < dmf_prop->len; i++) {
       continue;
     }
     /* always ensure room for 2, even if only 1 needed */
-    if(FCD_prop->len >= FCD_prop->max_len - 1)
-      resize(FCD_prop->rng_dat16, FCD_prop->max_len *= 2);
+    check_size(FCD_prop->rng_dat16, FCD_prop->max_len, FCD_prop->len + 2);
     if(FCD_prop->rng_dat16[m].low == cp) {
       movebuf(FCD_prop->rng_dat16 + m + 1, FCD_prop->rng_dat16 + m,
               FCD_prop->len - m);
@@ -15304,8 +16059,7 @@ for(i = 0; i < dmf_prop->len; i++) {
     FCD_prop->rng_dat16[m].dath = sccc;
     FCD_prop->rng_dat16[m].datl = eccc;
   } else if(sccc || eccc) {
-    if(FCD_prop->len == FCD_prop->max_len)
-      resize(FCD_prop->rng_dat16, FCD_prop->max_len *= 2);
+    check_size(FCD_prop->rng_dat16, FCD_prop->max_len, FCD_prop->len + 1);
     movebuf(FCD_prop->rng_dat16 + l + 1, FCD_prop->rng_dat16 + l,
             FCD_prop->len - l);
     FCD_prop->len++;
@@ -15576,8 +16330,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
       s++;
     if(!isxdigit(*s))
       break;
-    if(buf_len == max_buf)
-      resize(buf, (max_buf *= 2));
+    check_size(buf, max_buf, buf_len + 1);
     buf[buf_len++] = strtol(s, &s, 16);
   }
   tot++;
@@ -15760,8 +16513,7 @@ int main(int argc, const char **argv)
       slen--;
     if(!slen)
       continue;
-    if(nstrs == maxstrs)
-      resize(strs, (maxstrs *= 2));
+    check_size(strs, maxstrs, nstrs + 1);
     strs[nstrs].str = malloc(slen);
     strs[nstrs].len = slen;
     memcpy(strs[nstrs].str, lbuf, slen);
@@ -16107,8 +16859,7 @@ for(i = raw_ents_size - 1; /* i >= 0 */ ; i--) {
     len += raw_ents[j - 1].len + 1; /* + 1 for cp */
   }
   /* alread sorted by full index, so just append them all */
-  while(max_rev_strs < rev_strs_len + len)
-    resize(rev_strs, max_rev_strs *= 2);
+  check_size(rev_strs, max_rev_strs, rev_strs_len + len);
   uint32_t *dp = rev_strs + rev_strs_len;
   for(low = j; j <= i; j++) {
     sj = prop->strs + raw_ents[j].off;
@@ -16436,8 +17187,7 @@ static void str_to_enum(prop_t *p, const char *def)
     seq++;
     poff = p->str_arr[i].off;
     plen = p->str_arr[i].len;
-    if(num_val_aliases[pnum] == max_val_aliases[pnum])
-      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    check_size(val_aliases[pnum], max_val_aliases[pnum], num_val_aliases[pnum] + 1);
     {
       uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
       char *n;
@@ -16454,8 +17204,7 @@ static void str_to_enum(prop_t *p, const char *def)
   }
   if(p->def == (uint8_t)~0) {
     p->def = seq;
-    if(num_val_aliases[pnum] == max_val_aliases[pnum])
-      resize(val_aliases[pnum], max_val_aliases[pnum] *= 2);
+    check_size(val_aliases[pnum], max_val_aliases[pnum], num_val_aliases[pnum] + 1);
     {
       uni_alias_t *va = &val_aliases[pnum][num_val_aliases[pnum]];
       va->short_name = va->long_name = strdup(def);
@@ -16748,8 +17497,7 @@ for(i = xna->len - 1; i > 0; i--) {
   }
   if(low == i)
     continue;
-  while(xna->max_strs < xna->strs_len + nlen)
-    resize(xna->strs, xna->max_strs *= 2);
+  check_size(xna->strs, xna->max_strs, xna->strs_len + nlen);
   uint8_t *strs8 = (uint8_t *)(xna->strs + xna->strs_len);
   unsigned int strs8_len = 0;
   for(j = low; j <= i; j++) {
@@ -16805,8 +17553,7 @@ for(i = xna_seq->len - 1; i > 0; i--) {
   }
   while(i > 0 && xna_seq->str_arr[i].cp == xna_seq->str_arr[i - 1].cp) {
     int jlen = xna_seq->str_arr[i - 1].len, ilen = xna_seq->str_arr[i].len;
-    while(xna_seq->max_strs < xna_seq->strs_len + ilen + jlen)
-      resize(xna_seq->strs, xna_seq->max_strs *= 2);
+    check_size(xna_seq->strs, xna_seq->max_strs, xna_seq->strs_len + ilen + jlen);
     uint16_t *newseq = (uint16_t *)(xna_seq->strs + xna_seq->strs_len);
     jlen *= 2;
     cpybuf(newseq, xna_seq->strs + xna_seq->str_arr[i - 1].off, jlen);
@@ -17106,8 +17853,7 @@ for(i = 0; i < xna->len; i++) {
 @
 
 <<Add [[src[i]]] at [[low[elen]]] to [[rev_xna]]>>=
-if(rev_xna->len == rev_xna->max_len)
-  resize(rev_xna->str_arr, rev_xna->max_len *= 2);
+check_size(rev_xna->str_arr, rev_xna->max_len, rev_xna->len + 1);
 rev_xna->str_arr[rev_xna->len].cp = xna->str_arr[i].cp;
 rev_xna->str_arr[rev_xna->len].off = (i << 8) + low;
 rev_xna->str_arr[rev_xna->len].len = elen;
@@ -17760,8 +18506,7 @@ static void do_attr_alias(xmlNodePtr alias, int prop)
       fp = &enum_vals[prop][l];
       fp->name = strdup(from);
       fp->val = num_val_aliases[prop];
-      if(num_val_aliases[prop] == max_val_aliases[prop])
-        resize(val_aliases[prop], max_val_aliases[prop] *= 2);
+      check_size(val_aliases[prop], max_val_aliases[prop], num_val_aliases[prop] + 1);
       num_val_aliases[prop]++;
       /* note that val_aliases[prop][fp->val] will just be ignored/deleted */
       val_aliases[prop][fp->val].short_name = NULL; /* prevent freeing */
@@ -19079,12 +19824,14 @@ QMark&Radical&SD&STerm&Term\\
 UIdeo&Upper&VS&WSpace&XIDC\\
 XIDS\\
 \end{tabular}
+\end{centering}
+
+~
 
 {\small Note: NFD\_QC and NFKD\_QC are actually enumerated properties
 with only two values: Y and N.}
 
 \caption{\label{tab:boolprop}Boolean properties (Unicode canonical short name)}
-\end{centering}
 \end{table}
 
 \subsection{Bit Set Operations}
@@ -19257,11 +20004,13 @@ NFC\_QC&NFKC\_QC&nt&sc\\
 SB&WB&IDNA\_Status&ID\_Restrict\_Status\\
 ID\_Restrict\_Type&&&\\
 \end{tabular}
+\end{centering}
+
+~
 
 {\small Note: age and ccc are technically numeric properties.}
 
 \caption{\label{tab:enumprop}Enumerated properties (Unicode canonical short name)}
-\end{centering}
 \end{table}
 
 The IDNA\_Status property will not be available if the IDNA data files
@@ -19531,12 +20280,14 @@ is more than one value, the [[val2]] macro will return a non-zero value.
 nv&cjkRSUnicode&slc&suc\\
 stc&scf&bmg&\\
 \end{tabular}
+\end{centering}
+
+~
 
 {\small Note: slc, suc, stc, scf, and bmg are technically string
 properties.}
 
 \caption{\label{tab:numprop}Numeric properties (Unicode canonical short name)}
-\end{centering}
 \end{table}
 
 \section{String Properties}
@@ -19598,18 +20349,21 @@ multi-level table are all in separate object files.
 \begin{tabular}{llll}
 dm&\emph{canon\_decomp}&\emph{compat\_decomp}&\emph{canon\_comp}\\
 lc&uc&tc&cf\\
-NFKC\_CF&cjkTraditionalVariant&cjkSimplifiedVariant&cjkCompatibilityVariant\\
-IDNA\_Mapping&\emph{DUCET}&\emph{DUCET\_CLDR}&\emph{rev\_DUCET}\\
-\emph{rev\_DUCET\_CLDR}&scx&JSN&na\\
-Name\_Alias&\emph{na\_seq}&\emph{na\_xml}&\emph{na\_xml\_seq}\\
+\emph{NFD\_CF}&\emph{NFKD\_CF}&NFKC\_CF&cjkTraditionalVariant\\
+cjkSimplifiedVariant&cjkCompatibilityVariant&IDNA\_Mapping&\emph{DUCET}\\
+\emph{DUCET\_CLDR}&\emph{rev\_DUCET}&\emph{rev\_DUCET\_CLDR}&scx\\
+JSN&na&Name\_Alias&\emph{na\_seq}\\
+\emph{na\_xml}&\emph{na\_xml\_seq}&&\\
 \end{tabular}
+\end{centering}
+
+~
 
 \small{Property names in italics are non-standard properties.}
 
 \small{na, Name\_Alias, and scx are technically ``other'' properties.}
 
 \caption{\label{tab:stringprop}String Properties (Unicode canonical short name)}
-\end{centering}
 \end{table}
 
 \subsection{Names}
@@ -20304,6 +21058,67 @@ tables to query:
 % uni_str_case_convert16 prototype
 % uni_str_case_convert8 prototype
 
+Since a common operation to perform after case folding is comparison,
+a function is provided to do both steps at the same time.  This is
+equivalent to [[strcasecmp]] if the inputs are sufficiently
+normalized.  The return value is $1$, $0$, or $-1$ on successful
+comparison, indicating [[a]] is greater than, equal to, or less than
+[[b]], respectively.  If there is an encoding error in [[a]], $2$ is
+returned.  If there is an encoding error in [[b]], $-2$ is returned.
+
+% uni_cf_strcmp32 prototype
+% uni_cf_strcmp16 prototype
+% uni_cf_strcmp8 prototype
+% uni_tcf_strcmp32 prototype
+% uni_tcf_strcmp16 prototype
+% uni_tcf_strcmp8 prototype
+
+These are all preprocessor macros using a more generic routine which
+takes the locale flags as a parameter.
+
+% uni_either_cf_strcmp32 prototype
+% uni_either_cf_strcmp16 prototype
+% uni_either_cf_strcmp8 prototype
+
+If the inputs are not sufficiently normalized, the following functions
+perform the comparison instead.  The return values have the same
+values and interpretations, except that in addition, $3$ indicates a
+memory allocation error while processing [[a]], and $-3$ indicates a
+memory allocation error while processing [[b]].  Memory is allocated
+for long canonical character sequences.
+
+% uni_NFD_cf_strcmp32 prototype
+% uni_NFD_cf_strcmp16 prototype
+% uni_NFD_cf_strcmp8 prototype
+% uni_NFD_tcf_strcmp32 prototype
+% uni_NFD_tcf_strcmp16 prototype
+% uni_NFD_tcf_strcmp8 prototype
+% uni_NFKD_cf_strcmp32 prototype
+% uni_NFKD_cf_strcmp16 prototype
+% uni_NFKD_cf_strcmp8 prototype
+% uni_NFKD_tcf_strcmp32 prototype
+% uni_NFKD_tcf_strcmp16 prototype
+% uni_NFKD_tcf_strcmp8 prototype
+
+Again, these are preprocessor macros using more generic functions
+which take the locale flags and NFD\_CF/NFKD\_CF pseudo-property
+tables as parameters.
+
+% uni_norm_cf_strcmp32 prototype
+% uni_norm_cf_strcmp16 prototype
+% uni_norm_cf_strcmp8 prototype
+
+Finally, using the NFKC\_Casefold property instead of simple case
+folding can be done using the following functions.  The capitalization
+of CF should be enough to indicate that their function does not
+involve the cf property directly.  Like the other normalizing
+comparison functions, these may return memory errors as well when long
+canonical character sequences are present.
+
+% uni_NFKC_CF_strcmp32 prototype
+% uni_NFKC_CF_strcmp16 prototype
+% uni_NFKC_CF_strcmp8 prototype
+
 There are also test functions for determining if a character or string
 would change if converted to a case.  Normally, it would be more
 efficient to check the gc property for the character, but this is does
@@ -20404,11 +21219,14 @@ functions which implement them.  The Bidirectional Algorithm (UBA) and
 the Standard Compression Scheme for Unicode (SCSU) are not
 implemented, and there are no plans to ever implement them.
 
+% End-doc Users-Guide
+
 <<FIXME>>=
 Should probably implement UBA anyway, to ensure that data files are
 usable, and to exercise BidiTest.txt (see tr9)
 @
 
+% Begin-doc Users-Guide
 \begin{table}[htb]
 \begin{centering}
 \begin{tabular}{ll}
@@ -20422,7 +21240,7 @@ Hangul Syllable Name Generation&[[uni_cp_to_name]], [[uni_name_rng_to_cp]]\\
 Default Case Conversion*&[[uni_str_]]\{[[lc]],[[uc]],[[tc]],[[cf]]\}\{[[8]],[[16]],[[32]]\},\\
 &[[uni_NFKC_CF]]\{[[8]],[[16]],[[32]]\}\\
 Default Case Detection*&[[uni_str_is_]]\{[[lc]],[[uc]],[[tc]],[[cf]],[[cased]]\}\{[[8]],[[16]],[[32]]\}\\
-Default Caseless Matching&\\
+Default Caseless Matching&[[uni_]]\{,[[NFD_]],[[NFKD_]],[[NFKC_]]\}[[cf_strcmp]]\\
 Line Breaking Algorithm*&[[uni_line_brk]]\\
 Character Segmentation&[[uni_gc_brk]]\\
 Word Segmentation*&[[uni_word_brk]]\\
@@ -20432,12 +21250,14 @@ Default Identifier Determination&\\
 Alternative Identifier Determination&\\
 Pattern Syntax Determination&\\
 Identifier Normalization&\\
-Identifier Case Folding&\\
+Identifier Case Folding&[[uni_NFKC_CF]]\{[[8]],[[16]],[[32]]\}\\
 Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
 &[[uni_str_ducet]]\{[[8]],[[16]],[[32]]\},\\
 &[[uni_uca_ducet_cmp]]\\
 \end{tabular}
 \end{centering}
+
+~
 
 \small{* With localization support}
 
@@ -20450,19 +21270,7 @@ Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
 
 \input{begin-hidden.tex} %%% doc
 notes:
-    Default Caseless Matching
-     simple strcasecmp(X, Y): toCasefold(X) == toCasefold(Y)
-       uni_strcasecmp{8,16,32}()
-     canonical strcasecmp(X, Y): NFD(toCasefold(NFD(X))) == NFD(toCasefold(NFD(Y)))
-       uni_NFD_Casefold{8,16,32}()
-       uni_NFD_strcasecmp{8,16,32}()
-     compat strcasecmp(X, Y): NFKD(toCasefold(NFKD(toCasefold(NFD(X))) ==
-                              NFKD(toCasefold(NFKD(toCasefold(NFD(Y)))
-       uni_NFKD_Casefold{8,16,32}()
-       uni_NFKD_strcasecmp{8,16,32}()
-     id strcasecmp(X, Y): toNFKC_Casefold(NFD(X)) == toNFKC_Casefold(NFD(Y))
-       uni_id_Casefold{8,16,32}()
-       uni_id_strcasecmp{8,16,32}()
+  UAX #31:
     Default Identifier Determiniation
       ID = ID_Start { ID_Continue }
       XID = XID_Start { XID_Continue }
@@ -20481,7 +21289,11 @@ notes:
       other = literals or identifiers
         uni_is_PWS()/uni_is_PS() good enough?
     Identifier Normalization
+      uni_ID_NFC_brk()
+        0E33 0EB3 FF9E FF9F
+	037A, etc.
     Identifer Case Folding
+      uni_NFKC_CF() plus uni_ID_NFC_brk()?
 
 Completely untouched & undocumented files:
   IDNA:
