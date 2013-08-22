@@ -5,9 +5,10 @@ other projects that had separate Unicode-related implementations.
 You can query a large number of properties consistently (56 boolean,
 21 enumerated, 7 numeric, 24 string at the time of this writing), and
 if you link statically, you will only burden your executable with the
-properties you actually use.  The standard collation, normalization,
-case conversion, name synthesis and boundary detection algorithms are
-also implemented.
+properties you actually use.  19 named Unicode algorithms are also
+implemented (all listed named algorithms in 6.2 except for UBA and
+SCSU), along with a few unnamed algorithms from the standard and
+various annexes.
 
 Like some of my other literate projects, I have split off the user
 documentation into a separate document, and have uploaded that to the
@@ -31,14 +32,21 @@ during the build process, so it is no longer required after building.
 
 It's not really meant to be stable/usable yet.  Still to do before 1.0:
   - finish collation-related code (locale support via CLDR)
-  - implement more Unicode algorithms, if appropriate
-    - full-string case conversion
-    - ID/"pattern" parsing
   - make installation painless:
     - create tar files with all sources, including code generated from
-      UCD & CLDR
+      UCD & CLDR & XML spec
     - figure out how to make shared libraries more easily without
       invoking libtool (libtool is a pain) or being Linux-specific
+        currently, on Linux:
+	- build with -fPIC in CFLAGS (gcc/arch dependent)
+	- for x in libuni libuni_cmph; do
+	    ld -s -o $x.so.1.0 -shared -soname $x.so.1 -whole-archive $x.a
+	    # following should be done automatically by ldconfig anyway
+	    ln -sf $x.so.1.0 $x.so.1
+	    # but not this one
+	    ln -sf $x.so.1 $x.so
+	  done
+  - finish at least one of my major users to verify API is OK
 
 As with my other literate projects, building depends on the
 literate-build project, although the main source for that is attached
@@ -47,8 +55,7 @@ to the source, so you don't really need to go get it:
   https://bitbucket.org/darktjm/literate-build
 
 This is currently my second-largest single noweb source that I have
-yet to abandon (>19k lines, ~333 pages, 42 of which are API
-documentation; >11k loc).  Normally I would have split this into
-multiple documents by now, but I don't really see an easy, clean
-split.  At least it's no longer just a (way too long) section in
-another document.
+yet to abandon (>21k lines, ~360 pages, 48 of which are API docs; >12k
+loc).  Normally I would have split this into multiple documents by
+now, but I don't really see an easy, clean split.  At least it's no
+longer just a (way too long) section in another document.
