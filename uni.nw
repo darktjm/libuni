@@ -21246,10 +21246,10 @@ Character Segmentation&[[uni_gc_brk]]\\
 Word Segmentation*&[[uni_word_brk]]\\
 Sentence Segmentation*&[[uni_sentence_brk]]\\
 Hangul Syllable Boundary Determination&[[uni_gc_brk]]\\
-Default Identifier Determination&\\
-Alternative Identifier Determination&\\
-Pattern Syntax Determination&\\
-Identifier Normalization&\\
+Default Identifier Determination&[[uni_is_IDS]], [[uni_is_IDC]]\\
+Alternative Identifier Determination&[[uni_is_XIDS]], [[uni_is_XIDC]]\\
+Pattern Syntax Determination&[[uni_is_Pat_WS]], [[uni_is_Pat_Syn]]\\
+Identifier Normalization&[[uni_NFKC_CF]]\{[[8]],[[16]],[[32]]\}, [[uni_is_DI]]\\
 Identifier Case Folding&[[uni_NFKC_CF]]\{[[8]],[[16]],[[32]]\}\\
 Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
 &[[uni_str_ducet]]\{[[8]],[[16]],[[32]]\},\\
@@ -21261,6 +21261,16 @@ Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
 
 \small{* With localization support}
 
+\small{Note that [[_brk]]-style functions are not provided for
+identifiers and pattern syntax; the properties described by the
+[[is_]]-style functions are mutually exclusive and
+context-independent.}
+
+\small{Note that identifier normalization is application-dependent,
+so no specific function is provided.  Anything but NFKC\_CF requires
+removal of default ignorable (DI) code points in addition to
+normalization.}
+
 \caption{\label{tab:unialg}Named Unicode Algorithms}
 \end{table}
 
@@ -21269,32 +21279,6 @@ Unicode Collation Algorithm (UCA)*&[[uni_uca_strcmp]]\{[[8]],[[16]],[[32]]\},\\
 \end{document}
 
 \input{begin-hidden.tex} %%% doc
-notes:
-  UAX #31:
-    Default Identifier Determiniation
-      ID = ID_Start { ID_Continue }
-      XID = XID_Start { XID_Continue }
-        note: there are alternatives with format chars & grandfathered chars
-	note: optionally NFD, NFKC, NFKC_CF (see tr31)
-	   uni_ID_brk()
-	   uni_XID_brk()
-    Alternative Identifier Determination
-      !Pattern_White_Space&!Pattern_Syntax&!Noncharacter_Code_Point&
-      !(gc in Private_Use, Surrogate, Control)
-           uni_alt_ID_brk()
-	   uni_alt_XID_brk()
-    Pattern Syntax Determination
-      Pattern_White_Space == space/separator
-      Pattern_Syntax == syntactic chars
-      other = literals or identifiers
-        uni_is_PWS()/uni_is_PS() good enough?
-    Identifier Normalization
-      uni_ID_NFC_brk()
-        0E33 0EB3 FF9E FF9F
-	037A, etc.
-    Identifer Case Folding
-      uni_NFKC_CF() plus uni_ID_NFC_brk()?
-
 Completely untouched & undocumented files:
   IDNA:
     IdnaTest.txt (IDNA algorithm not implemented, so no testing)
