@@ -1,6 +1,7 @@
-This is a simple interface the the Unicode Character Database and
+This is a simple interface to the Unicode Character Database and
 other small Unicode-related utilities.  It was translated from two
-other projects that had separate Unicode-related implementations.
+other projects of mine that had separate Unicode-related
+implementations.
 
 You can query a large number of properties consistently (56 boolean,
 21 enumerated, 7 numeric, 24 string at the time of this writing), and
@@ -50,7 +51,7 @@ It's not really meant to be stable/usable yet.  Still to do before 1.0:
 
 As with my other literate projects, building depends on the
 literate-build project, although the main source for that is attached
-to the source, so you don't really need to go get it:
+to the PDF documents, so you don't really need to go get it:
 
   https://bitbucket.org/darktjm/literate-build
 
