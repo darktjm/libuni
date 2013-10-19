@@ -18222,8 +18222,8 @@ linkage.
 
 The CLDR also uses XML rather than simple tables.  Doing hand-coded
 XSLT for hundreds of data files seemed excessive, which is the main
-reason why I abandoned XSLT.  Note that unlike unicode.xml, there is a
-local, valid DTD for every CLDR file.
+reason why I abandoned XSLT.  Note that unlike for the XML entity
+data, there is a local, valid DTD for every CLDR file.
 
 \lstset{language=make}
 <<makefile.vars>>=
@@ -18455,6 +18455,7 @@ targets are space-separated lists (I'm not sure how to handle those).
 Some are language codes with scripts.  Some, however, are just missing
 (e.g. ami for the i-ami to ami alias).  Some have no target at all; I
 assume this is meant to delete the value, but what is used instead?
+The root locale?
 
 One additional problem presented by these aliases is that there are
 sometimes more than three aliases for a name.  The alias structure
