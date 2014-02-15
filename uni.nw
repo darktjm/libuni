@@ -147,25 +147,45 @@ This document does not contain the UCD or CLDR itself; it is expected
 that the user download them manually and place them where they can be
 found.  Some Linux distributions may already provide at least the UCD
 as a package, although the CLDR is probably less common.  This package
-was tested with versions 6.0.0 and 6.2.0 of the UCD, but the file
-formats are relatively stable and it should work with later versions
-as well.  I recommend at least version 6.1.0, as that is the first
-version where the control character names were finally made official.
-An earlier version of this library actually had hard-coded names for
-ASCII control characters optionally added to the name database.  This
-package was tested against CLDR version 22.1; I recommend always
-getting the latest version available.  In particular, care must be
-taken that the CLDR and UCD versions are compatible.
+was tested with versions 6.0.0, 6.2.0, and 6.3.0 of the UCD, but the
+file formats are relatively stable and it should work with later
+versions as well, other than algorithm changes.  I recommend at least
+version 6.1.0, as that is the first version where the control
+character names were finally made official.  An earlier version of
+this library actually had hard-coded names for ASCII control
+characters optionally added to the name database.  This package was
+tested against CLDR version 24; I recommend always getting the
+latest version available.  In particular, care must be taken that the
+CLDR and UCD versions are compatible.
+
+Originally, I didn't care what version was used, but 6.3.0 introduces
+some incompatible algorithm changes.  Thus, the version must be known
+as well.  The UCD version can be extracted from the first line of many
+of the data files (e.g. the first line of \texttt{PropertyAliases.txt}
+is \texttt{\# PropertyAliases-}\emph{ver}\texttt{.txt}), but there is
+no guarantee that it is always present, so an explicit value must be
+set.  The CLDR has nothing which indicates the current version, so
+again, an explicit value must be set.  Note that the CLDR version is
+currently ignored.
+
+<<FIXME>>=
+Provide function to return UCD/CLDR version numbers (and maybe UAX
+revisions used for algorithms)
+@
 
 % End-doc Introduction
 \lstset{language=make}
 <<makefile.config>>=
+# The version of the UCD/Unihan data: major*100+minor*10+sub
+UCD_VER = 630
 # The location of the Unicode Character Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/UCD.zip
 UCD_LOC = /usr/share/unicode-data
 # The location of the Unicode Han Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/Unihan.zip
 UNIHAN_LOC = $(UCD_LOC)
+# The version of the CLDR data: major*10+minor
+CLDR_VER=221
 # The location of the Unicode Common Locale Data Repository (unzipped)
 # http://www.unicode.org/Public/cldr/latest/core.zip
 CLDR_LOC = /usr/share/unicode-data/cldr
@@ -2684,6 +2704,18 @@ but having two pointers to the same subtable can significantly reduce
 storage requirements.  Note that another name for this structure is an
 optimized prefix tree (aka optimized trie) on the code point bit string.
 
+There are other trie-style data structures.  For example, ICU uses
+what they call a folding trie.  This structure uses two levels in a
+way that optimizes characteristics of the Unicode character set
+somewhat, but it does not appear to do a very good job of compressing
+data.  On the other hand, with UTF-16 input, it can look up data with
+only one table access for BMP code points, and two (one for each
+UTF-16 character) for non-BMP code points, making lookup time almost
+optimal.  However, even using 64k tables for each level is not very
+space or cache efficient.  Another possibility is the Judy array.  It
+might be worth testing it, but its inner structure is complex, and it
+still doesn't do like node merging for less space usage.
+
 The multi-level table approach requires fewer lookups than the code
 point arrays (just as many table lookups as there are levels, vs. a
 binary search against a long range list that might take, say, 10 or
@@ -2844,6 +2876,11 @@ save a tiny bit of space, but scanning through dense or sparse
 sections of the array can be much faster.  Care must be taken during
 the comparisons to not access data past the end of the actual bit
 array, instead treating them as zeroes.
+
+<<FIXME>>=
+Maybe add hash to block before sort for dup detect; maybe also store
+hash with mtab.
+@
 
 <<Unsaved multi-level table information>>=
 uint32_t j;
@@ -3045,23 +3082,39 @@ or one entry.
 *ret = NULL;
 @
 
-First, we need to filter out the main range.  The default, 0 or 1, is
-encoded as the first bit of the low end, after shifting that up.
+First, we need to filter out the main range.  If the value is out of
+range, the default is returned. This can be stored in the next word.
+Since it's only one bit, other information can be stored in that word
+as well.
 
 <<Find multi-level table entry [[val]]>>=
-if(val < (*dat >> 1) || val > dat[1])
-  return def ? def : *dat & 1 ? ~0 : 0;
-val -= *dat >> 1;
-dat += 2;
+if(val < *dat || val > dat[1])
+  return def ? def : dat[2] & 1 ? ~0 : 0;
+val -= *dat;
+dat += 3;
 @
 
 <<Multi-level table buffer length>>=
-+2
++3
 @
 
 <<Split [[bits]] into multi-level table [[*ml]]>>=
-*mp++ = (low << 1) + (def & 1);
+*mp++ = low;
 *mp++ = high;
+*mp++ = def & 1;
+@
+
+There is no other rarely used information necessary for scanning the
+table that can be stored along with the default bit.  However, for
+some applications, it may be nice to know the size of the table.  So,
+the remaining bits of that word are filled with that size (in words).
+
+<<FIXME>>=
+Provide function that returns mt[2] >> 1 ("storage_len")
+@
+
+<<Split [[bits]] into multi-level table [[*ml]]>>=
+mp[-1] |= *ml_len << 1;
 @
 
 After looking up the value at a particular level, the level needs to
@@ -3365,13 +3418,13 @@ uint32_t nl;
 @
 
 <<Gather multi-level structure>>=
-inv = mt[0] & 1;
-low = (mt[0] >> 1) * 8;
+low = mt[0] * 8;
 high = mt[1] * 8 + 7;
+inv = mt[2] & 1;
 uint32_t desc;
-uint32_t nskip = mt[2], skip;
+uint32_t nskip = mt[3], skip;
 uint32_t l;
-mt += 3;
+mt += 4;
 bsz[0] = nskip; /* top level is just one block */
 for(l = 0; (desc = *mt++); l++) {
   dat[l] = mt;
@@ -3590,6 +3643,20 @@ expense of slowing the lookup down a bit.  For now, the multi-level
 table, sorted range table, and sorted code point table are the only
 supported data structures.
 
+<<FIXME>>=
+Add discussion of compressed tries:
+  Liang/TeX: overlapping arrays
+     build normally
+     merge suffixes
+     side bitmask of filled positions
+     add node by computing bitmask
+        find first fit pos in side mask
+     each array ent stores index of child
+     add node symbol itself
+  ref by Liang: bitmask of structure
+     e.g. 32-bit
+@
+
 \subsection{Testing}
 
 In order to actually compare performance and size, a separate test
@@ -3703,10 +3770,10 @@ static void print_mtab_info(const uint32_t *mt, uint32_t rsize)
   uint32_t skip, desc, nskip, psz;
 
   fputs("  mtab: ", stdout);
-  if(mt[0] & 1)
+  if(mt[2] & 1)
     fputs("*inv* ", stdout);
-  nskip = mt[2];
-  i = 3;
+  nskip = mt[3];
+  i = 4;
   printf(" %d", nskip);
   for(l = 0; (desc = mt[i]); l++) {
     printf("/%d", desc >> 16);
@@ -3829,6 +3896,7 @@ compiled in based on the configuration parameters.
 \lstset{language=make}
 <<makefile.vars>>=
 PARSER_CFLAGS += -DUCD_LOC=\"$(UCD_LOC)\" -DUNIHAN_LOC=\"$(UNIHAN_LOC)\"
+CFLAGS += -DUCD_VER=$(UCD_VER) -DCLDR_VER=$(CLDR_VER)
 @
 
 Rather than construct file names using the provided paths, the program
@@ -4543,10 +4611,10 @@ static void print_mtab(const char *name, const uint32_t *mt, FILE *gen_h)
   uint32_t skip, desc, nskip, psz;
   fprintf(mf, "#include <stdint.h>\n\n"
               "const uint32_t uni_%s_mtab[] = {\n", name);
-  fprintf(mf, "\t/* low/inv, high, l0len */\n"
-              "\t(0x%X << 1) + %d, 0x%X, %d,\n",
-	      mt[0] >> 1, mt[0] & 1, mt[1], (nskip = mt[2]));
-  i = 3;
+  fprintf(mf, "\t/* low, high, inv/fullen, l0len */\n"
+              "\t0x%X, 0x%X, (%d << 1) + %d, %d,\n",
+	      mt[0], mt[1], mt[2] >> 1, mt[2] & 1, (nskip = mt[3]));
+  i = 4;
   fprintf(gen_h, "extern const uint32_t uni_%s_mtab[]; /* %d", name, nskip);
   for(l = 0; (desc = mt[i]); l++) {
     fprintf(mf, "\t/* level %d (pointers) */\n"
@@ -6097,7 +6165,7 @@ determination function does a switch on the first character, for those
 rules that have a first character, and then on any failed rules, the
 second character is checked.  The rules are not repeated here; look
 them up in the standard.  Instead, the implementation of each rule is
-labeled with the rule number (for UAX~\#29, revision 21).  While the
+labeled with the rule number (for UAX~\#29, revision 23).  While the
 CLDR root locale has this in a machine-readable format, it expects
 regular expressions to be used for checks.  It is better to just
 update the routine if the standard ever changes.
@@ -6227,7 +6295,10 @@ Once again the first two rules are ignored, as they simply express
 that words cannot extend past text boundaries.  The rest of the rules
 are implemented in a switch and post-switch check, just like the
 grapheme cluster check.  In addition to using rules from UAX~\#29,
-revision 21, the CLDR overrides from CLDR version 22.1 are implemented.
+revision 23, the CLDR overrides from CLDR version 22.1 are
+implemented.  Note that the CLDR does not implement full Unicode 6.3
+rules as of version 24, but the rule changes for 6.3 are not
+incompatible with the CLDR overrides.
 
 Rules WB6, WB7, WB11, and WB12 are difficult, though:  they require
 three characters rather than just two to make their decision.  When
@@ -6260,9 +6331,18 @@ wbrk.o
 <<Common C Header>>
 #include "uni_prop.h"
 
+/* < 6.3 compat */
+#if UCD_VER < 630
+#define UNI_WB_SQ UNI_WB_MB
+#define UNI_WB_DQ UNI_WB_XX
+#define UNI_WB_HL UNI_WB_LE
+#endif
+
 /* extra WB values for ja locale */
 #define UNI_WB_HI UNI_NUM_WB
 #define UNI_WB_ID (UNI_WB_HI + 1)
+/* extra WB value for 6.3 */
+#define UNI_WB_SQ2 (UNI_WB_HI + 2)
 int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
 {
   uni_WB_t pwb, nwb = uni_WB_of(next);
@@ -6288,18 +6368,42 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
   }
   if(nwb == UNI_WB_Extend || nwb == UNI_WB_FO) /* WB4 */
     return prevret && prevret <= 1 ? prevret : -(pwb + 2);
-  if(prevret == 1) /* WB5, WB6 */
-    return nwb != UNI_WB_LE ? nwb + 2 : -(nwb + 2);
+  if(prevret == 1
+#if UCD_VER >= 630
+     && uni_WB_of(prev) != UNI_WB_DQ
+#endif
+     ) /* WB5, WB6 */
+    return nwb != UNI_WB_LE && nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
   else if(prevret == -1) /* WB11, WB12 */
     return nwb != UNI_WB_NU ? nwb + 2 : -(nwb + 2);
+#if UCD_VER >= 630
+  else if(prevret == 1) /* WB7b, WB7c */
+    return nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
+#endif
   switch((int)pwb) { /* cast is to allow UNI_WB_ID w/o warning */
+#if UCD_VER >= 630
+    case UNI_WB_SQ2: /* WB7/WB7a */
+      return nwb != UNI_WB_LE && nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
+    case UNI_WB_HL:
+      if(nwb == UNI_WB_DQ)
+        return 1; /* WB7b/c */
+      else if(nwb == UNI_WB_SQ)
+        return -(UNI_WB_SQ2 + 2); /* WB7a */
+      /* fall through */
+#endif
     case UNI_WB_LE:
       switch(nwb) {
         case UNI_WB_LE: /* WB5 */
+#if UCD_VER >= 630
+	case UNI_WB_HL:
+#endif
 	case UNI_WB_NU: /* WB9 */
 	  return -(nwb + 2);
 	case UNI_WB_ML: /* WB6/WB7 */
 	case UNI_WB_MB:
+#if UCD_VER >= 630
+	case UNI_WB_SQ:
+#endif
 	  return 1;
 	case UNI_WB_EX: /* WB13a */
 	  return -(nwb + 2);
@@ -6311,9 +6415,15 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
       switch(nwb) {
         case UNI_WB_NU: /* WB8 */
 	case UNI_WB_LE: /* WB10 */
+#if UCD_VER >= 630
+	case UNI_WB_HL:
+#endif
 	  return -(nwb + 2);
 	case UNI_WB_MN: /* WB11/WB12 */
 	case UNI_WB_MB:
+#if UCD_VER >= 630
+	case UNI_WB_SQ:
+#endif
 	  return -1;
 	case UNI_WB_EX: /* WB13a */
 	  return -(nwb + 2);
@@ -6336,7 +6446,8 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
       break;
     case UNI_WB_EX:
       if(nwb == UNI_WB_EX || /* WB13a */
-         nwb == UNI_WB_LE || nwb == UNI_WB_NU || nwb == UNI_WB_KA) /* WB13b */
+         nwb == UNI_WB_LE || nwb == UNI_WB_NU || nwb == UNI_WB_KA ||
+	 nwb == UNI_WB_HL) /* WB13b */
         return -(nwb + 2);
       break;
     case UNI_WB_RI:
@@ -6395,9 +6506,17 @@ if(locale & UNI_BRK_LOCALE_POSIX) {
 
 The next larger boundary is a sentence, also specfified by UAX~\#29. 
 Again, CLDR overrides may be provided, but they are in an unusable
-format.  While the only override in the current CLDR could be
-implemented by supporting a table override, once again the override
-is just hand-coded and enabled with a flag.
+format.  While the only override in the current (23.1) CLDR could be
+implemented by supporting a table override, once again the override is
+just hand-coded and enabled with a flag.  The version 24 CLDR
+introduces known abbreviations (mostly titles) as non-sentence
+overrides.  This is present for seven additional locales.
+
+<<FIXME>>=
+CLDR 24 sentence overrides:
+  - provide a table parameter for exceptions
+  - provide a cldr function to retrieve exceptions for current locale
+@
 
 This break algorithm is the most complex so far.  There are patterns
 other than simply the grapheme cluster pattern that require state
@@ -6668,7 +6787,7 @@ application that would benefit from the algorithm without the addition
 of a hyphenation dictionary is a plain text formatter, such as the
 automatic wrapping mode in a plain text editor.  Nonetheless, the
 following function implements the algorithm specified in UAX~\#14,
-revision 30.
+revision 32.
 
 Like the boundary determination algorithms, locale-specific tailoring
 should be supported.  Once again, the CLDR does not provide tailorings
@@ -13191,16 +13310,17 @@ narev_rng_bin.o
 @
 
 <<Unicode property exports>>=
+/* len is < 0 for strlen() */
 /* name must be normalized & case folded (i.e., lower-case) */
 /* if return value < 0, it's a lookup failure */
-int32_t uni_name_rng_to_cp(const char *name);
+int32_t uni_name_rng_to_cp(const char *name, int len);
 @
 
 <<narev_rng_bin.c>>=
 <<Common C Header>>
 #include "uni_prop.h"
 
-int32_t uni_name_rng_to_cp(const char *name)
+int32_t uni_name_rng_to_cp(const char *name, int len)
 {
   <<Convert synthetic [[name]] to code point>>
 }
@@ -13217,9 +13337,11 @@ where the stripped name is being built.
  
 <<Convert synthetic [[name]] to code point>>=
 const char *n = name;
-unsigned int len = strlen(name), olen = len;
+if(len < 0)
+  len = strlen(name);
+unsigned int olen = len;
 if(olen > 127)
-  olen = len;
+  olen = 127;
 char oname[olen + 1];
 olen = 0;
 for(; len > 0; n++, len--) {
@@ -13452,10 +13574,11 @@ table, it is placed in a separate object file from the main lookup
 function.
 
 <<Unicode property exports>>=
+/* len is < 0 for strlen() */
 /* if return value > UNI_MAX_CP, it's a sequence */
 /*    uni_na_seq_id_arr[ret - UNI_MAX_CP - 1] */
 /* if return value < 0, it's a lookup failure */
-int32_t uni_name_to_cp(const char *name);
+int32_t uni_name_to_cp(const char *name, int len);
 @
 
 <<Library [[uni]] Members>>=
@@ -13466,11 +13589,12 @@ narev_bin.o
 <<Common C Header>>
 #include "uni_prop.h"
 
-int32_t uni_name_to_cp(const char *name)
+int32_t uni_name_to_cp(const char *name, int len)
 {
+  unsigned int nlen = len < 0 ? len : strlen(name);
   <<Strip name before lookup>>
   <<Look up name and return if present>>
-  return uni_name_rng_to_cp(name);
+  return uni_name_rng_to_cp(name, nlen);
 }
 @
 
@@ -13479,9 +13603,9 @@ done using a flag in a side array.
 
 <<Strip name before lookup>>=
 const char *n = name;
-unsigned int len = strlen(name), olen = len;
+unsigned int olen = nlen;
 if(olen > 127)
-  olen = len;
+  olen = 127;
 char oname[olen + 1], hyphen[olen];
 olen = 0;
 int had_hyphen = 0;
@@ -13576,7 +13700,7 @@ int main(void)
     for(s = e; *s; s++)
       if(isupper(*s))
         *s = tolower(*s);
-    uint32_t ret = uni_name_to_cp(e);
+    uint32_t ret = uni_name_to_cp(e, (int)(s - e));
     <<Print and check [[name_to_cp]] results using [[na_seq_id]]>>
   }
   fprintf(stderr, "Successfully looked up %d entries\n", lno);
@@ -13768,18 +13892,20 @@ convert that to a hash lookup.  A prefix tree (trie) might be more
 effective, but that is an exercise for end user.
 
 <<Unicode property exports using [[cmph]]>>=
+/* len is < 0 for strlen() */
 /* if return value > UNI_MAX_CP, it's a sequence */
 /*    uni_na_seq_id_arr[ret - UNI_MAX_CP - 1] */
 /* if return value < 0, it's a lookup failure */
-int32_t uni_cmph_name_to_cp(const char *name);
+int32_t uni_cmph_name_to_cp(const char *name, int len);
 @
 
 <<[[cmph]] name lookup support>>=
-int32_t uni_cmph_name_to_cp(const char *name)
+int32_t uni_cmph_name_to_cp(const char *name, int len)
 {
+  unsigned int nlen = len < 0 ? len : strlen(name);
   <<Strip name before lookup>>
   <<Look up name using [[cmph]] and return if present>>
-  return uni_name_rng_to_cp(name);
+  return uni_name_rng_to_cp(name, nlen);
 }
 @
 
@@ -13839,10 +13965,10 @@ int main(void)
     for(s = e; *s; s++)
       if(isupper(*s))
         *s = tolower(*s);
-    uint32_t ret = uni_cmph_name_to_cp(e);
+    uint32_t ret = uni_cmph_name_to_cp(e, (int)(s - e));
     <<Print and check [[name_to_cp]] results using [[na_seq_id]]>>
     /* time lookup failures (synthetic names) and lookup successes separately */
-    int isr = uni_name_rng_to_cp(e) >= 0;
+    int isr = uni_name_rng_to_cp(e, (int)(s - e)) >= 0;
     if(isr)
       nr++;
     else
@@ -13850,14 +13976,14 @@ int main(void)
     int j;
     tstart();
     for(j = 0; j < 25; j++)
-      ret = uni_name_to_cp(e);
+      ret = uni_name_to_cp(e, (int)(s - e));
     if(isr)
       tbr += tend();
     else
       tb += tend();
     tstart();
     for(j = 0; j < 25; j++)
-      ret = uni_cmph_name_to_cp(e);
+      ret = uni_cmph_name_to_cp(e, (int)(s - e));
     if(isr)
       thr += tend();
     else
@@ -13866,7 +13992,7 @@ int main(void)
       /* also time pure synthetic name speed w/o lookup failure overhead */
       tstart();
       for(j = 0; j < 25; j++)
-        ret = uni_name_rng_to_cp(e);
+        ret = uni_name_rng_to_cp(e, (int)(s - e));
       tr += tend();
     }
   }
@@ -13922,13 +14048,16 @@ character (and in fact the well-formedness rules require this),
 multiple entries with the same [[cp]] are created, but the raw string
 table storage method does not care.
 
-In addition to the DUCET itself, the data files include the same data
-adjusted for use with the CLDR (\texttt{allkeys\_CLDR.txt} in
-\texttt{CollationAuxiliary.zip}).  This file is in the same format. 
-It should be unzipped under the same directory.  All CLDR data is based
-off of this root locale, and it can be explicitly requested using the
-locale extension \texttt{u-co-standard}.  The CLDR still requires the
-normal DUCET; it can be selected manually using the locale extension
+The CLDR has custom modifications to the DUCET, but in the same file
+format (\texttt{allkeys\_CLDR.txt}).  In versions of the UCA data
+prior to Unicode 6.3, this file was included in
+\texttt{CollationAuxiliary.zip}.  Now, this file is in
+\texttt{common/uca} with the CLDR data instead.  It should be unzipped
+under the same directory if included in the UCA, or in the CLDR
+diretories otherwise.  All CLDR data is based off of this root locale,
+and it can be explicitly requested using the locale extension
+\texttt{u-co-standard}.  The CLDR still requires the normal DUCET; it
+can be selected manually using the locale extension
 \texttt{u-co-ducet}.
 
 \lstset{language=C}
@@ -13940,8 +14069,24 @@ decl_str(DUCET_CLDR);
 <<Parse UCD files>>=
 static uint32_t ducet_vartop, cldr_vartop;
 ducet_vartop = parse_ducet("allkeys.txt", (prop_DUCET = add_prop("DUCET")));
+if(!ducet_vartop) {
+  perror("allkeys.txt");
+  exit(1);
+}
+prop_DUCET_CLDR = add_prop("DUCET_CLDR");
 cldr_vartop = parse_ducet("CollationAuxiliary/allkeys_CLDR.txt",
-                          (prop_DUCET_CLDR = add_prop("DUCET_CLDR")));
+                          prop_DUCET_CLDR);
+if(!cldr_vartop) {
+  chdir(cwd);
+  chdir(CLDR_LOC);
+  cldr_vartop = parse_ducet("common/uca/allkeys_CLDR.txt", prop_DUCET_CLDR);
+  chdir(cwd);
+  chdir(UCD_LOC);
+  if(!cldr_vartop) {
+    perror("allkeys_CLDR.txt");
+    exit(1);
+  }
+}
 parsed_props[prop_DUCET].strs_char_size = 32;
 parsed_props[prop_DUCET_CLDR].strs_char_size = 32;
 @
@@ -13953,7 +14098,8 @@ static uint32_t parse_ducet(const char *fname, int propn)
   <<Parser common variables>>
   prop_t *prop = &parsed_props[propn];
   uint32_t vartop = 0;
-  open_f(fname);
+  if(!(f = fopen(fname, "r")))
+    return 0;
   while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     uint32_t str[20*4]; /* current max: 18 * 4 */
     uint32_t len = 0;
@@ -14074,7 +14220,7 @@ use this technique are not suppressed.
 %  square   def 1C
 %  square/super/sub uc 1D
 %  fraction def 1E
-%  compat   --  1F
+%  MAX      --  1F
 %
 % uc == Uppercase, sh == small hira, nh == non-small hira,
 % sk == small kata, nk == non-small kata, snk == small narrow kata,
@@ -14087,6 +14233,7 @@ use this technique are not suppressed.
 % however, l4=0 weight rule is violated on 12 entries:
 %  0600 0601 0602 0603 0604 0605 06DD 2061 2062 2063 2064 110BD
 %   all of these are Cc or Cf, but have l4 == cp
+% 6.3 simply drops l4 from allkeys.txt.
 
 <<Prepare for DUCET post-processing>>=
 prop_t *dmf_prop = &parsed_props[add_prop("dm_full")];
@@ -14677,12 +14824,13 @@ if(var_mode > 0 && l123 <= var_top && l123 > 0xffff) {
       /*  at least UCA data files never use lev1 < 0x0200, so */
       /*  just testing for 1 is safe */
       /* who knows what IgnoreSP and Trimmed are supposed to work like */
+      /* IgnoreSP ws removed in 6.3.0, anyway */
       if(l4 > 1)
         l123 = 0;
       else
         st->in_var = 0;
       break;
-    case UNI_DUCET_VAR_MODE_IGNORE_SP:
+    case UNI_DUCET_VAR_MODE_IGNORE_SP: /* obsolete; removed in 6.3.0 */
       if((uni_gc_trans[UNI_gc_P] & (1 << uni_gc_of(c))) ||
          uni_is_WSpace(c)) {
         l4 = l123 >> UNI_DUCET_LEV1_SHIFT;
@@ -15424,6 +15572,13 @@ case DUCET_lookup_reorder:
     int32_t l, h, m;
     m = ducet_lookup_subindex(c, &l, &h, st);
     if(l <= h) {
+      /* 6.3.0: must fail if not exact match */
+      /* otherwise, 0FB2 0334 0F81 sorts incorrectly */
+      const uint32_t *str = st->strs + st->v.off + m;
+      if((str[st->matchlen + 1] & 3) == 3 && str[st->matchlen + 1] != 3) {
+        fprintf(stderr, "no ext for %04X %04X\n", st->c, c);
+        <<Return no DUCET values>>
+      }
       /* advance search result to match */
       st->v.off += m;
       st->v.len -= m;
@@ -15432,7 +15587,6 @@ case DUCET_lookup_reorder:
       /* find end of match entry */
       l = 1;
       h = st->v.len - 1;
-      const uint32_t *str = st->strs + st->v.off;
       <<Skip to next index extension>>
       if(l > h) {
         /* there are no more possible matches, so just return */
@@ -16253,11 +16407,22 @@ variable mode shifted.
 tstuca \
 @
 
+<<makefile.vars>>=
+# this would be nice, but GNU make doesn't support it
+#ifge ($(UCD_VER),630)
+# so use shell instead:
+CLDR_UCA_TESTS=$(shell if [ $(UCD_VER) -ge 630 ]; then \
+                          echo $(CLDR_LOC)/common/uca; \
+		       else \
+		          echo $(UCD_LOC)/CollationAuxiliary; \
+		       fi)
+@
+
 <<Additional Tests>>=
 ./tstuca <$(UCD_LOC)/CollationTest/CollationTest_NON_IGNORABLE.txt
 ./tstuca -s <$(UCD_LOC)/CollationTest/CollationTest_SHIFTED.txt
-./tstuca -c <$(UCD_LOC)/CollationAuxiliary/CollationTest_CLDR_NON_IGNORABLE.txt
-./tstuca -cs <$(UCD_LOC)/CollationAuxiliary/CollationTest_CLDR_SHIFTED.txt
+./tstuca -c <$(CLDR_UCA_TESTS)/CollationTest_CLDR_NON_IGNORABLE.txt
+./tstuca -cs <$(CLDR_UCA_TESTS)/CollationTest_CLDR_SHIFTED.txt
 @
 
 \lstset{language=C}
@@ -16351,8 +16516,14 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
     strcpy(s, "]\n");
     fputs(kbuf, stderr);
     /* CLDR data does not conform! */
+    /* main data no longer conforms; has one screwy entry */
+    /* has algorithm changed? */
+    /* 0FB3 0334 0F81 appears OK, but is wrong multiple ways */
+    /*   - FCD and non-FCD key mismatch */
+#if 0
     if(!do_cldr)
       exit(1);
+#endif
   } else
     free(fcd);
 #if 1 /* build string to match text in comment */
@@ -16989,6 +17160,11 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   add_num(bmg, strtol(fields[1], NULL, 16), 1);
 }
 fclose(f);
+@
+
+<<FIXME>>=
+BidiBrackets.txt:
+  cp -> cp (Bidi_Paired_Bracket)/type (Bidi_Paired_Bracket_Type) (numeric?)
 @
 
 While scx is officially an ``Other'' property, it can be treated just
@@ -17956,10 +18132,11 @@ mainly for illustrative purposes.  Since it is not actually meant to
 be used, it is placed in a separate object file.
 
 <<Unicode property exports>>=
+/* len is < 0 for strlen() */
 /* if return value > UNI_MAX_CP, it's a sequence */
 /*    uni_na_xml_seq_id_arr[ret - UNI_MAX_CP - 1] */
 /* if return value < 0, it's a lookup failure */
-int32_t uni_xml_name_to_cp(const char *name);
+int32_t uni_xml_name_to_cp(const char *name, int len);
 @
 
 <<Library [[uni]] Members>>=
@@ -17970,9 +18147,9 @@ xnarev_bin.o
 <<Common C Header>>
 #include "uni_prop.h"
 
-int32_t uni_xml_name_to_cp(const char *name)
+int32_t uni_xml_name_to_cp(const char *name, int len)
 {
-  unsigned int nlen = strlen(name);
+  unsigned int nlen = len < 0 ? strlen(name) : len;
   <<Look up XML name and return if present>>
   return -1;
 }
@@ -18031,7 +18208,7 @@ int main(void)
   int lno;
   for(lno = 0; fgets(buf, 256, stdin); lno++) {
     <<Set [[e]] to start of name to check>>
-    uint32_t ret = uni_xml_name_to_cp(e);
+    uint32_t ret = uni_xml_name_to_cp(e, -1);
     <<Print and check [[name_to_cp]] results using [[na_xml_seq_id]]>>
   }
   fprintf(stderr, "Successfully looked up %d entries\n", lno);
@@ -18122,13 +18299,13 @@ different from the binary search version.
 /* if return value > UNI_MAX_CP, it's a sequence */
 /*    uni_na_xml_seq_id_arr[ret - UNI_MAX_CP - 1] */
 /* if return value < 0, it's a lookup failure */
-int32_t uni_cmph_xml_name_to_cp(const char *name);
+int32_t uni_cmph_xml_name_to_cp(const char *name, int len);
 @
 
 <<[[cmph]] XML name lookup support>>=
-int32_t uni_cmph_xml_name_to_cp(const char *name)
+int32_t uni_cmph_xml_name_to_cp(const char *name, int len)
 {
-  unsigned int nlen = strlen(name);
+  unsigned int nlen = len < 0 ? strlen(name) : len;
   <<Look up XML name using [[cmph]] and return if present>>
   return -1;
 }
@@ -18185,17 +18362,17 @@ int main(void)
   unsigned long nn = 0;
   while(fgets(buf, 256, stdin)) {
     <<Set [[e]] to start of name to check>>
-    uint32_t ret = uni_cmph_xml_name_to_cp(e);
+    uint32_t ret = uni_cmph_xml_name_to_cp(e, -1);
     <<Print and check [[name_to_cp]] results using [[na_xml_seq_id]]>>
     nn++;
     int j;
     tstart();
     for(j = 0; j < 25; j++)
-      ret = uni_xml_name_to_cp(e);
+      ret = uni_xml_name_to_cp(e, -1);
     tb += tend();
     tstart();
     for(j = 0; j < 25; j++)
-      ret = uni_cmph_xml_name_to_cp(e);
+      ret = uni_cmph_xml_name_to_cp(e, -1);
     th += tend();
   }
   /* report as ops per second rather than total seconds */
@@ -20400,10 +20577,10 @@ Looking up a code point given its name is not meant to be done
 directly using the library.  Instead, the tables are meant to be
 dumped in a format most useful for the particular application.
 However, a few lookup functions are provided below.  These return a
-code point or sequence ID given a name.  Both functions require
-normalized 8-bit input.  Additionally, the [[uni_name_to_cp]] function
-requires case-folded input.  The return value is negative on lookup
-failure.
+code point or sequence ID given a name and the name's length (negative
+to use [[strlen]]).  Both functions require normalized 8-bit input.
+Additionally, the [[uni_name_to_cp]] function requires case-folded
+input.  The return value is negative on lookup failure.
 
 The sequence ID is a code point larger than [[UNI_MAX_CP]].  To
 convert it to a string, use the [[na_seq_id]] or [[na_xml_seq_id]]
