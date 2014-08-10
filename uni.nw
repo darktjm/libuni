@@ -13767,8 +13767,14 @@ hash table would need to be stored somewhere and be parsed every time
 the hash table is first used in a program.  I have made changes to
 [[cmph]] to allow generation of C code instead%
 \footnote{\url{http://sourceforge.net/tracker/?func=detail\&aid=3590339\&group_id=126608\&atid=706189}
-and \url{http://sourceforge.net/u/darktjm/cmph}}%
-.
+and \url{http://sourceforge.net/u/darktjm/cmph}}% .  While these
+changes were submitted upstream, they were rejected by the authors as
+``not being general enough.''   Their recommended workaround of
+encoding the file as a static array is too much trouble (because there
+is no function to load such an array, you'd have to write a program
+which loads the file, converts it to a packed blob, and use that
+instead, which is slower to use at run-time as well).  The following
+assumes you use my method instead.
 
 The [[cmph]] support is optional, and must be enabled with a
 configuration option.  Since using it requires linking to its library
@@ -17247,6 +17253,11 @@ providence annotations.  The annotations could simply be dropped and
 those properties added without issue (after all, static linking
 ensures their removal if unused), but for now, they are left out.
 
+Version 7 has moved the cjkCompatibilityVariant property to the
+[[Unihan_IRGSources]] file.  Until the standard is published, I will
+not look further into why, but instead read from both files, and
+whichever has the property will fill in the values.
+
 \lstset{language=C}
 <<UCD parser local definitions>>=
 #define add_hstr(n, v) do { \
@@ -17281,6 +17292,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   else if(!strcmp(fields[1], "kSimplifiedVariant"))
     add_hstr(cjkSimplifiedVariant, fields[2]);
   else if(!strcmp(fields[1], "kCompatibilityVariant"))
+    add_hstr(cjkCompatibilityVariant, fields[2]);
+}
+open_f("Unihan_IRGSources.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse Unihan cp>>
+  if(!strcmp(fields[1], "kCompatibilityVariant"))
     add_hstr(cjkCompatibilityVariant, fields[2]);
 }
 @
