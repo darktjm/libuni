@@ -120,16 +120,16 @@ information, but again, it is of more limited scope.  To the most
 part, the ISO 10646 standard is completely ignored from this point on.
 
 The Unicode consortium also provides a set of rules for interpreting
-characters in different locales.  ISO also has standards to this
-effect.  Both sets of standards and their data files are freely
+characters in different locales.  ISO has standards to this effect, as
+well.  Both sets of standards and their data files are freely
 available.  However, once again, the ISO data is ignored in favor of
 the Unicode data.  The Unicode locale information is available in
 electronically processable form in the Unicode Common Locale Data
 Repository (CLDR).%
 \footnote{\url{http://cldr.unicode.org},
 \url{http://unicode.org/Public/cldr/}}
-This library provides selected parts of the CLDR data to C programs as
-well.
+In addition to the regular UCD data, this library also provides access
+to selected parts of the CLDR data to C programs.
 
 % End-doc Introduction
 <<uni_all.h>>=
@@ -170,14 +170,17 @@ currently ignored.
 
 <<FIXME>>=
 Provide function to return UCD/CLDR version numbers (and maybe UAX
-revisions used for algorithms)
+revisions used for algorithms).
+Extract CLDR version from any identity section: <version cldrVersion="...">
+verify that Unicode version matches unicodeVersion tag of
+supplementalData's version element
 @
 
 % End-doc Introduction
 \lstset{language=make}
 <<makefile.config>>=
 # The version of the UCD/Unihan data: major*100+minor*10+sub
-UCD_VER = 630
+UCD_VER = 700
 # The location of the Unicode Character Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/UCD.zip
 UCD_LOC = /usr/share/unicode-data
@@ -185,7 +188,7 @@ UCD_LOC = /usr/share/unicode-data
 # http://www.unicode.org/Public/zipped/<version>/Unihan.zip
 UNIHAN_LOC = $(UCD_LOC)
 # The version of the CLDR data: major*10+minor
-CLDR_VER=221
+CLDR_VER=270
 # The location of the Unicode Common Locale Data Repository (unzipped)
 # http://www.unicode.org/Public/cldr/latest/core.zip
 CLDR_LOC = /usr/share/unicode-data/cldr
@@ -2731,7 +2734,18 @@ other hand, their straight lookup performance benefit over ranged
 tables is three-fold or more for many Unicode tables, without a need
 to do any special optimizations.
 
-There are probably very efficient algorithms to generate efficient
+<<FIXME>>=
+Make them more mergable.  Plan: align booleans' ranges to
+multiples of 32 (so low-level chunks don't need shifting for merging),
+store a checksum (CRC-32 or simple shifting sum) in a side table,
+along with a duplicate count (maybe 24 bits of cksum plus 8 bits of
+count).  Never bother resizing lowest level; use largest chunk size
+instead.  Likewise for each level, maybe.  Provide single merging
+function which takes 2 tables and a bitop.  Similar function also for
+range tables, maybe.
+@
+
+There are probably very efficient algorithms to generate good
 multi-level tables, but I am not aware of them.  The optimal number of
 levels and level size is difficult to find, but a pretty good number
 can be found by taking each level in turn, and finding the size which
@@ -2879,7 +2893,7 @@ array, instead treating them as zeroes.
 
 <<FIXME>>=
 Maybe add hash to block before sort for dup detect; maybe also store
-hash with mtab.
+hash with mtab.  See note above about making this more mergable.
 @
 
 <<Unsaved multi-level table information>>=
@@ -3896,7 +3910,7 @@ compiled in based on the configuration parameters.
 \lstset{language=make}
 <<makefile.vars>>=
 PARSER_CFLAGS += -DUCD_LOC=\"$(UCD_LOC)\" -DUNIHAN_LOC=\"$(UNIHAN_LOC)\"
-CFLAGS += -DUCD_VER=$(UCD_VER) -DCLDR_VER=$(CLDR_VER)
+EXTRA_CFLAGS += -DUCD_VER=$(UCD_VER) -DCLDR_VER=$(CLDR_VER)
 @
 
 Rather than construct file names using the provided paths, the program
@@ -5485,8 +5499,10 @@ for(i = 0; i < num_prop_ptrs; i++)
                                    i < num_prop_ptrs - 1 ? "," : "");
 fputs("};\n", paf);
 fclose(paf);
-fprintf(gen_h, "#define uni_propdesc_valueof_approx_len %d /* %d lookups max */\n",
-	       num_prop_ptrs, lg2(num_prop_ptrs + 1));
+fprintf(gen_h, "#define uni_propdesc_valueof_approx_len %d /* %d lookups max */\n"
+               "#define uni_propdesc_lookup(n) uni_x_valueof_approx(n, "
+                      "uni_propdesc_valueof_approx, %d, ~0)\n",
+	       num_prop_ptrs, lg2(num_prop_ptrs + 1), num_prop_ptrs);
 @
 
 Now that the aliases have been taken care of, it's time to read in the
@@ -6513,7 +6529,7 @@ introduces known abbreviations (mostly titles) as non-sentence
 overrides.  This is present for seven additional locales.
 
 <<FIXME>>=
-CLDR 24 sentence overrides:
+CLDR 24+ sentence overrides:
   - provide a table parameter for exceptions
   - provide a cldr function to retrieve exceptions for current locale
 @
@@ -6796,7 +6812,12 @@ flags. Some of the standard-recommended tailorings involve the use of
 hyphenation dictionaries, which will likely never be implemented here.
 In fact, breaking using a hyphenation dictionary would require use of
 the same dictionary by the user as well, as Unicode provides no
-mechanism for \TeX{}-like three-parameter soft hyphens.
+mechanism for \TeX{}-like three-parameter soft hyphens.  The CLDR
+provides no real rule changes to date, although version 27 appears to
+have introduced some rules for some Chinese locales; I am unsure at
+present what these rules are even supposed to mean (one rule appears
+to do nothing, and the other appears to include
+[[Conditional_Japanese_Starter]] with [[Ideographic]] characters).
 
 This algorithm is much more complex than the boundary determination
 algorithms.  Like the sentence break detector, this function uses a
@@ -7547,6 +7568,10 @@ additional interpretation for the radical numbers returned by this
 property.  Since this file's values have no property label, I will not
 provide them as a property for now.
 
+Version 7 has moved the cjkRSUnicode property to the
+[[Unihan_IRGSources]] file.  For now, I will read from both files, and
+whichever has the property will fill in the values.
+
 <<UCD parser local functions>>=
 static void split_line_tab(char *buf)
 {
@@ -7603,6 +7628,35 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     }
     add_num(cjkRSUnicode, num, denom);
   }
+}
+fclose(f);
+/* 7.0 moved this field */
+open_f("Unihan_IRGSources.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse Unihan cp>>
+  if(!strcmp(fields[1], "kRSUnicode")) {
+    /* due to complexity of this field, the num/denom is interpreted */
+    /* differently: */
+    /* denom is number after .; if after !., then it is negated */
+    /* num is 3 byte fields; lowest field is left of . or !. */
+    /* if there are two values, then the 2nd value is in the upper bytes */
+    int32_t num;
+    uint8_t denom;
+    num = strtol(fields[2], &s, 10);
+    if(*s == '!')
+      denom = -strtol(s + 2, &s, 10);
+    else
+      denom = strtol(s + 1, &s, 10);
+    if(*s) {
+      num |= strtol(s, &s, 10) << 8;
+      if(*s == '!')
+        num |= -strtol(s + 2, &s, 10) << 16;
+      else
+        num |= strtol(s + 1, &s, 10) << 16;
+    }
+    add_num(cjkRSUnicode, num, denom);
+  }
+  <<Further processing of [[IRGSources]]>>
 }
 fclose(f);
 @
@@ -12693,6 +12747,7 @@ int main(void)
   unsigned int buf_len = 0, clen;
   int has_more, aliases;
   for(cp = 0; cp <= UNI_MAX_CP + 1; cp++) {
+    aliases = 0;
     clen = uni_cp_to_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
     while(!clen && aliases > 0)
       clen = uni_cp_to_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
@@ -12763,7 +12818,7 @@ that lookups should ignore case, whitespace, underscore, and medial
 hyphens except in U+1180.  There are 15 names with non-medial hyphens,
 but only two are actually ambiguous.  UTS18 (Regular Expressions),
 section 2.5.1 ("Individually Named Characters") acknowledges this by
-requiring hyphen checkss only for U+1180, U+0F60, and U+0FB0.  While
+requiring hyphen checks only for U+1180, U+0F60, and U+0FB0.  While
 the algorithm I use violates the original loose matching algorithm, I
 will go ahead and only restrict those three.  The code actually
 derives this list by checking for duplicates, so it is guaranteed to
@@ -12807,7 +12862,7 @@ for(i = 0; i < revwords.len; i++) {
 }
 @
 
-The main name table is then coverted, ignoring word pointers and
+The main name table is then converted, ignoring word pointers and
 otherwise stripping spaces and hyphens and converting to lower-case.
 While this does introduce the duplicates mentioned earlier, they are
 not processed until the whole table has been filled.
@@ -13895,7 +13950,7 @@ The lookup function itself is identical to the one using binary
 searching, except for the primary name lookup.  That means that binary
 searching is still used for the range lookups; there is no easy way to
 convert that to a hash lookup.  A prefix tree (trie) might be more
-effective, but that is an exercise for end user.
+effective, but that is left as an exercise for the end user.
 
 <<Unicode property exports using [[cmph]]>>=
 /* len is < 0 for strlen() */
@@ -14194,7 +14249,7 @@ policy.  It uses compatibility decomposition instead of canonical
 decomposition, and replaces level 3 with a translation of the dt
 property value.  The amount of additional work at run-time isn't that
 great, and it might reduce the table a lot, but it affects many
-characterrs even after NFD decomposition, so for now, entries which
+characters even after NFD decomposition, so for now, entries which
 use this technique are not suppressed.
 
 % tertiary weight table (note: can is impossible):
@@ -17254,8 +17309,7 @@ those properties added without issue (after all, static linking
 ensures their removal if unused), but for now, they are left out.
 
 Version 7 has moved the cjkCompatibilityVariant property to the
-[[Unihan_IRGSources]] file.  Until the standard is published, I will
-not look further into why, but instead read from both files, and
+[[Unihan_IRGSources]] file.  Again, I just read from both files, and
 whichever has the property will fill in the values.
 
 \lstset{language=C}
@@ -17294,12 +17348,11 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   else if(!strcmp(fields[1], "kCompatibilityVariant"))
     add_hstr(cjkCompatibilityVariant, fields[2]);
 }
-open_f("Unihan_IRGSources.txt");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  <<Parse Unihan cp>>
-  if(!strcmp(fields[1], "kCompatibilityVariant"))
-    add_hstr(cjkCompatibilityVariant, fields[2]);
-}
+@
+
+<<Further processing of [[IRGSources]]>>=
+if(!strcmp(fields[1], "kCompatibilityVariant"))
+  add_hstr(cjkCompatibilityVariant, fields[2]);
 @
 
 <<Dump character information as C code>>=
@@ -17463,11 +17516,11 @@ Unihan_IRGSources.txt: kIRG_* (not sure how to encode)
 A number of data files outside of the UCD are encoded in XML.  These
 include in particular the CLDR files.  One way to deal with this would
 be to turn the files into files more like the rest of the UCD using
-CLDR.  In fact, an earlier version of this library did just that for
+XSLT.  In fact, an earlier version of this library did just that for
 the single XML file it supported.  The CLDR has many more files,
 though, and not all are in the same format, so something else needs to
 be done.  Since everything else is being parsed in parse-ucd,
-parse-ucd will read and parse the XML files directly, usoing libxml2.%
+parse-ucd will read and parse the XML files directly, using libxml2.%
 \footnote{\url{http://xmlsoft.org/}}
 For maximum simplicity, each file is simply read in using the
 document-at-once
@@ -17948,6 +18001,7 @@ int main(void)
   unsigned int buf_len = 0, clen;
   int has_more, aliases;
   for(cp = 0; cp <= UNI_MAX_CP + 1; cp++) {
+    aliases = 0;
     clen = uni_cp_to_xml_name(&cp, 1, &has_more, &aliases, &buf, 0, &buf_len);
     if(!clen)
       continue;
@@ -18448,8 +18502,9 @@ Like all data formats, XML needs supplementary documentation.  The
 CLDR has such documentation, but it is of medium-to-poor quality.}%
 .  Much of its functionality also has dubious value for general
 projects.  As such, the only CLDR data provided is that which supports
-localization of UCD data, plus one property that is required for
-regular expressions.
+localization of UCD data (such as breaking and collation rules that
+are supposed to be localized), plus one property that is required for
+regular expressions (the exemplar character set).
 
 The first thing necessary for localization is to determine what locale
 is being used.  The locale name consists of a language identifier,
@@ -18494,7 +18549,7 @@ xmlFreeDoc(doc);
 
 The data we're looking for is under the validity tag.  Each set is
 listed as a ``variable'' whose value is the whitespace-separated list
-of names.  Technically, they definition in [[attributeValues]] is
+of names.  Technically, their definition in [[attributeValues]] is
 used, but for those which have large lists, the value is just an
 expansion of one of these variables.  In fact, one could make an
 argument that all of the variables of type choice are useful to add as
@@ -19163,11 +19218,7 @@ else if(xml_isname(n, "collations")) {
 
 The main subdirectory contains a number of different common locale
 parameters.  The only one we're interested in is the
-[[characters/exemplarCharacters]] property.%
-\footnote{Maybe [[delimiters/quotation]]* would be useful as well, but
-it isn't covered under my UCD-localization-only mandate.  It appears
-to be supplemental to sentence boundary determination, but it isn't
-really.}
+[[characters/exemplarCharacters]] property.
 
 <<Parse CLDR files>>=
 /* main: "other" rules */
@@ -19205,7 +19256,8 @@ else if(xml_isname(n, "characters")) {
 @
 
 The segmentation exceptions modify the line, paragraph, and word
-breaking rules.
+breaking rules.  However, to the most part, I have hard-coded these
+where appropriate.
 
 <<Parse CLDR files>>=
 /* main: "other" rules */
@@ -19257,6 +19309,7 @@ transforms -> mappings (no real single name for each, though)
   if direction="both"
   can't just encode as table; may be multi-step (e.g. normalize before
   & after).
+  Is this really necessary, though?  It may violate my localized-UCD only rule
 
 crappy "set" notation must be implemented for reading LDML files:
  claims UTS18-L1+RL2.5 "with recommended syntax", but then goes on
