@@ -58,5 +58,5 @@ to the PDF documents, so you don't really need to go get it:
 This is currently my second-largest single noweb source that I have
 yet to abandon (>21k lines, ~360 pages, 48 of which are API docs; >12k
 loc).  Normally I would have split this into multiple documents by
-now, but I don't really see an easy, clean split.  At least it's no
-longer just a (way too long) section in another document.
+now, but I don't really see an easy, clean split.  At least it's not
+just a (way too long) section in another document any more.

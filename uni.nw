@@ -147,8 +147,8 @@ This document does not contain the UCD or CLDR itself; it is expected
 that the user download them manually and place them where they can be
 found.  Some Linux distributions may already provide at least the UCD
 as a package, although the CLDR is probably less common.  This package
-was tested with versions 6.0.0, 6.2.0, and 6.3.0 of the UCD, but the
-file formats are relatively stable and it should work with later
+was tested with versions 6.0.0, 6.2.0, 6.3.0 and 7.0.0 of the UCD, but
+the file formats are relatively stable and it should work with later
 versions as well, other than algorithm changes.  I recommend at least
 version 6.1.0, as that is the first version where the control
 character names were finally made official.  An earlier version of
@@ -168,6 +168,9 @@ set.  The CLDR has nothing which indicates the current version, so
 again, an explicit value must be set.  Note that the CLDR version is
 currently ignored.
 
+% End-doc Introduction
+
+\lstset{language=txt}
 <<FIXME>>=
 Provide function to return UCD/CLDR version numbers (and maybe UAX
 revisions used for algorithms).
@@ -176,7 +179,6 @@ verify that Unicode version matches unicodeVersion tag of
 supplementalData's version element
 @
 
-% End-doc Introduction
 \lstset{language=make}
 <<makefile.config>>=
 # The version of the UCD/Unihan data: major*100+minor*10+sub
@@ -326,8 +328,8 @@ the code point.
 
 \lstset{language=make}
 <<makefile.vars>>=
-# for endian
-EXTRA_CFLAGS += -D_BSD_SOURCE
+# for endian (was _BSD_SOURCE, but recent GNU libc hates that)
+EXTRA_CFLAGS += -D_DEFAULT_SOURCE
 @
 
 \lstset{language=C}
@@ -1883,7 +1885,7 @@ operations.
 \begin{tabular}{lllllcrll}
 $x\in A$&false&false&true&true&&~&\\
 $x\in B$&false&true&false&true&&&\\
-\emph{op}&\multicolumn{4}{c}{$x\in A\textrm{ \emph{op} }B$}&\emph{when}&\multicolumn{2}{l}{\emph{Op \#}}&\emph{Op Name}\\
+\emph{op}&\multicolumn{4}{c}{$x\in A\textrm{ \emph{op} }B$}&\emph{when}&\multicolumn{2}{l}{\emph{\#}}&\emph{Op Name}\\
 $\emptyset$&false&false&false&false&never&0&&NIL\\
 $\alpha$&true&true&true&true&always&1&&ALL\\
 $A$&false&false&true&true&$x\in A$&2&&A\\
@@ -5312,7 +5314,7 @@ fputs("};\n", anf);
 fclose(anf);
 free(approx_array);
 fprintf(gen_h, "#define uni_%s_lookup(n) "
-                   "uni_x_valueof_approx(n, %s_valueof_approx, %d, ~0)\n",
+                   "uni_x_valueof_approx(n, uni_%s_valueof_approx, %d, ~0)\n",
 	       pn, pn, enum_vals_len[i]);
 @
 
@@ -7606,59 +7608,41 @@ decl_num(cjkRSUnicode);
 open_f("Unihan_RadicalStrokeCounts.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse Unihan cp>>
-  if(!strcmp(fields[1], "kRSUnicode")) {
-    /* due to complexity of this field, the num/denom is interpreted */
-    /* differently: */
-    /* denom is number after .; if after !., then it is negated */
-    /* num is 3 byte fields; lowest field is left of . or !. */
-    /* if there are two values, then the 2nd value is in the upper bytes */
-    int32_t num;
-    uint8_t denom;
-    num = strtol(fields[2], &s, 10);
-    if(*s == '!')
-      denom = -strtol(s + 2, &s, 10);
-    else
-      denom = strtol(s + 1, &s, 10);
-    if(*s) {
-      num |= strtol(s, &s, 10) << 8;
-      if(*s == '!')
-        num |= -strtol(s + 2, &s, 10) << 16;
-      else
-        num |= strtol(s + 1, &s, 10) << 16;
-    }
-    add_num(cjkRSUnicode, num, denom);
-  }
+  <<Parse [[kRSUnicode]] property>>
 }
 fclose(f);
-/* 7.0 moved this field */
 open_f("Unihan_IRGSources.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse Unihan cp>>
-  if(!strcmp(fields[1], "kRSUnicode")) {
-    /* due to complexity of this field, the num/denom is interpreted */
-    /* differently: */
-    /* denom is number after .; if after !., then it is negated */
-    /* num is 3 byte fields; lowest field is left of . or !. */
-    /* if there are two values, then the 2nd value is in the upper bytes */
-    int32_t num;
-    uint8_t denom;
-    num = strtol(fields[2], &s, 10);
-    if(*s == '!')
-      denom = -strtol(s + 2, &s, 10);
-    else
-      denom = strtol(s + 1, &s, 10);
-    if(*s) {
-      num |= strtol(s, &s, 10) << 8;
-      if(*s == '!')
-        num |= -strtol(s + 2, &s, 10) << 16;
-      else
-        num |= strtol(s + 1, &s, 10) << 16;
-    }
-    add_num(cjkRSUnicode, num, denom);
-  }
+  <<Parse [[kRSUnicode]] property>>
   <<Further processing of [[IRGSources]]>>
 }
 fclose(f);
+@
+
+<<Parse [[kRSUnicode]] property>>=
+if(!strcmp(fields[1], "kRSUnicode")) {
+  /* due to complexity of this field, the num/denom is interpreted */
+  /* differently: */
+  /* denom is number after .; if after !., then it is negated */
+  /* num is 3 byte fields; lowest field is left of . or !. */
+  /* if there are two values, then the 2nd value is in the upper bytes */
+  int32_t num;
+  uint8_t denom;
+  num = strtol(fields[2], &s, 10);
+  if(*s == '!')
+    denom = -strtol(s + 2, &s, 10);
+  else
+    denom = strtol(s + 1, &s, 10);
+  if(*s) {
+    num |= strtol(s, &s, 10) << 8;
+    if(*s == '!')
+      num |= -strtol(s + 2, &s, 10) << 16;
+    else
+      num |= strtol(s + 1, &s, 10) << 16;
+  }
+  add_num(cjkRSUnicode, num, denom);
+}
 @
 
 <<Parse Unihan cp>>=
@@ -10941,6 +10925,9 @@ if [[iptr]] is [[NULL]], this is done internally.
 <<[[uni_X_dec]] protos for [[NFKD_dec]]>>
 /* NFKC_Casefold assumes NFD has already been run */
 <<[[uni_X_dec]] protos for [[NFKC_Casefold]]>>
+<<[[do_any_dec]][[32]] proto>>;
+<<[[do_any_dec]][[16]] proto>>;
+<<[[do_any_dec]][[8]] proto>>;
 @
 
 <<[[uni_X_dec]] protos for (@type)>>=
@@ -10960,10 +10947,14 @@ int uni_<<@type>><<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
 <<[[do_any_dec]][[8]]>>
 @
 
+<<[[do_any_dec]](@sz) proto>>=
+int uni_do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
+                       <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
+		       const uint32_t *tab, const uint16_t *str)
+@
+
 <<[[do_any_dec]](@sz)>>=
-static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
-                          <<Buffer return parameters for UTF-[[<<@sz>>]]>>,
-                          const uint32_t *tab, const uint16_t *str)
+<<[[do_any_dec]](@sz) proto>>
 {
   int i;
   int rlen = 0;
@@ -11020,7 +11011,7 @@ static int do_any_dec<<@sz>>(const uint<<@sz>>_t *ibuf, unsigned int ilen,
 
 <<[[uni_dec_any]](@sz)>>=
 #define uni_<<@type>><<@sz>>(ibuf, ilen, buf, off, buf_len) \
-  do_any_dec<<@sz>>(ibuf, ilen, buf, off, buf_len, <<@tab>>, <<@str>>)
+  uni_do_any_dec<<@sz>>(ibuf, ilen, buf, off, buf_len, <<@tab>>, <<@str>>)
 @
 
 <<Unicode normalization support exports>>=
@@ -14111,7 +14102,7 @@ table storage method does not care.
 
 The CLDR has custom modifications to the DUCET, but in the same file
 format (\texttt{allkeys\_CLDR.txt}).  In versions of the UCA data
-prior to Unicode 6.3, this file was included in
+prior to Unicode 6.3, this file was included with the standard DUCET in
 \texttt{CollationAuxiliary.zip}.  Now, this file is in
 \texttt{common/uca} with the CLDR data instead.  It should be unzipped
 under the same directory if included in the UCA, or in the CLDR
@@ -20945,6 +20936,14 @@ and decomposition steps, the following functions are similar to the
 % uni_NFKC_Casefold32 prototype
 % uni_NFKC_Casefold16 prototype
 % uni_NFKC_Casefold8 prototype
+
+The functions listed so far in this section use a low-level routine
+which takes the raw decomposition data as additional parameters to
+perform their function.
+
+% uni_do_any_dec32 prototype
+% uni_do_any_dec16 prototype
+% uni_do_any_dec8 prototype
 
 Raw decomposition data (except for NFKC\_CF, which is a normal string
 property) is stored in [[uni_dm_strs]].  This includes the raw dm
