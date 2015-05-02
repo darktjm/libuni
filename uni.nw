@@ -170,7 +170,7 @@ currently ignored.
 
 % End-doc Introduction
 
-\lstset{language=text}
+\lstset{language=txt}
 <<FIXME>>=
 Provide function to return UCD/CLDR version numbers (and maybe UAX
 revisions used for algorithms).
