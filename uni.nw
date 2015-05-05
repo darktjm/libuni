@@ -3705,24 +3705,6 @@ int main(void)
 }
 @
 
-<<POSIX timing support>>=
-#include <sys/resource.h>
-static struct rusage ru;
-
-static void tstart(void)
-{
-  getrusage(RUSAGE_SELF, &ru);
-}
-
-static unsigned long tend(void)
-{
-  struct rusage ru2;
-  getrusage(RUSAGE_SELF, &ru2);
-  return (ru2.ru_utime.tv_sec - ru.ru_utime.tv_sec) * 1000000 +
-            (ru2.ru_utime.tv_usec - ru.ru_utime.tv_usec);
-}
-@
-
 To test a boolean, a function is provided to run the entire test, and
 a call to that function is done in the mainline.  The function is
 passed the range table, the multi-level table, and the name of the
@@ -3755,7 +3737,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     }
     /* check performance */
     int j;
-    unsigned long tr, tt;
+    double tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
@@ -3766,7 +3748,7 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
       for(i = 0; i < 0x110000; i++)
         tres = <<range table result for [[i]]>>;
     tt = tend();
-    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
     /* check conversion */
     uni_chrrng_t *rng2;
     uint32_t nent2;
@@ -3890,6 +3872,7 @@ PARSER_LDFLAGS :=
 <<makefile.config>>=
 # The location of my support library (tjm-ext.nw)
 SUPT_LIB_LOC := ../build
+
 @
 
 <<makefile.rules>>=
@@ -5644,7 +5627,7 @@ static void doit_dat8(const char *name, const uni_chrrng_dat8_t *rng, uint32_t n
     }
     /* check performance */
     int j;
-    unsigned long tr, tt;
+    double tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
@@ -5655,7 +5638,7 @@ static void doit_dat8(const char *name, const uni_chrrng_dat8_t *rng, uint32_t n
       for(i = 0; i < 0x110000; i++)
         tres = <<range table data for [[i]]>>;
     tt = tend();
-    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
 }
 @
 
@@ -7509,7 +7492,7 @@ static void doit_num(const char *name, const uni_chrrng_dat32_t *rng, uint32_t n
     }
     /* check performance */
     int j;
-    unsigned long tr, tt;
+    double tr, tt;
     tstart();
     int32_t mn;
     uint8_t md;
@@ -7522,7 +7505,7 @@ static void doit_num(const char *name, const uni_chrrng_dat32_t *rng, uint32_t n
       for(i = 0; i < 0x110000; i++)
         <<range table val for [[i]]>>;
     tt = tend();
-    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
 }
 @
 
@@ -8681,7 +8664,7 @@ static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
     }
     /* check performance */
     int j;
-    unsigned long tr, tt;
+    double tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
@@ -8692,7 +8675,7 @@ static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
       for(i = 0; i < 0x110000; i++)
         uni_x_str_of(i, mtab);
     tt = tend();
-    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
 }
 @
 
@@ -13914,7 +13897,7 @@ an entirely different library.
 \lstset{language=make}
 <<Library [[uni_cmph]] Members>>=
 cmph_rev_na.o
-cmph_supt.o
+cmph_na_supt.o
 @
 
 <<makefile.config>>=
@@ -13922,7 +13905,7 @@ cmph_supt.o
 #CMPH=cmph
 
 # Generation options for cmph table
-#CMPH_GEN=
+CMPH_GEN=-a bdz_ph -b 3
 
 # Include directory for cmph headers
 #CMPH_INCLUDE=/usr/include
@@ -13933,15 +13916,15 @@ cmph_supt.o
 @
 
 <<makefile.rules>>=
+cmph_in_na.gen: cmph_in_na_gen
+	./cmph_in_na_gen >$@
+
+cmph_in_na.gen.mph: cmph_in_na.gen
+	$(CMPH) -g $(CMPH_GEN) cmph_in_na.gen
+
 ifneq ($(CMPH),)
-cmph_in.gen: cmph_in_gen
-	./cmph_in_gen >$@
-
-cmph_in.gen.mph: cmph_in.gen
-	$(CMPH) -g $(CMPH_GEN) cmph_in.gen
-
-cmph_rev_na.c: cmph_in.gen.mph
-	$(CMPH) -C uni_rev_na_mph -o $@ cmph_in.gen
+cmph_rev_na.c: cmph_in_na.gen.mph
+	$(CMPH) -C uni_rev_na_mph -o $@ cmph_in_na.gen
 else
 cmph_rev_na.c: uni_prop.gen.h
 	echo >$@
@@ -13957,11 +13940,11 @@ endif
 @
 
 <<Clean temporary files>>=
-rm -f cmph_in.gen{,.mph}
+rm -f cmph_in_na.gen{,.mph}
 @
 
 \lstset{language=C}
-<<cmph_supt.c>>=
+<<cmph_na_supt.c>>=
 #ifdef USE_CMPH
 <<Common C Header>>
 
@@ -13988,16 +13971,18 @@ to that list element.  Since the name list must be expanded, the
 original na array cannot be used.  So, the same rev\_na list built above
 is still needed.
 
+\lstset{language=make}
 <<C Build Executables>>=
-cmph_in_gen \
+cmph_in_na_gen \
 @
 
 <<makefile.rules>>=
-cmph_in_gen: libuni.a cmph_in_gen.o
-	$(CC) -o $@ cmph_in_gen.o -L. -luni
+cmph_in_na_gen: libuni.a cmph_in_na_gen.o
+	$(CC) -o $@ cmph_in_na_gen.o -L. -luni
 @
 
-<<cmph_in_gen.c>>=
+\lstset{language=C}
+<<cmph_in_na_gen.c>>=
 <<Common C Header>>
 
 #include "uni_prop.h"
@@ -14020,12 +14005,90 @@ int main(void)
 }
 @
 
+The value returned by the lookup function is arbitrary.  The only way
+to map this number back to a name is to look up the names, and
+generate a translation table from return value to name array index.
+This translation is unnecessary if the algorithm is CHM, so a separate
+preprocessor define activates this table (but it is always generated,
+anyway).  On all but two algorithms, the return value is within range
+of the input table size, so a blind direct lookup is possible.
+However, for a few types, the values are sparse, so the return value
+must be checked against the larger table size rather than the name
+table size.  Thus the table size is exported (always) as well.
+
+\lstset{language=make}
+<<makefile.config>>=
+# Set to non-blank if perfect hash function is not order-preserving
+# at time of writing, this means any algorithm other than chm (the default)
+CMPH_XLATE=y
+
+# Set to non-blank if the perfect hash function's results are not within
+# the range 0 - <len>-1
+# at time of writing, this means bdz_ph and chd_ph
+CMPH_SPARSE=y
+
+@
+
+<<makefile.rules>>=
+# needed for cproto.h, so may as well include everywhere
+ifneq ($(CMPH),)
+ifneq ($(CMPH_XLATE),)
+EXTRA_CFLAGS += -DCMPH_XLATE $(if $(CMPH_SPARSE),-DCMPH_SPARSE)
+endif
+endif
+@
+
+\lstset{language=C}
+<<Unicode property exports using [[cmph]]>>=
+extern const uint32_t uni_rev_na_mph_xlate[];
+extern const uint32_t uni_rev_na_max_mph_res;
+@
+
+\lstset{language=make}
+<<makefile.rules>>=
+cmph_na_xlate.gen.c: cmph_in_na.gen.mph
+	$(call gen_xlate,na) >$@
+@
+
+<<makefile.vars>>=
+gen_xlate = ( \
+  echo "\#include <stdint.h>"; \
+  echo "const uint32_t uni_rev_$1_mph_xlate[] = {"; \
+  $(CMPH) -v -m cmph_in_$1.gen.mph cmph_in_$1.gen | sed 's/.* -> //' | \
+  ( i=0; while read n; do echo $$n $$i; i=$$((i+1)); done ) | sort -n | \
+  ( i=0; while read x n; do \
+           while [ $$i -lt $$x ]; do echo $$i '~0'; i=$$((i+1)); done; \
+	   echo $$x $$n; i=$$((i+1)); \
+	 done ) | \
+  ( \
+    i=0; tr='\t'; \
+    while read x n; do \
+      i=$$((i+1)); \
+      printf "$$tr$$n"; \
+      if [ $$i -lt 8 ]; then tr=', '; else i=0; tr=',\n\t'; fi; \
+    done); \
+  echo; \
+  echo "};"; \
+  echo $(if $(CMPH_SPARSE), \
+        "const uint32_t uni_rev_$1_max_mph_res = " \
+        "sizeof(uni_rev_$1_mph_xlate)/sizeof(uint32_t);") )
+@
+
+<<Library [[uni_cmph]] Members>>=
+cmph_na_xlate.gen.o
+@
+
+<<Clean temporary files>>=
+rm -f cmph_na_xlate.gen.c
+@
+
 The lookup function itself is identical to the one using binary
 searching, except for the primary name lookup.  That means that binary
 searching is still used for the range lookups; there is no easy way to
 convert that to a hash lookup.  A prefix tree (trie) might be more
 effective, but that is left as an exercise for the end user.
 
+\lstset{language=C}
 <<Unicode property exports using [[cmph]]>>=
 /* len is < 0 for strlen() */
 /* if return value > UNI_MAX_CP, it's a sequence */
@@ -14050,7 +14113,14 @@ check, just like with the binary searching routine.
 
 <<Look up name using [[cmph]] and return if present>>=
 uint32_t ret = cmph_search((cmph_t *)&uni_rev_na_mph, oname, olen);
+#if defined(CMPH_SPARSE) && defined(CMPH_XLATE)
+if(ret < uni_rev_na_max_mph_res)
+  ret = uni_rev_na_mph_xlate[ret];
+#endif
 if(ret < uni_rev_na_arr_len) {
+#if defined(CMPH_XLATE) && !defined(CMPH_SPARSE)
+  ret = uni_rev_na_mph_xlate[ret];
+#endif
   const uint8_t *rev_na = (const uint8_t *)(uni_rev_na_strs + uni_rev_na_arr[ret].off);
   len = uni_rev_na_arr[ret].len * 4;
   while(!rev_na[len - 1])
@@ -14093,17 +14163,17 @@ char buf[256];
 
 int main(void)
 {
-  unsigned long tb = 0, th = 0, tbr = 0, thr = 0, tr = 0;
+  double tb = 0, th = 0, tbr = 0, thr = 0, tr = 0;
   unsigned long nn = 0, nr = 0;
   while(fgets(buf, 256, stdin)) {
     <<Set [[e]] to start of name to check>>
     for(s = e; *s; s++)
       if(isupper(*s))
         *s = tolower(*s);
-    uint32_t ret = uni_cmph_name_to_cp(e, (int)(s - e));
+    int32_t ret = uni_cmph_name_to_cp(e, (int)(s - e));
     <<Print and check [[name_to_cp]] results using [[na_seq_id]]>>
     /* time lookup failures (synthetic names) and lookup successes separately */
-    int isr = uni_name_rng_to_cp(e, (int)(s - e)) >= 0;
+    int isr = ret < 0 || (ret <= UNI_MAX_CP && !uni_na_of(ret)->len);
     if(isr)
       nr++;
     else
@@ -14132,17 +14202,24 @@ int main(void)
     }
   }
   /* report as ops per second rather than total seconds */
-  tb = nn * 25000000UL / tb;
-  th = nn * 25000000UL / th;
-  fprintf(stderr, "b%ld/s h%ld/s %.2fx\n", tb, th, (double)th/(double)tb);
-  tr = nr * 25000000UL / tr;
-  tbr = nr * 25000000UL / tbr;
-  thr = nr * 25000000UL / thr;
-  fprintf(stderr, "r%ld/s b%ld/s h%ld/s %.2fx\n", tr, tbr, thr, (double)thr/(double)tbr);
+  tb = nn * 25000000.0 / tb;
+  th = nn * 25000000.0 / th;
+  fprintf(stderr, "norm %lu b%.0f/s h%.0f/s %.2fx\n", nn, tb, th, th/tb);
+  tr = nr * 25000000.0 / tr;
+  tbr = nr * 25000000.0 / tbr;
+  thr = nr * 25000000.0 / thr;
+  fprintf(stderr, "syn %lu r%.0f/s b%.0f/s h%.0f/s %.2fx\n", nr, tr, tbr, thr, thr/tbr);
   return 0;
 }
 #endif
 @
+
+There may be better tuning options, but my experiments show that the
+hash function is not, in fact, sufficiently faster to justify its use.
+For nearly all inputs, the hash function is within a few percent of
+the performance of the binary search, and in fact it is sometimes
+slower.  The fastest result I found was bdz\_ph with the lowest
+possible [[-b]] setting, which is about 16\%-20\% faster.
 
 \lstset{language=txt}
 <<FIXME>>=
@@ -16465,7 +16542,7 @@ static void doit_dat16(const char *name, const uni_chrrng_dat16_t *rng, uint32_t
     }
     /* check performance */
     int j;
-    unsigned long tr, tt;
+    double tr, tt;
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
@@ -16476,7 +16553,7 @@ static void doit_dat16(const char *name, const uni_chrrng_dat16_t *rng, uint32_t
       for(i = 0; i < 0x110000; i++)
         uni_x_dat16(i, mtab);
     tt = tend();
-    printf("  r%ld t%ld %.2fx\n", tr, tt, (double)tr / (double)tt);
+    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
 }
 @
 
@@ -17676,6 +17753,7 @@ applications, and seems like a reasonable default.
 <<makefile.config>>=
 # XML entity name group
 XML_ENTITY_NAME_GROUP = 2007
+
 @
 
 <<makefile.vars>>=
@@ -18367,19 +18445,22 @@ a hash implementation using [[cmph]] is provided as well.
 \lstset{language=make}
 <<Library [[uni_cmph]] Members>>=
 cmph_rev_xna.o
-cmph_xml_supt.o
+cmph_na_xml_supt.o
+cmph_na_xml_xlate.gen.o
 @
 
 <<makefile.rules>>=
 ifneq ($(CMPH),)
-cmph_xml_in.gen: cmph_xml_in_gen
-	./cmph_xml_in_gen >$@
+cmph_in_na_xml.gen: cmph_in_na_xml_gen
+	./cmph_in_na_xml_gen >$@
 
-cmph_xml_in.gen.mph: cmph_xml_in.gen
-	$(CMPH) -g $(CMPH_GEN) cmph_xml_in.gen
+cmph_in_na_xml.gen.mph: cmph_in_na_xml.gen
+	$(CMPH) -g $(CMPH_GEN) cmph_in_na_xml.gen
 
-cmph_rev_xna.c: cmph_xml_in.gen.mph
-	$(CMPH) -C uni_rev_na_xml_mph -o $@ cmph_xml_in.gen
+cmph_rev_xna.c: cmph_in_na_xml.gen.mph
+	$(CMPH) -C uni_rev_na_xml_mph -o $@ cmph_in_na_xml.gen
+cmph_na_xml_xlate.gen.c: cmph_in_na_xml.gen.mph
+	$(call gen_xlate,na_xml) >$@
 else
 cmph_rev_xna.c: uni_prop.gen.h
 	echo >$@
@@ -18387,16 +18468,18 @@ endif
 @
 
 <<Clean temporary files>>=
-rm -f cmph_xml_in.gen{,.mph}
+rm -f cmph_in_na_xml.gen{,.mph} cmph_na_xml_xlate.gen.c
 @
 
 \lstset{language=C}
 <<Unicode property exports using [[cmph]]>>=
 extern const cmph_t uni_rev_na_xml_mph;
+extern const uint32_t uni_rev_na_xml_mph_xlate[];
+extern const uint32_t uni_rev_na_xml_max_mph_res;
 @
 
 \lstset{language=C}
-<<cmph_xml_supt.c>>=
+<<cmph_na_xml_supt.c>>=
 #ifdef USE_CMPH
 <<Common C Header>>
 
@@ -18410,15 +18493,15 @@ Once again, the reverse name list used for binary searching is also
 used to generate names for [[cmph]].
 
 <<C Build Executables>>=
-cmph_xml_in_gen \
+cmph_in_na_xml_gen \
 @
 
 <<makefile.rules>>=
-cmph_xml_in_gen: libuni.a cmph_xml_in_gen.o
-	$(CC) -o $@ cmph_xml_in_gen.o -L. -luni
+cmph_in_na_xml_gen: libuni.a cmph_in_na_xml_gen.o
+	$(CC) -o $@ cmph_in_na_xml_gen.o -L. -luni
 @
 
-<<cmph_xml_in_gen.c>>=
+<<cmph_in_na_xml_gen.c>>=
 <<Common C Header>>
 
 #include "uni_prop.h"
@@ -18461,7 +18544,14 @@ explicit comparison.
 
 <<Look up XML name using [[cmph]] and return if present>>=
 uint32_t ret = cmph_search((cmph_t *)&uni_rev_na_xml_mph, name, nlen);
+#if defined(CMPH_SPARSE) && defined(CMPH_XLATE)
+if(ret < uni_rev_na_xml_max_mph_res)
+  ret = uni_rev_na_xml_mph_xlate[ret];
+#endif
 if(ret < uni_rev_na_xml_arr_len) {
+#if defined(CMPH_XLATE) && !defined(CMPH_SPARSE)
+  ret = uni_rev_na_xml_mph_xlate[ret];
+#endif
   const uni_str_arr_t *retp = &uni_rev_na_xml_arr[ret];
   if(nlen == retp->len) {
     const uint8_t *rev_na = retp->cp > UNI_MAX_CP ?
@@ -18503,7 +18593,7 @@ char buf[256];
 
 int main(void)
 {
-  unsigned long tb = 0, th = 0;
+  double tb = 0, th = 0;
   unsigned long nn = 0;
   while(fgets(buf, 256, stdin)) {
     <<Set [[e]] to start of name to check>>
@@ -18521,13 +18611,20 @@ int main(void)
     th += tend();
   }
   /* report as ops per second rather than total seconds */
-  tb = nn * 25000000UL / tb;
-  th = nn * 25000000UL / th;
-  fprintf(stderr, "b%ld/s h%ld/s %.2fx\n", tb, th, (double)th/(double)tb);
+  tb = nn * 25000000.0 / tb;
+  th = nn * 25000000.0 / th;
+  fprintf(stderr, "b%.0f/s h%.0f/s %.2fx\n", tb, th, th/tb);
   return 0;
 }
 #endif
 @
+
+There may be better tuning options, but my experiments show that the
+hash function is not, in fact, faster at all for any algorithms but
+one: bdz\_ph.  The best performance I got, again with bdz\_ph with the
+lowest possible [[-b]] setting, was a whole 6\% faster.  This just
+goes to show that the computation of the hash function is far too
+expensive.
 
 \section{The CLDR}
 
@@ -20766,6 +20863,22 @@ As mentioned earlier, these require linking with the [[cmph]] library,
 and may need parameter adjustment to find the include files.  The are
 also in a separate library, so using this requires linking with
 [[-luni_cmph]].
+
+In addition to the hash tables, some hash algortihms require
+translation tables to turn the hash result into an array index in the
+reverse name table.  The are
+[[const uint32_t uni_rev_na_mph_xlate[]]] and
+[[const uint32_t un_rev_na_xml_mph_xlate[]]].  The size of those
+tables is normally the same as the associated reverse name lookup
+table, but some algorithms produce sparse hash functions, so they
+require the explicit translation table size:
+[[const uint32_t uni_rev_na_max_mph_res]] and
+[[const uint32_t uni_rev_na_xml_max_mph_res]], respectively.  For
+sparse tables, unused entries are always [[~0]].  There is currently
+no way to query the library to determine if these are, in fact,
+necessary, but the current fastest lookup algorithm always needs both,
+and using them does not affect the results (only the timing), so it is
+probably not a bad idea to assume that both are necessary.
 
 % uni_cmph_name_to_cp prototype
 % uni_cmph_xml_name_to_cp prototype
