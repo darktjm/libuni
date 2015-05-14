@@ -11156,8 +11156,7 @@ static int cmpcc(const void *a, const void *b)
       qsort(ccbuf, l, sizeof(*ccbuf), cmpcc);
       for(k = 0, j = i; k < l; k++, j += uni_utf<<@sz>>_nextc(buf + j))
         if(ccbuf[k].opos != j)
-	  /* FIXME: assign return value somewhere */
-	  uni_int_utf<<@sz>>_encode(buf + j, ccbuf[k].cp);
+	  (void)uni_int_utf<<@sz>>_encode(buf + j, ccbuf[k].cp);
     }
   }
   return ilen;
@@ -11240,8 +11239,7 @@ int uni_NFC_comp<<@sz>>(uint<<@sz>>_t *buf, unsigned int ilen, unsigned int *nok
 	  movebuf(buf + i + clen, buf + i + len1, j - i - len1);
 	  len2 += len1 - clen;
 	}
-	/* FIXME: assign return value somewhere */
-	uni_int_utf<<@sz>>_encode(buf + i, ccp);
+	(void)uni_int_utf<<@sz>>_encode(buf + i, ccp);
 	if(len2 > 0 && ilen - j - len2)
 	  movebuf(buf + j, buf + j + len2, ilen - j - len2);
         ilen -= len2;
@@ -18982,6 +18980,11 @@ or both, followed by the utf8-encoded language code, the utf8-encoded
 script code (if present), and the utf8-encoded territory code (if
 present).
 
+A few variants have issues.  AALAND translates to AX, but that is a
+territory, not a variant.  POSIX translates to [[u-va-posix]], which
+is a locale extension, not a variant.  Both of these issues need to be
+handled manually in the locale parser.
+
 Some targets have unexplained issues, though.  Some simple targets do
 not exist (e.g. ami for the i-ami to ami alias); I'll probably just
 treat them like any other unknown locale.  In earlier CLDR revisions,
@@ -19213,13 +19216,6 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
 
 \lstset{language=txt}
 <<FIXME>>=
-legacy variant translations: (1st 2 need to be handled manually)
-  AALAND -> sv_AX (in variant tab, but flagged as error/unadded)
-  POSIX -> -u-va-posix
-  BOKMAL -> nb (in language tab)
-  NYNORSK -> nn (in language tab)
-  POLYTONI -> -polyton (in variant tab)
-  SAAHO -> ssy (in language tab)
 Following translations ae not covered above, but do they really matter?
 translated private use territory codes:
   AA -> 958 -> AAA
@@ -19245,17 +19241,21 @@ it is absent.
 
 \lstset{language=C}
 <<Locale triplet support macros>>=
-#define uni_locale_check_tripletid(x, max) ((x) ? (x) - 1 : (max))
-#define uni_locale_extract_locale(x) \
-   uni_locale_check_tripletid(((x) >> 17) & 0x3ff, UNI_NUM_CLDR_language)
-#define uni_locale_extract_script(x) \
-   uni_locale_check_tripletid(((x) >> 9) & 0xff, UNI_NUM_CLDR_script)
-#define uni_locale_extract_territory(x) \
-   uni_locale_check_tripletid((x) & 0x1ff, UNI_NUM_CLDR_territory)
+uint32_t uni_locale_triplet(uint32_t l, uint32_t s, uint32_t t);
 #define uni_locale_triplet(l, s, t) \
   (((l) >= UNI_NUM_CLDR_language ? 0 : ((l) + 1) << 17) + \
    ((s) >= UNI_NUM_CLDR_script ? 0 : ((s) + 1) << 9) + \
    ((t) >= UNI_NUM_CLDR_territory ? 0 : (t) + 1))
+#define uni_locale_check_tripletid(x, max) ((x) ? (x) - 1 : (max))
+uint32_t uni_locale_extract_lang(uint32_t x);
+#define uni_locale_extract_lang(x) \
+   uni_locale_check_tripletid(((x) >> 17) & 0x3ff, UNI_NUM_CLDR_language)
+uint32_t uni_locale_extract_script(uint32_t x);
+#define uni_locale_extract_script(x) \
+   uni_locale_check_tripletid(((x) >> 9) & 0xff, UNI_NUM_CLDR_script)
+uint32_t uni_locale_extract_territory(uint32_t x);
+#define uni_locale_extract_territory(x) \
+   uni_locale_check_tripletid((x) & 0x1ff, UNI_NUM_CLDR_territory)
 @
 
 <<Library [[uni]] headers>>=
@@ -19548,6 +19548,13 @@ chdir(CLDR_LOC);
   *en = 0;
   xmlprop_free(name);
   elit = add_enum_lit(CLDR_locale_ext, ename)->val;
+  if(*ename == 'u' && !xmlHasProp(n, (const xmlChar *)"alias")) {
+    /* u exts can be given after @ with alias */
+    /* or using raw kw if no alias */
+    uni_valueof_t *v = add_enum_lit(CLDR_locale_ext, ename + 2);
+    v->val = elit;
+    num_val_aliases[CLDR_locale_ext]--;
+  }
   free(ename);
 }
 @
@@ -19559,11 +19566,14 @@ chdir(CLDR_LOC);
     /* alias may be multiple space-separated aliases */
     /* adding to val's alias list may overflow, so just add enum lits */
     s = alias;
-    char *e = strchr(s, ' ');
+    char *e;
+    for(e = s; *e && *e != ' '; e++)
+      *e = tolower(*e);
     while(1) {
-      if(e)
+      if(*e)
         *e = 0;
-      /* FIXME: case-fold s */
+      else
+        e = NULL;
       int na = num_val_aliases[<<@prop>>];
       uni_valueof_t *v = add_enum_lit(<<@prop>>, s);
       if(na != num_val_aliases[<<@prop>>]) {
@@ -19574,9 +19584,8 @@ chdir(CLDR_LOC);
 	/* calendar e.g. uses this field to say "this is an alias of x" */
       }
       if(e) {
-        *e++ = ' ';
-	s = e;
-	e = strchr(e, ' ');
+	for(*e++ = ' ', s = e; *e && *e != ' '; e++)
+	  *e = tolower(*e);
       } else
         break;
     }
@@ -19596,7 +19605,7 @@ chdir(CLDR_LOC);
 <<[[uni_CLDR_locale_ext_desc]]>>=
 typedef struct {
   int type_len; /* >0: enum defined by lookup; <0: see below */
-  const uni_valueof_t *lookup; /* len == type_len if present */
+  const uni_valueof_t *lookup; /* table len == type_len */
 } uni_CLDR_locale_ext_desc_t;
 
 #define UNI_LOCALE_EXT_BOOL  -1 /* boolean: true=yes/false=no */
@@ -19619,14 +19628,14 @@ extern const uni_CLDR_locale_ext_desc_t uni_CLDR_locale_ext_desc[];
   for(i = 0; i < CLDR_locale_ext_desc_len; i++) {
     int desc = CLDR_locale_ext_desc[i];
     if(desc >= 0)
-      fprintf(of, "\t{ %d, ", desc);
+      fprintf(of, "\t{ %d, ", num_val_aliases[desc]);
     else
       fprintf(of, "\t{ UNI_LOCALE_EXT_%s, ",
                   desc == LEXT_BOOL ? "BOOL" : desc == LEXT_CP ? "CP" :
 		  desc == LEXT_REORDER ? "REORD" : desc == LEXT_GENERIC ? "PRIV" :
 		  "ATTR");
     if(desc >= 0)
-      fprintf(of, "uni_%s_valueof_approx}", parsed_props[desc].name);
+      fprintf(of, "uni_%s_valueof}", parsed_props[desc].name);
     else
       fputs("NULL}", of);
     if(i < CLDR_locale_ext_desc_len - 1)
@@ -19653,10 +19662,9 @@ data are supported.  After all, the only purpose of this is to select
 the correct locale data for the algorithms already implemented.
 
 The return value for this function is an array of integers indicating
-the locale.  The first is the base triplet, as described above.  A
-flag indicates the presence of a variant tag, which is in the next
-integer.  Any integers following this are parsed locale extensions.
-Unknown or missing language, script and territory tags are returned as
+the locale.   The first is the base triplet, as described above.  The
+remaining words are variants and locale extensions.  Unknown or
+missing language, script and territory tags are returned as
 zero.  Unknown variant and locale extension tags are silently dropped.
 
 <<Library [[uni]] Members>>=
@@ -19685,7 +19693,9 @@ duplicating the input every time.  The only quick case not requiring
 this is an empty string.  Actually, conversion can take place while
 parsing, so only the tag currently being extracted is converted. The
 first tag is always the language identifier, or it should be; some
-legacy language identifiers also have a leading ``i'' tag.
+legacy language identifiers also have a leading ``i'' tag, and there
+is also a leading ``x'' tag for private use language identifiers.  If
+there are other special cases, I probably don't care.
 
 <<Parse CLDR/Unicode Locale string>>=
 if(!*locale_str)
@@ -19699,33 +19709,29 @@ for(s = str; *ls; ls++) {
     break;
   *s++ = tolower(*ls);
 }
-/* some languages start with i- and private use starts with x- */
-/* there are probably other special cases, but I don't really care */
 if(s == str + 1 && (s[-1] == 'i' || s[-1] == 'x') && (*ls == '-' || *ls == '_'))
   for(ls++, *s++ = '_'; isalpha(*ls); ls++)
     *s++ = tolower(*ls);
 *s++ = 0;
 @
 
-<<FIXME>>=
-/* The IETF allows additional language tags after this.  I should
-probably skip them. */
-@
-
-The next tag, if present, may be the script tag.  If so, it is always
-4 characters long.  It is also always alphabetic, but only the first
-character needs to be checked, since the only other 4-letter tag is a
-variant starting with a digit.
+The IETF allows up to 3 more 3-letter language tags after this.  I go
+ahead and skip any 3-letter tags, without counting.  However, if the
+3-letter tag matches a region code, it is assumed to be one, and is
+not skipped.
 
 <<Parse CLDR/Unicode Locale string>>=
-char *stag = NULL;
-uint32_t scr = ~0;
 int tl = 0;
+uni_valueof_t me, *v;
 if(*ls == '-' || *ls == '_')
   for(ls++; isalnum(*ls); ls++, tl++)
     *s++ = tolower(*ls);
-if(tl == 4 && isalpha(s[-tl])) {
-  stag = s - tl;
+while(tl == 3) {
+  me.name = s - tl;
+  v = bsearch(&me, uni_CLDR_territory_valueof, uni_CLDR_territory_valueof_len,
+              sizeof(me), uni_cmp_valueof);
+  if(v)
+    break;
   <<Advance to next locale tag>>
 }
 @
@@ -19738,21 +19744,31 @@ if(*ls == '-' || *ls == '_')
     *s++ = tolower(*ls);
 @
 
+The next tag, if present, may be the script tag.  If so, it is always
+4 characters long.  It is also always alphabetic, but only the first
+character needs to be checked, since the only other 4-letter tag is a
+variant starting with a digit.
+
+<<Parse CLDR/Unicode Locale string>>=
+char *stag = NULL;
+uint32_t scr = ~0;
+if(tl == 4 && isalpha(s[-tl])) {
+  stag = s - tl;
+  <<Advance to next locale tag>>
+}
+@
+
 The next tag, if present, may be the territory (region) tag.  If so,
 it is always 2-3 alphanumeric characters long.  After that may be the
-variant tag, which is always 4 or more characters long.  It has a
+variant tags, which are always 4 or more characters long.  It has a
 maximum limit, but that is irrelevant, as no other tags can be that
 long in this position.  It also only occupies 4 characters if the
 first character is numeric, but that is checked sufficiently well by
 the script check above.
 
-<<FIXME>>=
-/* The IETF allows >1 variant tag.  I should probably support this. */
-@
-
 <<Parse CLDR/Unicode Locale string>>=
 char *ttag = NULL, *vtag = NULL;
-uint32_t ter = ~0, var = ~0;
+uint32_t ter = ~0;
 if(tl >= 2 && tl <= 3) {
   ttag = s - tl;
   <<Advance to next locale tag>>
@@ -19764,7 +19780,7 @@ if(tl >= 4) {
 @
 
 All remaining tags are part of the locale extension syntax.  Before
-getting into those, it's time to look up the values already parsed.
+getting into those, it's time to look up the tags already extracted.
 
 First, the language tag can be looked up.  One complication is that
 some aliases consist of a language tag combined with script, territory
@@ -19797,23 +19813,49 @@ if(l < uni_CLDR_language_valueof_len) {
                *et = strchr(rt, '_');
     h = et ? et - rt : strlen(rt);
     c = 1;
+    char *ostag = stag, *ottag = ttag, *ovtag = vtag;
     if(stag && h == 4) {
-      c = memcmp(rt, stag, 4);
+      if(!(c = memcmp(rt, stag, 4)))
+        stag = NULL;
       <<Advance [[rt]] to next tag if match>>
     }
     if(ttag && h >= 2 && h <= 3) {
-      c = memcmp(rt, ttag, h) && !ttag[h];
+      if(!(c = memcmp(rt, ttag, h) && !ttag[h]))
+        ttag = NULL;
       <<Advance [[rt]] to next tag if match>>
     }
-    if(vtag && h > 4) {
-      c = memcmp(rt, vtag, h) && !vtag[h];
+    /* Since variants are mostly harmless, I'll not worry about FIXMEs below */
+    if(vtag && h >= 4) {
+      if(!(c = memcmp(rt, vtag, h) && !vtag[h]))
+        vtag = NULL;
       <<Advance [[rt]] to next tag if match>>
+      if(c && tl >= 4) { /* more variant tags */
+        const char *ols = ls;
+	char *os = s;
+	int otl = tl;
+        do {
+	  c = tl == h && memcmp(rt, s - tl, h);
+	  /* FIXME: how do I delete this? */
+	  <<Advance [[rt]] to next tag if match>>
+	  if(!c)
+	    break;
+	  <<Advance to next locale tag>>
+	} while(tl >= 4);
+	ls = ols;
+	s = os;
+	tl = otl;
+      }
     }
     if(!c && !et) {
       lang = m;
       break;
     }
+    stag = ostag;  ttag = ottag;  vtag = ovtag;
   }
+}
+if(!vtag && tl >= 4) {
+  vtag = s - tl;  /* FIXME: what if there are more of the same? */
+  <<Advance to next locale tag>>
 }
 @
 
@@ -19851,10 +19893,9 @@ if(lang != ~0) {
 }
 @
 
-Script tags and variant tags can simply be looked up directly.
+Script tags can simply be looked up directly.
 
 <<Parse CLDR/Unicode Locale string>>=
-uni_valueof_t me, *v;
 if(stag) {
   me.name = stag;
   v = bsearch(&me, uni_CLDR_script_valueof, uni_CLDR_script_valueof_len,
@@ -19862,12 +19903,32 @@ if(stag) {
   if(v)
     scr = v->val;
 }
-if(vtag) {
-  me.name = vtag;
-  v = bsearch(&me, uni_CLDR_variant_valueof, uni_CLDR_variant_valueof_len,
-              sizeof(me), uni_cmp_valueof);
-  if(v)
-    var = v->val;
+@
+
+One variant alias was dropped above, because it translates into a
+territory.  This is handled manually here, before looking up the
+territory tag, since that overrides this.  There is no need to discard
+the variant; it will be discarded later due to lookup failure.
+
+<<Parse CLDR/Unicode Locale string>>=
+if(vtag && ter != UNI_CLDR_territory_ax) {
+  if(!strcmp(vtag, "aaland"))
+    ter = UNI_CLDR_territory_ax;
+  else if(tl >= 4) { /* more variant tags */
+    const char *ols = ls;
+    char *os = s;
+    int otl = tl;
+    do {
+      if(!strcmp(s - tl, "aaland")) {
+        ter = UNI_CLDR_territory_ax;
+	break;
+      }
+      <<Advance to next locale tag>>
+    } while(tl >= 4);
+    ls = ols;
+    s = os;
+    tl = otl;
+  }
 }
 @
 
@@ -19928,103 +19989,415 @@ if(ttag) {
 }
 @
 
+Variants are complicated by the fact that there may be more than one.
+Also, the [[POSIX]] variant must be converted into [[u-va-posix]].
+
+<<Parse CLDR/Unicode Locale string>>=
+uint32_t *exts = NULL, exts_len = 0, had_posix = 0;
+while(vtag) {
+  me.name = vtag;
+  v = bsearch(&me, uni_CLDR_variant_valueof, uni_CLDR_variant_valueof_len,
+              sizeof(me), uni_cmp_valueof);
+  if(v) {
+    if(v->val == UNI_CLDR_variant_posix) {
+      had_posix = 1;
+    } else {
+      grow_size(exts, exts_len, exts_len + 1);
+      exts[exts_len - 1] = v->val + (1UL << 31);
+    }
+  }
+  if(tl >= 4) {
+    vtag = s - tl;
+    <<Advance to next locale tag>>
+  } else
+    vtag = NULL;
+}
+if(had_posix) {
+  <<Append [[u-va-posix]] into result>>
+}
+@
+
 Now that the main tags have been parsed, the locale extensions can be
 processed.  Each locale extension begins with a single character, and
 ends either before the start of the next extension tag, or upon
 encountering invalid characters.  This implies that value aliases
 which have invalid characters in them are ignored, and are only used
 for the alternate extension syntax, parsed later.  Any unknown tags
-of any kind are simply ignored.
+of any kind are simply ignored.  While I allow multiple extensions of
+the same type, the actual syntax only allows for one each.
+
+Unicode u-type extensions consist of 3-8 letter attributes, followed
+by groups of keyword/value pairs.  Each keyword is 2 letters, and each
+value is more than 2 letters, so they are easily distinguished.
+
+Unicode t-type extensions consinst of one or both of a language code
+(without extensions) and field specifiers.  Field specifiers are the
+same as keyword/value pairs in the u-type extension.  The only way to
+distinguish the beginning of the field specifiers from a locale name
+is to compare it with valid tags (always a letter followed by a digit,
+but that is irrelevant when just comparing).
+
+IETF x-type extensions consist of all remaining tags, interpreted in
+an application-specific manner.  They are ignored.
+
+Any other unknown extension is skipped until the next single-character
+tag.
 
 <<Parse CLDR/Unicode Locale string>>=
-while(tl > 1) { /* skip unknown tags */
+while(tl > 1) { /* skip illegal tags */
   <<Advance to next locale tag>>
 }
-uint32_t *exts = NULL;
-uint32_t num_ext = 0;
 while(tl == 1) {
-  char *ext_start = s - 1, *ext_end;
-  do {
-    <<Advance to next locale tag>>
-  } while(tl > 1);
-  ext_end = s - tl;
-  if(ext_end - ext_start < 4)
-    continue; /* can't be a known ext, so skip */
-  ext_start[1] = '_';
-  me.name = ext_start;
-  v = bsearch(&me, uni_CLDR_locale_ext_valueof, uni_CLDR_locale_ext_valueof_len,
-              sizeof(me), uni_cmp_valueof);
-  if(!v)
-    continue; /* not a known ext, so skip */
-  uint32_t ext = v->val;
-  const uni_CLDR_locale_ext_desc_t *desc = &uni_CLDR_locale_ext_desc[ext];
-  ext_start += strlen(ext_start) + 1;
-  if(ext_start >= ext_end) {
-    /* only attrib can have no parms; no attribs right now, but in case.. */
-    if(desc->type_len != UNI_LOCALE_EXT_ATTR)
-      continue; /* invalid; skip */
-    grow_size(exts, num_ext, num_ext + 1);
-    exts[num_ext - 1] = ext;
+  char ext_type = s[-1];
+  if(ext_type == 'x') { /* all subsequent tags are private use/unsupported */
+    do {
+      <<Advance to next locale tag>>
+    } while(tl);
+    break;
+  } else if(ext_type != 'u' && ext_type != 't') {
+    do {
+      <<Advance to next locale tag>>
+    } while(tl > 1);
     continue;
   }
-  switch(desc->type_len) {
-    default:
-      /* cu i0 lb tz k0 ca t0 nu m0 va co ka kf */
-      if(ext_start + strlen(ext_start) + 1 < ext_end)
-        continue; /* only supports exactly one parameter */
-      me.name = ext_start;
-      v = bsearch(&me, desc->lookup, desc->type_len, sizeof(me), uni_cmp_valueof);
-      if(!v)
-        continue;
-      grow_size(exts, num_ext, num_ext + 1);
-      exts[num_ext - 1] = ext + (v->val << 8);
-      continue;
-    case UNI_LOCALE_EXT_BOOL: {
-      if(ext_start + strlen(ext_start) + 1 < ext_end)
-        continue; /* only supports exactly one parameter */
-      int val;
-      if(!strcmp(ext_start, "false") || !strcmp(ext_start, "no"))
-        val = 0;
-      else if(!strcmp(ext_start, "true") || !strcmp(ext_start, "yes"))
-        val = 1;
-      else
-        continue; /* invalid */
-      grow_size(exts, num_ext, num_ext + 1);
-      exts[num_ext - 1] = ext + (val << 8);
-      break;
+  <<Advance to next locale tag>>
+  if(tl < 2)
+    continue; /* no subtags */
+  if(ext_type == 't') {
+    /* may have initial locale tag */
+    const char *locale_start = s - tl;
+    s[-tl - 1] = '_';
+    do {
+      while(tl > 2) {
+        <<Advance to next locale tag>>
+	s[-tl - 1] = '_';
+      }
+      if(tl == 2) {
+        char c0 = s[-tl - 2];
+        s[-tl - 2] = 't';
+        me.name = s - tl - 2;
+        v = bsearch(&me, uni_CLDR_locale_ext_valueof, uni_CLDR_locale_ext_valueof_len,
+                    sizeof(me), uni_cmp_valueof);
+        s[-tl - 2] = c0;
+        if(v) {
+	  s[-tl - 1] = 0;
+          break;
+        }
+	<<Advance to next locale tag>>
+	s[-tl - 1] = '_';
+      }
+    } while(tl > 1);
+    if(tl < 2)
+      continue; /* invalid t tag: no field specs */
+    if(s - tl != locale_start) {
+      <<Encode [[t]] extension locale>>
     }
-    case UNI_LOCALE_EXT_ATTR:
-      continue; /* ignore: attrs may not have parms */
-    case UNI_LOCALE_EXT_PRIV:
-      continue; /* ignore: x0 not supported.  do it yourself. */
-    case UNI_LOCALE_EXT_CP: {
-      uint32_t lenoff = num_ext; 
-      grow_size(exts, num_ext, num_ext + 1);
-      do {
-        char *en;
-        uint32_t n = strtoul(ext_start, &en, 16);
-	if(*en) {
-	  num_ext = lenoff;
-	  if(!num_ext) {
-	    free(exts);
-	    exts = NULL;
-	  }
-	  lenoff = ~0;
-	  break;
-	}
-	grow_size(exts, num_ext, num_ext + 1);
-	exts[num_ext - 1] = n;
-        ext_start += strlen(ext_start) + 1;
-      } while(ext_start < ext_end);
-      if(lenoff == (uint32_t)~0)
-        continue;
-      exts[lenoff] = ext + ((num_ext - lenoff - 1) << 8);
-      break;
-    }
-    case UNI_LOCALE_EXT_REORD:
-      /* FIXME: reordering block names */
-      break;
   }
+  /* there are currently no attributes, but if there were, they'd go here */
+  if(ext_type == 'u') {
+    while(tl > 2) {
+      s[-tl - 2] = 'u';
+      s[-tl - 1] = '_';
+      me.name = s - tl - 2;
+      v = bsearch(&me, uni_CLDR_locale_ext_valueof, uni_CLDR_locale_ext_valueof_len,
+                  sizeof(me), uni_cmp_valueof);
+      <<Advance to next locale tag>>
+      if(!v || uni_CLDR_locale_ext_desc[v->val].type_len != UNI_LOCALE_EXT_ATTR)
+        continue;
+      <<Append locale ext attribute [[v->val]] into result>>
+    }
+    if(tl < 2)
+      continue;
+  }
+  /* now there are just 2-letter keywords, followed by 3-8 letter parms */
+  do {
+    s[-tl - 2] = ext_type;
+    s[-tl - 1] = '_';
+    me.name = s - tl - 2;
+    v = bsearch(&me, uni_CLDR_locale_ext_valueof, uni_CLDR_locale_ext_valueof_len,
+                sizeof(me), uni_cmp_valueof);
+    <<Advance to next locale tag>>
+    if(!v) {
+      <<Skip to next locale ext kw>>
+    }
+    uint32_t ext = v->val;
+    const uni_CLDR_locale_ext_desc_t *desc = &uni_CLDR_locale_ext_desc[ext];
+    switch(desc->type_len) {
+      <<Type cases for locale ext keyword [[ext]]>>
+    }
+  } while(tl == 2);
+}
+@
+
+<<Skip to next locale ext kw>>=
+while(tl > 2) {
+  <<Advance to next locale tag>>
+}
+@
+
+While there are no attributes in the current CLDR, if there were, they
+would be simplest:  just the keyword ID itself.
+
+<<Append locale ext attribute [[v->val]] into result>>=
+grow_size(exts, exts_len, exts_len + 1);
+exts[exts_len - 1] = v->val;
+@
+
+If they have parameters, they are invalid, and simply ignored.
+Likewise, private extensions have no known format, and are ignored.
+
+<<Type cases for locale ext keyword [[ext]]>>=
+case UNI_LOCALE_EXT_ATTR:
+  /* none */
+  /* ignore: attrs may not have parms */
+  /* fall through */
+case UNI_LOCALE_EXT_PRIV:
+  /*
+    t-x0 private use; not useful
+   */
+  /* ignore: x0 not supported.  do it yourself. */
+  <<Skip to next locale ext kw>>
+  continue;
+@
+
+The locale for the [[t]] tag is encoded just like the locale, but has
+bit 30 set for each word.  It is parsed by recursion, but there will
+never be more than one recursion (there are no extension tags in the
+string).
+
+<<Encode [[t]] extension locale>>=
+unsigned int max_len = 0, len;
+uint32_t *tloc = NULL, *p;
+len = uni_parse_locale(locale_start, &tloc, 0, &max_len);
+if(len > 0) {
+  grow_size(exts, exts_len, exts_len + len);
+  p = exts + exts_len - len;
+  while(len-- > 0)
+    p[len] = tloc[len] | (1UL << 30);
+}
+if(tloc)
+  free(tloc);
+@
+
+Enumerations are stored with the keyword code in the low 8 bits, and
+the looked-up enumeration code in the upper 24 bits.  The parser
+supports multiple parameters, mainly because the [[t]] extension
+implies that multiple parameters may be necessary.  The [[u]]
+extension's documentation explicitly states that enumerated parameters
+are ``final and used alone,'' but once again, this routine is not a
+validity checker.  Multiple parameters are encoded as if they were
+independent keyword/value pairs.
+
+<<Type cases for locale ext keyword [[ext]]>>=
+default:
+  /*
+    t-k0 - keyboard - not useful; multiple subtags
+           may have as-yet-unspecified tags, but don't care
+    t-i0 - input method xform - not useful; multiple subtags
+           may have as-yet-unspecified tags, but don't care
+    t-t0 - mach-xlate - not useful; probably multiple subtags
+           may have as-yet-unspecified tags, but don't care
+    t-m0 - xform ext - not useful
+    u-cu - currency - not useful
+    u-lb - line break type
+    u-tz - timezone - not useful; most names only valid in @-syntax
+    u-ca - calendar - not useful; may have 2 tags (if name has -)
+    u-nu - number-style - not useful
+    u-va - variant - should translate to equivalent variant tag, really
+    u-co - collation type
+    u-ka - collation alt handling
+    u-kf - collation case folding
+    u-ks - collation strength
+    u-kv - collation maxvar
+   */
+  if(tl <= 2)
+    continue; /* at lest one parameter required */
+  do {
+    me.name = s - tl;
+    v = bsearch(&me, desc->lookup, desc->type_len, sizeof(me), uni_cmp_valueof);
+    <<Advance to next locale tag>>
+    if(!v) {
+      /* this is just for u-ca */
+      if(tl > 2) {
+        s[-tl - 1] = '-';
+        v = bsearch(&me, desc->lookup, desc->type_len, sizeof(me), uni_cmp_valueof);
+        if(v) {
+          <<Advance to next locale tag>>
+        }
+      }
+    }
+    if(v) {
+      grow_size(exts, exts_len, exts_len + 1);
+      exts[exts_len - 1] = ext + (v->val << 8);
+    }
+  } while(tl > 2);
+  break;
+@
+
+<<Append [[u-va-posix]] into result>>=
+grow_size(exts, exts_len, exts_len + 1);
+exts[exts_len - 1] = UNI_CLDR_locale_ext_u_va + (UNI_CLDR_locale_u_va_posix << 8);
+@
+
+Booleans are a special form of enumerations, and are stored similarly.
+However, [[false]] always maps to zero, and [[true]] always maps to
+one.  While it is not documented as such, some boolean variables are
+shown in examples as if they were attributes:  their presence means
+truth.  This is supported here as well.
+
+<<Type cases for locale ext keyword [[ext]]>>=
+case UNI_LOCALE_EXT_BOOL: {
+  /*
+    u-kb - collation 2nd level backwards
+    u-kc - collation insert case level
+    u-kh - collation hiragana handling
+    u-kk - collation normalization
+    u-kn - collation numeric handling
+   */
+  int val;
+  if(tl < 3)
+    val = 1; /* if just present, same as "true" */
+  else {
+    /* 2-letter "no" is impossible */
+    if(!strcmp(s - tl, "false") /* || !strcmp(s - tl, "no") */ )
+      val= 0;
+    /* "yes" is probably meant for @-syntax only, but I'll allow it */
+    else if(!strcmp(s - tl, "true") || !strcmp(s - tl, "yes"))
+      val = 1;
+    else { /* invalid; skip to next kw */
+      <<Skip to next locale ext kw>>
+      continue;
+    }
+    <<Advance to next locale tag>>
+    if(tl > 2) {
+      /* only supports 0 or 1 parms, so invalid */
+      <<Skip to next locale ext kw>>
+      continue;
+    }
+  }
+  grow_size(exts, exts_len, exts_len + 1);
+  exts[exts_len - 1] = ext + (val << 8);
+  break;
+}
+@
+
+Code point lists are encoded as multiple words.  The first word has
+the extension identifier and the length, and the remaining words are
+the raw code points.
+
+<<Type cases for locale ext keyword [[ext]]>>=
+case UNI_LOCALE_EXT_CP: {
+  /*
+    u-vt collation vartop
+   */
+  if(tl <= 2)
+    continue; /* at lest one parameter required */
+  uint32_t lenoff = exts_len; 
+  grow_size(exts, exts_len, exts_len + 1);
+  do {
+    char *en;
+    uint32_t n = strtoul(s - tl, &en, 16);
+    /* technically, also an error if size is not 4 or 6, but I'll allow */
+    if(*en || tl > 6 || n > UNI_MAX_CP) {
+      exts_len = lenoff;
+      if(!exts_len) {
+        free(exts);
+	exts = NULL;
+      }
+      lenoff = ~0;
+      break;
+    }
+    grow_size(exts, exts_len, exts_len + 1);
+    exts[exts_len - 1] = n;
+    <<Advance to next locale tag>>
+  } while(tl > 2);
+  if(lenoff == (uint32_t)~0)
+    continue;
+  exts[lenoff] = ext + ((exts_len - lenoff - 1) << 8);
+  break;
+}
+@
+
+Reordering codes are encoded the same way, except that the words
+following the initial word identify reordering blocks.
+
+<<Type cases for locale ext keyword [[ext]]>>=
+case UNI_LOCALE_EXT_REORD: {
+  /*
+    u-kr collation reordering
+   */
+  if(tl <= 2)
+    continue; /* at lest one parameter required */
+  uint32_t lenoff = exts_len; 
+  grow_size(exts, exts_len, exts_len + 1);
+  do {
+    uint32_t b = uni_parse_locale_reorder_block(s - tl);
+    if(b == (uint32_t)~0) {
+      exts_len = lenoff;
+      if(!exts_len) {
+        free(exts);
+	exts = NULL;
+      }
+      lenoff = ~0;
+      break;
+    }
+    grow_size(exts, exts_len, exts_len + 1);
+    exts[exts_len - 1] = b;
+    <<Advance to next locale tag>>
+  } while(tl > 2);
+  if(lenoff == (uint32_t)~0)
+    continue;
+  exts[lenoff] = ext + ((exts_len - lenoff - 1) << 8);
+  break;
+}
+@
+
+Reordering block names are not available in any easy enumeration table
+for parsing.  There are really only 6 fixed strings, though, and the
+rest are 4-character script names.  One of the fixed strings is
+equivalent to a script, and the other 5 are given codes beyond the
+maximum script code.
+
+<<Unicode locale exports>>=
+#define UNI_REORDER_SPACE    (UNI_NUM_sc)
+#define UNI_REORDER_PUNCT    (UNI_NUM_sc + 1)
+#define UNI_REORDER_SYMBOL   (UNI_NUM_sc + 2)
+#define UNI_REORDER_CURRENCY (UNI_NUM_sc + 3)
+#define UNI_REORDER_DIGIT    (UNI_NUM_sc + 4)
+#define UNI_REORDER_OTHER    UNI_sc_Zzzz
+
+uint32_t uni_parse_locale_reorder_block(const char *s);
+@
+
+<<Unicode locale functions>>=
+/* assumes s is already lower-case */
+uint32_t uni_parse_locale_reorder_block(const char *s)
+{
+  uint32_t len = strlen(s);
+  if(len == 4) {
+    uni_valueof_t me, *v;
+    me.name = s;
+    v = bsearch(&me, uni_sc_valueof_approx, uni_sc_valueof_len, sizeof(me),
+                uni_cmp_valueof);
+    if(v)
+      return v->val;
+    else
+      return ~0;
+  }
+  /* linear search for rest, but that's probably OK since there are so few */
+  if(!strcmp(s, "space"))
+    return UNI_REORDER_SPACE;
+  if(!strcmp(s, "punct"))
+    return UNI_REORDER_PUNCT;
+  if(!strcmp(s, "symbol"))
+    return UNI_REORDER_SYMBOL;
+  if(!strcmp(s, "currency"))
+    return UNI_REORDER_CURRENCY;
+  if(!strcmp(s, "digit"))
+    return UNI_REORDER_DIGIT;
+  if(!strcmp(s, "other"))
+    return UNI_REORDER_OTHER;
+  return ~0;
 }
 @
 
@@ -20033,9 +20406,13 @@ afterwards.  The only supported text is an at-sign, followed by
 old-style locale extensions.  It is also legal to have a dot, followed
 by a text encoding identifier, but everything other than an at-sign is
 ignored.  The dot is still used to potentially terminate the old-style
-locale extensions, though.
+locale extensions, though, and if a dot is encountered first, an
+at-sign may still be present afterwards (I am unsure of the required
+order).
 
 <<Parse CLDR/Unicode Locale string>>=
+if(*ls == '.')
+  while(*++ls && *ls != '@');
 if(*ls == '@') {
   do {
     ls++;
@@ -20056,17 +20433,16 @@ if(*ls == '@') {
     const uni_CLDR_locale_ext_desc_t *desc = &uni_CLDR_locale_ext_desc[ext];
     me.name = s;
     for(ls++; *ls && *ls != ';' && *ls != '.'; ls++)
-      if(*ls != '-' && *ls != '_') /* FIXME: approx strips these */
+      if(*ls != '-' && *ls != '_')
         *s++ = tolower(*ls);
     *s = 0;
     switch(desc->type_len) {
       default:
-        /* cu i0 lb tz k0 ca t0 nu m0 va co ka kf */
         v = bsearch(&me, desc->lookup, desc->type_len, sizeof(me), uni_cmp_valueof);
         if(!v)
           continue;
-        grow_size(exts, num_ext, num_ext + 1);
-        exts[num_ext - 1] = ext + (v->val << 8);
+        grow_size(exts, exts_len, exts_len + 1);
+        exts[exts_len - 1] = ext + (v->val << 8);
         continue;
       case UNI_LOCALE_EXT_BOOL: {
         int val;
@@ -20076,27 +20452,35 @@ if(*ls == '@') {
           val = 1;
         else
           continue; /* invalid */
-        grow_size(exts, num_ext, num_ext + 1);
-        exts[num_ext - 1] = ext + (val << 8);
+        grow_size(exts, exts_len, exts_len + 1);
+        exts[exts_len - 1] = ext + (val << 8);
         break;
       }
       case UNI_LOCALE_EXT_ATTR:
         continue; /* ignore: attrs may not have parms */
       case UNI_LOCALE_EXT_PRIV:
-        continue; /* ignore: x0 not supported.  do it yourself. */
+        continue; /* ignore: not supported.  do it yourself. */
       case UNI_LOCALE_EXT_CP: {
+        /* FIXME: support > 1 (what separates? -? ,?) */
         char *en;
 	uint32_t n = strtoul(me.name, &en, 16);
 	if(*en || !me.name[0])
 	  continue;
-        grow_size(exts, num_ext, num_ext + 2);
-	exts[num_ext - 2] = ext + ((1 << 8));
-	exts[num_ext - 1] = n;
+        grow_size(exts, exts_len, exts_len + 2);
+	exts[exts_len - 2] = ext + ((1 << 8));
+	exts[exts_len - 1] = n;
         break;
       }
-      case UNI_LOCALE_EXT_REORD:
-        /* FIXME: reordering block names */
+      case UNI_LOCALE_EXT_REORD: {
+        /* FIXME: support > 1 (what separates? -? ,?) */
+        uint32_t b = uni_parse_locale_reorder_block(me.name);
+	if(b == (uint32_t)~0)
+	  continue;
+        grow_size(exts, exts_len, exts_len + 2);
+	exts[exts_len - 2] = ext + ((1 << 8));
+	exts[exts_len - 1] = b;
 	break;
+      }
     }
   } while(*ls && *ls != '.');
 }
@@ -20106,25 +20490,17 @@ The only thing left to do is return a value, after freeing any
 temporary storage.
 
 <<Parse CLDR/Unicode Locale string>>=
-uint32_t ret = uni_locale_triplet(lang, scr, ter), rlen = 1;
-if(var != (uint32_t)~0) {
-  ret |= 1UL << 31;
-  rlen++;
-}
-rlen += num_ext;
-uint32_t init[2];
-init[0] = ret;
-init[1] = var;
-uni_return32_buf32(init, rlen - num_ext, buf, off, buf_len);
+uint32_t ret = uni_locale_triplet(lang, scr, ter);
+uni_return32_buf32(&ret, 1, buf, off, buf_len);
 if(off < 0) { /* fixed-len buffer of length *buf_len */
-  if(*buf_len > rlen - num_ext) {
-    uint32_t *b = *buf + rlen - num_ext;
-    unsigned int len = *buf_len + num_ext - rlen;
-    uni_return32_buf32(exts, num_ext, &b, off, &len);
+  if(*buf_len > 1) {
+    uint32_t *b = *buf + 1;
+    unsigned int len = *buf_len - 1;
+    uni_return32_buf32(exts, exts_len, &b, off, &len);
   }
 } else {
   if(*buf)
-    uni_return32_buf32(exts, num_ext, buf, off + rlen - num_ext, buf_len);
+    uni_return32_buf32(exts, exts_len, buf, off + 1, buf_len);
 }
 free(str);
 if(exts)
@@ -20152,15 +20528,6 @@ print, canonically:
   ter, var = uc
   sort exts alpha order, attrs before kws
   all t's grouped; all u's grouped; t before u
-@
-
-<<FIXME>>=
-unsure if -t handled properly.
-   -t[-_lang]{-_field}; at last one lang or field must be present
-     lang: same format as full locale name, but only - as sep.
-     field: alnum - 3-8 alnum
-   t_i0 t_k0 t_t0 may have other valid subtags: tags indicating method
-Then again, t tags aren't really supported by rest of library, so who cares?
 @
 
 The main ldml files contain the actual locale data.  Every ldml file
@@ -22689,8 +23056,6 @@ point's sc property value.
 \lstset{language=txt}
 <<FIXME>>=
 Document:
-  CLDR name lookups (enums with only names):
-    CLDR_{language,territory,script,variant,collationType,segmentation}
   enums w/o names:
     DUCET_dt
   strings:
@@ -22782,52 +23147,82 @@ These are manipulated using the following macros, which consider
 anything beyond the normal value range of each enumeration to mean
 that the field is undefined:
 
-\input{Locale triplet support macros.tex} % C
-% FIXME: convert to prototypes
+% uni_locale_extract_lang prototype
+% uni_locale_extract_script prototype
+% uni_locale_extract_territory prototype
+% uni_locale_triplet prototype
 
-A locale identifier may also have extensions.  The extensions at least
-partially supported by this library are represented by the partial
-enumeration property [[uni_CLDR_locale_ext]].  Each extension also has
-a descriptor, indexed by its enumeration literal, in the
-[[uni_CLDR_locale_ext_desc]] array.  This array contains the
-extension's parameter type and, in the case of enumerated parameters,
-a pointer to the approximate matching array for that enumerated
-parameter.  Each enumerated parameter is available as a partial
-enumeration property as well, and is named
-[[uni_CLDR_locale_]]\emph{extension}, where \emph{extension} is the
-single-letter extension group (u or t), followed by an underscore,
-followed by the two-letter canonical key (e.g.
-[[uni_CLDR_locale_u_ca]].
+A locale identifier may also have extensions.  The extensions and
+their keys at least partially supported by this library are
+represented by the partial enumeration property
+[[uni_CLDR_locale_ext]].  Each extension key also has a descriptor,
+indexed by its enumeration literal, in the
+[[uni_CLDR_locale_ext_desc]] array.  This array contains the extension
+key's parameter type and, in the case of enumerated parameters, a
+pointer to the matching array for that enumerated parameter.  Each
+enumerated parameter is available as a partial enumeration property as
+well, and is named [[uni_CLDR_locale_]]\emph{extension}, where
+\emph{extension} is the single-letter extension group ([[u]] or
+[[t]]), followed by an underscore, followed by the two-letter
+canonical key (e.g. [[uni_CLDR_locale_u_ca]]).
 
 \input{[[uni_CLDR_locale_ext_desc]].tex} % C
 
 Normally, locales are provided in text form.  The following function
-parses that string to produce values described above.  Its return is
-an array of 32-bit integers.  The first is the
-language-script-territory triplet.  If the high bit is set, the second
-is the variant.  Otherwise, no variant was specified.  Follwing this
-is a list of extensions.  For each extension, the first word's low
-byte is the extension enumeration literal.  The remaining 24 bits'
-value, and any subsequent values, are determined based on type:
+parses a string to produce values described above.  It is not meant to
+determine the validity of a locale identifier; it silently skips
+anything it doesn't understand.  Its purpose is to convert a valid
+locale identifier into something usable for setting locale-specific
+options.
+
+Its return is an array of 32-bit integers.  The first is the
+language-script-territory triplet.  All remaining words are variant
+and extension codes.  Variant codes are encoded as enumeration literal
+values, with the high bit set.  Tranlation locale codes from t
+extensions contain the triplet and variant codes encoded the same way,
+but with bit 30 set.  Extension codes have the extension enumeration
+literal in the low byte, and other information in the upper 3 bytes,
+and, in some cases, following words.  The interpretation of the upper
+3 bytes (shifted down 8 bits) is determined by the extension type:
 
 \begin{itemize}
-\item [[UNI_LOCALE_EXT_BOOL]] --- 0 if false, 1 if true
+\item Enumeration ([[type_len > 0]]) --- the enumeration literal value
+corresponding to the value tag.  If more than one value was present,
+each will be encoded in the same way, as if there were multiple
+key-value pairs.
+\item [[UNI_LOCALE_EXT_BOOL]] --- 0 if false, 1 if true.
 \item [[UNI_LOCALE_EXT_CP]] --- a count; this many words follow giving
-the specified code points
-\item [[UNI_LOCALE_EXT_REORD]] --- not yet implemented
-\item [[UNI_LOCALE_EXT_ATTR]] --- unused
-\item [[UNI_LOCALE_EXT_PRIV]] -- unsupported
+the specified code points.
+\item [[UNI_LOCALE_EXT_REORD]] --- a count; this many words follow
+giving the specified reordering blocks.  Reordering blocks are script
+codes (i.e., [[uni_sc_t]] enumeration values), plus
+[[UNI_REORDER_SPACE]], [[UNI_REORDER_PUNCT]], [[UNI_REORDER_SYMBOL]],
+[[UNI_REORDER_CURRENCY]], [[UNI_REORDER_DIGIT]] and
+[[UNI_REORDER_OTHER]] to indicate the special fixed block names
+([[UNI_REORDER_OTHER]] is actually just an alias for the script code
+[[UNI_sc_Zzzz]]).
+\item [[UNI_LOCALE_EXT_ATTR]] --- unused.
+\item [[UNI_LOCALE_EXT_PRIV]] --- unsupported.
 \end{itemize}
 
 % uni_parse_locale prototype
 
-In addtion to the partial enumerations specified above, this function
-uses one more support table ([[const uni_cp_val_t uni_CLDR_likely_subtags[]]]
-of length [[uni_CLDR_likely_subtags_len]]) to resolve territory
-aliases.  This support table indicates the most likely full locale
-triplet given a partial triplet.  It is stored as a [[uni_cp_val_t]],
-but the ``code point'' is actually the partial triplet, and the value
-is the associated full triplet.  It is sorted by ``code point'' field.
+The reordering code can be separately parsed using the following
+function, which takes an all-lower-case string as input.  It returns
+all ones ([[~0]]) on lookup failure.
+
+% uni_parse_locale_reorder_block prototype
+
+In addtion to the partial enumerations specified above, the locale
+parser function uses one more support table to resolve territory
+aliases ([[const uni_cp_val_t uni_CLDR_likely_subtags[]]] of length
+[[uni_CLDR_likely_subtags_len]]).  This support table indicates the
+most likely full locale triplet given a partial triplet.  It is stored
+as a [[uni_cp_val_t]], but the ``code point'' is actually the partial
+triplet, and the value is the associated full triplet.  It is sorted
+by ``code point'' field.  This table could also be used after parsing
+to fill in missing script and territory values, or during printing to
+suppress redundant script and territory tags.
 
 % End-doc Users-Guide
 
