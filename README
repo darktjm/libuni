@@ -4,12 +4,12 @@ other projects of mine that had separate Unicode-related
 implementations.
 
 You can query a large number of properties consistently (56 boolean,
-21 enumerated, 7 numeric, 24 string at the time of this writing), and
+22 enumerated, 8 numeric, 27 string at the time of this writing), and
 if you link statically, you will only burden your executable with the
 properties you actually use.  19 named Unicode algorithms are also
-implemented (all listed named algorithms in 6.2 except for UBA and
-SCSU), along with a few unnamed algorithms from the standard and
-various annexes.
+implemented (all named algorithms in Table 3-1 of version 7.0 of the
+standard except for UBA and SCSU), along with a few unnamed algorithms
+from the standard and various annexes.
 
 Like some of my other literate projects, I have split off the user
 documentation into a separate document, and have uploaded that to the
@@ -22,20 +22,21 @@ including ones that are meant for internal use.  If any are missing,
 that's a bug.
 
 The noweb source code is attached to the documentation.  It is
-available in PDF form as well:
+available in PDF form as well (assuming I can ever get it uploaded again):
 
   https://bitbucket.org/darktjm/libuni/downloads/uni.pdf
   
 Note that it contains no Unicode Consortium provided information; that
 is all expected to be downloaded separately by the user (as documented
-in the Build chapter).  That information is parsed and converted to C
-during the build process, so it is no longer required after building.
+in uni-doc.pdf, Chapter 2: Building).  That information is parsed and
+converted to C during the build process, so it is no longer required
+after building.
 
 It's not really meant to be stable/usable yet.  Still to do before 1.0:
   - finish collation-related code (locale support via CLDR)
-  - make installation painless:
+  - make installation less painful:
     - create tar files with all sources, including code generated from
-      UCD & CLDR & XML spec
+      UCD & CLDR & XML spec (or maybe not; may be a copyright violation)
     - figure out how to make shared libraries more easily without
       invoking libtool (libtool is a pain) or being Linux-specific
         currently, on Linux:
