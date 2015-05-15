@@ -17447,14 +17447,14 @@ the existence of the first property to provide the third value.
 Instead, it's treated as a plain enumeration.
 
 <<Initialize UCD files>>=
-#if UNI_VER >= 630
+#if UCD_VER >= 630
 decl_num(bpb);
 decl_enum(bpt, "n");
 #endif
 @
 
 <<Parse UCD files>>=
-#if UNI_VER >= 630
+#if UCD_VER >= 630
 open_f("BidiBrackets.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
