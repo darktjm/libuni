@@ -170,15 +170,6 @@ currently ignored.
 
 % End-doc Introduction
 
-\lstset{language=txt}
-<<FIXME>>=
-Provide function to return UCD/CLDR version numbers (and maybe UAX
-revisions used for algorithms).
-Extract CLDR version from any identity section: <version cldrVersion="...">
-verify that Unicode version matches unicodeVersion tag of
-supplementalData's version element
-@
-
 \lstset{language=make}
 <<makefile.config>>=
 # The location of the Unicode Character Database (unzipped)
@@ -7267,6 +7258,43 @@ if(locale & UNI_BRK_LOCALE_FI) {
 }
 @
 
+<<FIXME>>=
+Support u-lb locale extension.  Seems to be a reference to css3-text:
+http://www.w3.org/TR/css3-text/#line-break-property
+  values: auto strict normal loose
+  The precise set of rules in effect for each level is up to the UA
+  and should follow language conventions. However, this specification
+  does require that:
+    Following breaks be forbidden in ‘strict’ line breaking and
+    allowed in ‘normal’ and ‘loose’: 
+      breaks before Japanese small kana or the Katakana-Hiragana
+      prolonged sound mark: i.e. characters with the Unicode Line Break
+      property CJ. (See LineBreak.txt in [UNICODE].)  
+    If the content language is Chinese or Japanese, then
+    additionally allow (but otherwise forbid) for ‘normal’ and ‘loose’:
+      breaks before hyphens:
+        ‐ U+2010, – U+2013, 〜 U+301C, ゠ U+30A0 
+    Following breaks be forbidden in ‘normal’ and ‘strict’ line
+    breaking and allowed in ‘loose’:
+       breaks before iteration marks:
+         々 U+3005, 〻 U+303B, ゝ U+309D, ゞ U+309E, ヽ U+30FD, ヾ U+30FE
+       breaks between inseparable characters such as ‥ U+2025, …
+         U+2026 i.e. characters with the Unicode Line Break property IN. (See
+        LineBreak.txt in [UNICODE].)  
+    If the content language is Chinese or Japanese, then additionally
+    allow (but otherwise forbid) for ‘loose’: 
+      breaks before certain centered punctuation marks:
+        : U+003A, ; U+003B, ・ U+30FB, ： U+FF1A, ； U+FF1B, ･ U+FF65,
+        ! U+0021, ? U+003F, ‼ U+203C, ⁇ U+2047, ⁈ U+2048, ⁉ U+2049,
+	！ U+FF01, ？ U+FF1F
+      breaks before suffixes:
+         % U+0025, ¢ U+00A2, ° U+00B0, ‰ U+2030, ′ U+2032, ″ U+2033,
+	 ℃ U+2103, ％ U+FF05, ￠ U+FFE0
+      breaks after prefixes:
+         № U+2116 and all currency symbols (Unicode general category
+         Sc) other than ¢ U+00A2 and ￠ U+FFE0
+@
+
 \subsection{Support Testing}
 
 While the machine-readable breaking rules are unusable, the test files
@@ -8638,6 +8666,11 @@ that the exact name of the special value for Hangul Syllables is
 encoded in these functions, rather than everywhere lookups are used.
 
 <<Unicode property exports>>=
+void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
+               uint8_t *compat, int h);
+@
+
+<<Unicode property exports>>=
 /* 2-step lookup: uni_find_xxx followed by uni_get_decomp */
 /* off is uint16_t; len and compat are uint8_t; compat is optional */
 void uni_find_canon_decomp(uint32_t cp, int16_t *off, uint8_t *len);
@@ -8653,15 +8686,10 @@ void uni_find_dm(uint32_t cp, int16_t *off, uint8_t *len, uint8_t *compat);
 void uni_get_decomp(uint32_t cp, uint32_t *buf, int16_t *off, uint8_t *len);
 #define uni_get_decomp(cp, buf, off, len) do { \
   if((off) == -1) \
-    uni_hangul_syllable_decomp(cp, buf, (len) == 3); \
+    uni_hangul_syllable_decomp(cp, buf, (len) >= 3); \
   else \
     cpybuf(buf, uni_dm_strs + (off), len); \
 } while(0)
-@
-
-<<Unicode property exports>>=
-void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
-               uint8_t *compat, int h);
 @
 
 <<Unicode property functions>>=
@@ -14335,7 +14363,9 @@ diretories otherwise.  All CLDR data is based off of this root locale,
 and it can be explicitly requested using the locale extension
 \texttt{u-co-standard}.  The CLDR still requires the normal DUCET; it
 can be selected manually using the locale extension
-\texttt{u-co-ducet}.
+\texttt{u-co-ducet}.  The CLDR also provides this data in other
+formats, but as long as the DUCET-format file exists, it's the one
+that's parsed.
 
 \lstset{language=C}
 <<Initialize UCD files>>=
@@ -14400,10 +14430,16 @@ static uint32_t parse_ducet(const char *fname, int propn)
     if((s = strchr(fields[0], ' '))) {
       do {
         str[len++] = strtol(s, &s, 16);
+	if(!(len % 4)) {
+	  fputs("DUCET contraction too long\n", stderr);
+	  exit(1);
+        }
       } while(*s);
     }
     /* 6.2: 120007 words (6212 saved) */
     /* 6.2-CLDR: 120493 words (5724 saved) */
+    /* 7.0: 117482 words (17796 saved) */
+    /* 7.0-CLDR: 117534 words (17688 saved) */
     add_str_rng(prop, low, high, str, len);
   }
   fclose(f);
@@ -14421,10 +14457,13 @@ to be made.
 
 A little space can be saved while storing this by making some strings
 identical when they would normally not be, thereby increasing the
-removals due to redundancy. Level 4 is usually equal to the code
+removals due to redundancy.  Level 4 is usually equal to the code
 point, and is never 1, so that case can be stored as 1 to indicate
-that it is equal to the code point.  This saves an additional 6,972
-words.
+that it is equal to the code point.  This saves some space in 6.2, but
+in versions 6.3 and later the level 4 field is dropped almost
+entirely, making this a less useful optimization.  In fact, the
+data becomes slightly larger as a result.  However, this
+transformation becomes more useful later, so I'll leave it in.
 
 <<Post-process DUCET>>=
 <<Prepare for DUCET post-processing>>
@@ -14440,25 +14479,52 @@ for(i = 0; i < prop->len; i++) {
 for(j = 3; j < len; j += 4)
   if(str[j] == cp)
     str[j] = 1;
-/* 6.2: 113035 words (13184 saved) */
-/* 6.2-CLDR: 112169 words (14048 saved) */
 @
 
 One common expansion is for the sort key to be the concatenation of
 the sort keys for each character in the canonical decomposition of the
-collation element.  To save more space, this sort key string is
-indicated by an empty sort key.  For sanity, the entire key is
-checked, even though the current DUCET has no entries which fail the
-complete check when just the last element matches the decomposition
-characters.  This brings the total down to 117,631 words, with 11,800
-removed due to redundancy.  In other words, it saves an additional
-7,204 words.
+collation element.  Since the official algorithm requires canonical
+decomposition, these entries are removed.  For sanity, the entire key
+is checked, even though the current DUCET has no entries which fail
+the complete check when just the last element matches the
+decomposition characters.
 
-This requires decomposition lookup during DUCET lookup.  However, the
-UCA algorithm specifies NFD form for its input strings; in that case,
-the decomposition will already be done, and no extra work is needed in
-the lookup function.  However, a special case (FCD; see below) allows
-for unnormalized data inputs, where this lookup would be necessary.
+While sort keys present in the table can simply be looked up, some of
+the characters may require synthetic keys.  If the lookup fails, a
+key is synthesized.  Note that synthesis requires the UIdeo and blk
+properties as specified, although this could be modified to use
+explicit range checks instead.  The UIdeo property is complicated
+enough and yet small enough (12 ranges/300 bytes) that conversion
+would not save much, but the blk checks are just single ranges each
+(and the blk table is much larger, at 220 ranges/8032 bytes).  This
+assumes that the ranges will never change in the future, which is
+actually a pretty safe bet.
+
+The UCA standard used to give no hints on how to set the secondary
+value; presumably any non-zero number will work, because the primaries
+will always differ.  The most common value (0020) is chosen for this.
+The tertiary value has a table, but since no decomposition is
+involved, and all special cases are already covered in the DUCET, all
+characters get the default (0002) assigned to them.   Note that in
+recent standards, 0020 and 0002 are the recomended values.
+
+For the fourth level, the UCA standard states that any non-zero value
+should be used on the first key element, and zero on the second.
+However, actual 6.2 DUCET values which duplicate synthesized values
+(due to decomposition) show a non-zero level four on the second key
+element as well, and in fact both use the code point.  For
+consistency, that is what is generated.  In 6.3 and later, zero is
+generated for both level 4 values in the tables.
+
+The removal of this data requires decomposition lookup during DUCET
+lookup.  However, the UCA algorithm specifies NFD form for its input
+strings; in that case, the decomposition will already be done, and no
+extra work is needed in the lookup function.  However, a special case
+(FCD; see below) allows for unnormalized data inputs, where this
+lookup would be necessary.  That is probably why these redundant
+entries were present in the first place, but even they were not
+complete:  they did not include synthetic compositions (i.e., the
+Hangul syllables).
 
 Note that the standard specifies a much more liberal decomposition
 policy.  It uses compatibility decomposition instead of canonical
@@ -14519,8 +14585,8 @@ qsort(prop->str_arr, prop->len, sizeof(*prop->str_arr), uni_cmp_cp);
 @
 
 <<Reduce DUCET entry>>=
-/* if it's decomposed first, then store that case as 0-len string */
-if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
+/* if it's decomposed first, then strip it */
+if(str[3] != 1 && !(len % 4)) {
   raw_cp_str_t *dec = bsearch(&cp, dmf_prop->str_arr,
                               dmf_prop->len,
 			      sizeof(raw_cp_str_t), uni_cmp_cp);
@@ -14530,46 +14596,108 @@ if(str[3] && str[3] != 1 && !(len % 4) && len > 4) {
     if(dec->flags || dec->cp != cp)
       dec = NULL;
   }
-  if(dec && dec->len * 4 == len) {
-    for(j = 0; j < dec->len; j++) {
-      raw_cp_str_t *cd;
-      uint32_t ocp = str[3 + 4 * j];
-      if(ocp != dmf_prop->strs[dec->off + j])
-        break;
-      cd = bsearch(&ocp, prop->str_arr,
-	           prop->len, sizeof(raw_cp_str_t),
-		   uni_cmp_cp);
-      if(!cd)
-        break;
-      /* scan for single-element entry */
-      /* some may have ocp as 1st char of multi-char entry */
-      while(cd->len != 4 && cd > prop->str_arr && cd[-1].cp == ocp)
-        cd--;
-      while(cd->len != 4 && cd < prop->str_arr + prop->len - 1 &&
-            cd[1].cp == ocp)
-	cd++;
-      if(cd->len != 4 ||
-	 (prop->strs[cd->off + 3] != 1 && prop->strs[cd->off + 3] != ocp) ||
-	 memcmp(prop->strs + cd->off, str + 4 * j, 12))
-	break;
+  if(dec && dec->len * 4 <= len) {
+    int k;
+    for(j = k = 0; j < dec->len && k < len; j++, k += 4) {
+      uint32_t dc = dmf_prop->strs[dec->off + j];
+      if(k < len - 4 && str[k] == uca_synth1(dc) && str[k + 1] == 0x20 &&
+         str[k + 2] == 2 && (!str[k + 3] || str[k + 3] == 1 || str[k + 3] == dc) &&
+	 str[k + 4] == uca_synth2(dc) && !str[k + 5] &&
+	 !str[k + 6] && (!str[k + 7] || str[k + 7] == 1 || str[k + 7] == dc))
+        k += 4;
+      else {
+        raw_cp_str_t *cd;
+        uint32_t ocp = str[3 + k];
+        if(ocp && ocp != dc)
+          break;
+        cd = bsearch(&dc, prop->str_arr, prop->len, sizeof(raw_cp_str_t),
+		     uni_cmp_cp);
+        if(!cd)
+          break;
+        /* scan for single-element entry */
+        /* some may have dc as 1st char of multi-char entry */
+        while(cd->len != 4 && cd > prop->str_arr && cd[-1].cp == dc)
+          cd--;
+        while(cd->len != 4 && cd < prop->str_arr + prop->len - 1 && 
+              cd[1].cp == dc)
+	  cd++;
+        if(cd->len != 4 ||
+	   /* need to compare against dc in case not converted to 1 yet */
+	   (prop->strs[cd->off + 3] && prop->strs[cd->off + 3] != 1 &&
+	    prop->strs[cd->off + 3] != dc) ||
+	   memcmp(prop->strs + cd->off, str + 4 * j, 12))
+	  break;
+      }
     }
-    if(j == dec->len)
-      prop->str_arr[i].len = 0;
+    if(j == dec->len && k == len) {
+      movebuf(prop->str_arr + i, prop->str_arr + i + 1, prop->len - i - 1);
+      --i;
+      --prop->len;
+      continue;
+    }
   }
 }
-/* 6.2: 105831 words (11800 saved) */
-/* 6.2-CLDR: 104937 words (12688 saved) */
 @
+
+<<Synthetic UCA key support>>=
+static uint32_t uca_synth1(uint32_t c)
+{
+  uint32_t ret = c >> 15;
+  if(uni_is_UIdeo(c)) {
+#if 0
+    uni_blk_t blk = uni_blk_of(c);
+    if(blk == UNI_blk_CJK || blk == UNI_blk_CJK_Compat_Ideographs)
+#else
+    if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF))
+#endif
+      ret += 0xFB40;
+    else
+      ret += 0xFB80;
+  } else
+    ret += 0xFBC0;
+  return ret;
+}
+#define uca_synth2(c)   (((c) & 0x7fff) | 0x8000)
+@
+
+<<DUCET parser globals>>=
+static int uni_is_UIdeo(uint32_t c)
+{
+  static int UIdeo = -1;
+  if(UIdeo < 0)
+    UIdeo = add_prop("UIdeo");
+  uni_chrrng_t rng = {c, c};
+  return bsearch(&rng, parsed_props[UIdeo].rng, parsed_props[UIdeo].len,
+                 sizeof(rng), uni_cmprng) != NULL;
+}
+<<Synthetic UCA key support>>
+@
+
 
 Similarly, some multi-character collation elements are the canonical
 decomposition of a single character, and the sort key is the sort key
-for that character.  That case could also be encoded by a zero-length
-key, but retaining the extra collation element characters as its
-string.  However, not much is saved (about 415 words, although
+for that character.  That case could be encoded by a zero-length key,
+but retaining the extra collation element characters as its string.
+However, not much is saved (about 415 words in 6.2, although
 surprisingly many more for the CLDR table), so this extra lookup
 complication is not imposed.  Unlike the decomposition entries above,
 the composition entries are legitimate multi-character collation
 elements, even after NFD transformation.
+
+One other redundancy I've noticed in some of the tables is the
+presence of raw synthetic keys.  There is no need to store something
+which can be generated by code.
+
+<<Reduce DUCET entry>>=
+if(len == 8 && str[0] == uca_synth1(cp) && str[1] == 0x20 && str[2] == 2 &&
+   (!str[3] || str[3] == 1) && str[4] == uca_synth2(cp) && !str[5] && !str[6] &&
+   (!str[7] || str[7] == 1)) {
+  movebuf(prop->str_arr + i, prop->str_arr + i + 1, prop->len - i - 1);
+  --prop->len;
+  --i;
+  continue;
+}
+@
 
 While there is a pattern to most of the rest of the DUCET, it is
 difficult to encode, and encoding would make lookup much more
@@ -14625,7 +14753,7 @@ fourth level:
 \end{itemize}
 
 When combining like this, each entry drops in length to 2 or fewer
-words.  This means that if there is more than two characters in the
+words.  This means that if there are more than two characters in the
 index string, it can no longer be detected by length alone.  Since
 every character can be encoded in fewer than 30 bits, the extra index
 characters are simply shifted left two, leaving the lower two bits for
@@ -14642,12 +14770,11 @@ need for scanning, the extra index characters are moved to the front
 of the string as well.
 
 For consistency, the explicitly stored level 4 values are also shifted
-left by two.  This way, the only characters in the string with the
-lower two bits set are the index characters.
+left by two.  This way, the only characters in the string with both of
+the lower two bits set are the index characters.
 
 After collapsing the keys like this, over two thirds of the required
-space is removed.  The result is 33,723 words, with 3,308 words
-removed due to redundancy.  This saves an additional 75,416 words.
+space is removed.
 
 <<Post-process DUCET>>=
 for(i = 0; i < prop->len; i++) {
@@ -14670,8 +14797,6 @@ for(i = 0; i < prop->len; i++) {
   for(k = 0; j < len; j++, k++)
     str[k] = (extra[k] << 2) | 3;
 }
-/* 6.2: 30639 words (3252 saved) */
-/* 6.2-CLDR: 20489 words (3157 saved) */
 @
 
 The final problem to deal with is the possibility of multiple sort
@@ -14704,13 +14829,6 @@ uint32_t raw_ents_size;
 inisize(raw_ents, raw_ents_size = prop->len);
 cpybuf(raw_ents, prop->str_arr, raw_ents_size);
 @
-
-The only potential conflicts when merging are the zero-length canonical
-decomposition entries.  The entry with no index extension is always
-first, so detecting zero-length canonical decomposition entries is
-easy: if the first character is an index extension or the end of the
-string, then the key is blank.  A sanity check is made to ensure that
-there is always a key for the zero-length extension case.
 
 <<Post-process DUCET>>=
 ducet_strs = prop->strs; /* for sort & abbrev */
@@ -14749,8 +14867,10 @@ for(i = prop->len - 1; i > 0; i--) {
   if(!(i = low))
     break;
 }
-/* 6.2: 30641 words (3250 saved) */
-/* 6.2-CLDR: 29491 words (3155 saved) */
+/* 6.2: 27009 words (2850 saved) */
+/* 6.2-CLDR: 25858 words (2756 saved) */
+/* 7.0: 26739 words (3408 saved) */
+/* 7.0-CLDR: 26650 words (3421 saved) */
 @
 
 <<DUCET parser globals>>=
@@ -14779,7 +14899,7 @@ static int cmp_ducet_idx(const void *a, const void *b)
 @
 
 Unsurprisingly, combining entries reduces redundancy a bit (gaining 2
-words).  Thus the original 126,219 words are reduced to 30,641 words.
+words).  Thus the original 126,219 words are reduced to 27,009 words.
 This allows the use of 16-bit offsets, as supported by the
 [[uni_str_arr_t]] type.  Note that this is just the string table; the
 lookup tables add additional overhead (about 200kb for the code point
@@ -15225,8 +15345,13 @@ function very complex.
 
 \lstset{language=txt}
 <<FIXME>>=
+parse CLDR FractionalUCA.txt for reordering groups and case bits (see below)
+@
+
+<<FIXME>>=
   Unimplemented CLDR options:
     caseLevel=on/off: add level "2.5" "case level" (even if 2 not present)
+    note: CLDR-27 removes LOWEST rule, and reduces numbers below by 1
       l2.5 == LOWEST ? 1 : upper_first ? (UPPER ? 2 : MIXED ? 3 : 4) :
                                          (UPPER ? 4 : MIXED ? 3 : 2)
          or 0 if sorting by l1 and l1 = 0
@@ -15235,6 +15360,7 @@ function very complex.
         LOWEST if U+FFFE
         UPPER if l3 == 08-0C, 0E, 11-12, 1D
 	UNCASED otherwise
+      note: rules below come from CLDR<=23
       for locale customizations of single char could take old l3.  for
       multi-char locale customizations, canonically decompose & compute
       for each char:
@@ -15256,6 +15382,15 @@ function very complex.
 	luck figuring them out from printed copies..
       then for original char, combine all.  If all but UNCASED are same,
       use that; otherwise MIXED
+      for CLDR >= 24, a new set of rules is used based on case bits from
+      FractionalUCA.txt (case bits are bits 6-7 of l3):
+        - *for entire string* compute root DUCET values; N = len
+	- *for entire string* compute locale DUCET values; M = len
+	- if N <= M copy root case bits for 0 .. N and clear N+1..M.
+	- if N > M copy root case bits for 0 .. M-2. M-1 =
+	    00 if all remaining are 00 (lower)
+	    10 if all remaining are 10 (upper)
+	    01 otherwise (mixed)
     caseFirst=upper/lower/off: force upper/lower case reordering
       when caseLevel=on, see above.  Otherwise, l2.5 is prepended to
       the l3 value, by shifting left 5 and oring with l3 (I think; it's
@@ -15458,87 +15593,37 @@ if(st->eoi) {
 }
 @
 
-Otherwise, a lookup is performed in the table.  If the lookup fails, a
-key is synthesized.  Note that synthesis requires the UIdeo and blk
-properties as specified, although this could be modified to use
-explicit range checks instead.  The UIdeo property is complicated
-enough and yet small enough (12 ranges/300 bytes) that conversion
-would not save much, but the blk checks are just single ranges each
-(and the blk table is much larger, at 220 ranges/8032 bytes).  This
-assumes that the ranges will never change in the future, which is
-actually a pretty safe bet.
-
-The UCA standard gives no hints on how to set the secondary value;
-presumably any non-zero number will work, because the primaries will
-always differ.  The most common value (0020) is chosen for this.  The
-tertiary value has a table, but since no decomposition is involved,
-and all special cases are already covered in the DUCET, all characters
-get the default (0002) assigned to them.
-
-For the fourth level, the UCA standard states that any non-zero value
-should be used on the first key element, and zero on the second.
-However, actual DUCET values which duplicate synthesized values (due to
-decomposition) show a non-zero level four on the second key element as
-well, and in fact both use the code point.  For consistency, that is
-what is generated.
-
-Note that while the standard states that FCD form data can be
-processed without normalization, this does not cover the implicit
-canonical compositions; i.e., the Hangul syllable compositions.  For
-this reason, if a lookup fails for such a decomposable character, the
-first character of decomposition is processed instead, and any
-remaining characters from decomposition are pushed onto the
-backtracking buffer.%
-\footnote{<sigh> CLDR has additional problems with this.
-Specifically, U+0F73 decomposes to U+0F71 U+0F72.  U+0F73 is a starter
-(ccc=0), and the other two are non-starters (ccc>0).  This means that
-the latter two will be reordered to combine with U+0FB3, but U+0F73
-will not.  Having the string in FCD form makes no difference; UCA
-simply disallows moving starters around.  I don't know if this is a
-bug in the UCD (maybe U+0F73 shouldn't be a starter, since it
-decomposes into two non-starters) or a bug in the claim that the UCA
-can be applied as-is (maybe it needs changes to support FCD) or a bug
-in the CLDR DUCET or what.}
-
+Otherwise, a lookup is performed in the table.  If it succeeds, the
+results are returned appropriately.  Otherwise, it might be a
+canonically decomposable character.  The automatic single-character
+decomposition performed by the original DUCET was stripped above, so
+it must be done here, by pushing the decomposition onto the
+backtracking buffer and retrying.  If it is neither in the table nor a
+canonical composition, a key is synthesized.
 
 <<DUCET lookup state members>>=
 uni_str_ptr_t v;
 uint32_t c;
 @
 
+<<Private DUCET lookup definitions>>=
+<<Synthetic UCA key support>>
+@
+
 <<Look up in DUCET given no state>>=
 const uni_str_ptr_t *v;
 uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
-if(!v || (!v->off && !v->len)) {
-  uint32_t hbuf[3];
-  int hlen = uni_hangul_syllable_decomp(c, hbuf, 1);
-  if(hlen > 0) {
-    c = hbuf[0];
-    uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
-    add_bt(hbuf[1], st);
-    if(hlen > 2)
-      add_bt(hbuf[2], st);
-  }
+if(!v || !v->len) {
+  <<Set [[v]] from canonical decomposition>>
 }
-if(v && (v->off || v->len)) {
+if(v && v->len) {
   st->v = *v;
   <<Process DUCET initial lookup>>
 } else {
+  /* synthesized elements are 2-parters; prepare for 2nd part */
   st->c = c;
   st->state = DUCET_lookup_synth;
-  l123 = ((c >> 15) << 16) + (0x0020 << 7) + (0x0002 << 2);
-  if(uni_is_UIdeo(c)) {
-#if 0
-    uni_blk_t blk = uni_blk_of(c);
-    if(blk == UNI_blk_CJK || blk == UNI_blk_CJK_Compat)
-#else
-    if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3300 && c <= 0x33FF))
-#endif
-      l123 += 0xFB40 << 16;
-    else
-      l123 += 0xFB80 << 16;
-  } else
-    l123 += 0xFBC0 << 16;
+  l123 = (uca_synth1(c) << 16) + (0x0020 << 7) + (0x0002 << 2);
   l4 = c; /* actual value does not matter, as long as it's non-0 */
   <<Return more than one DUCET value>>
 }
@@ -15550,10 +15635,49 @@ if(v && (v->off || v->len)) {
 
 <<Look up in DUCET given state>>=
 case DUCET_lookup_synth:
-  l123 = ((st->c & 0x7fff) << 16) | 0x80000000;
-  l4 = st->c;
+  l123 = uca_synth2(st->c) << 16;
+  l4 = st->c; /* should be 0, but sample data uses c, so I will as well */
   st->state = 0;
   <<Return one DUCET value>>
+@
+
+Two sources of single-character decomposition exist:  table entries
+and Hangul syllable decomposition.  While it may be more efficient to
+store the decomposition results as a pointer and length, since it's a
+static buffer, it is instead pushed onto the regular backtracking
+buffer in order to avoid having to duplicate processing code.  The
+input to the function should be canonically decomposed anyway, so this
+will not happen often.
+
+<<DUCET lookup state members>>=
+const uint16_t *multi_ret16;
+uint32_t multi_ret_len;
+@
+
+<<Set [[v]] from canonical decomposition>>=
+int16_t coff;
+uint8_t clen;
+uni_find_canon_decomp(c, &coff, &clen);
+if(coff >= 0 && clen > 0) {
+  const uint16_t *str = uni_canon_decomp_strs + coff;
+  unsigned int cl;
+  c = uni_int_utf16_decode(str, &cl);
+  uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+  while(clen -= cl) {
+    str += cl;
+    add_bt(uni_int_utf16_decode(str, &cl), st);
+  }
+} else if(coff < 0) {
+  uint32_t hbuf[3];
+  int hlen = uni_hangul_syllable_decomp(c, hbuf, 1);
+  if(hlen > 0) {
+    c = hbuf[0];
+    uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
+    add_bt(hbuf[1], st);
+    if(hlen > 2)
+      add_bt(hbuf[2], st);
+  }
+}
 @
 
 For a successful lookup, the response for a single-character index is
@@ -15910,98 +16034,19 @@ break;
 @
 
 Due to advancing the pointers above, [[v]] points to the desired result
-to return.  The only difficulty is distinguishing between
-multi-character index results and blank single-character index
-results; this can be done by checking [[curoff]], which points to the
-first character after the key.  If this is zero, then it is a blank
-single-character index result.
-
-<<Look up and return a single key element from DUCET>>=
-if(!st->curoff) {
-  <<Return blank single-character index DUCET result>>
-}
-int i;
-const uint32_t *str = st->strs + st->v.off;
-for(i = 0; i < st->curoff; i++)
-  if((str[i] & 3) != 3)
-    break;
-<<Return non-blank DUCET result>>
-@
-
-The single-character index entries with blank keys denote canonical
-decomposition.  This may require more than one result.  All decomposed
-characters are guaranteed to have a real key of length one for the
-single-character index.
-
-<<DUCET lookup state members>>=
-const uint16_t *multi_ret16;
-uint32_t multi_ret_len;
-@
-
-<<Return blank single-character index DUCET result>>=
-const uni_str_ptr_t *v;
-uni_multi_tab_lookup(uni_canon_decomp_mtab, c * 4, (const uint8_t **)&v, 0);
-st->multi_ret16 = uni_dm_strs + v->off;
-st->multi_ret_len = v->len;
-<<Return DUCET entry for next decomp character>>
-@
-
-<<Return DUCET entry for next decomp character>>=
-unsigned int clen;
-const uint32_t *str;
-c = uni_int_utf16_decode(st->multi_ret16, &clen);
-st->multi_ret16 += clen;
-st->multi_ret_len -= clen;
-<<Look up and return DUCET value for [[c]]>>
-if(st->multi_ret_len) {
-  st->state = DUCET_lookup_compret;
-  <<Return more than one DUCET value>>
-} else {
-  st->state = DUCET_lookup_start;
-  <<Return one DUCET value>>
-}
-@
-
-<<Look up and return DUCET value for [[c]]>>=
-uni_multi_tab_lookup(st->tab, c * 4, (const uint8_t **)&v, 0);
-str = st->strs + v->off;
-<<Return DUCET value for [[str]]/[[c]]>>
-@
-
-<<Return DUCET value for [[str]]/[[c]]>>=
-l123 = *str & ~3;
-switch(*str & 3) {
-  case 0:
-    l4 = 0;
-    break;
-  case 1:
-    l4 = c;
-    break;
-  default:
-    l4 = *++str >> 2;
-    break;
-}
-@
-
-<<DUCET lookup states>>=
-,DUCET_lookup_compret
-@
-
-<<Look up in DUCET given state>>=
-case DUCET_lookup_compret:
-  {
-    <<Return DUCET entry for next decomp character>>
-  }
-@
-
-The non-blank result only requires work if there is more than one key
-entry.  If so, it is returned later.
+to return.  The result only requires work if there is more than one
+key entry.  If so, it is returned later.
 
 <<DUCET lookup state members>>=
 const uint32_t *multi_ret32;
 @
 
-<<Return non-blank DUCET result>>=
+<<Look up and return a single key element from DUCET>>=
+int i;
+const uint32_t *str = st->strs + st->v.off;
+for(i = 0; i < st->curoff; i++)
+  if((str[i] & 3) != 3)
+    break;
 str += i;
 st->multi_ret32 = str;
 st->curoff -= i;
@@ -16019,6 +16064,21 @@ st->state = DUCET_lookup_multikey;
 
 <<DUCET lookup states>>=
 ,DUCET_lookup_multikey
+@
+
+<<Return DUCET value for [[str]]/[[c]]>>=
+l123 = *str & ~3;
+switch(*str & 3) {
+  case 0:
+    l4 = 0;
+    break;
+  case 1:
+    l4 = c;
+    break;
+  default:
+    l4 = *++str >> 2;
+    break;
+}
 @
 
 <<Look up in DUCET given state>>=
@@ -16275,7 +16335,7 @@ added to the options structure.  While the standard indicates that
 literal comparison is selected with [[max_level]] of 5 or higher, in
 fact the test data suggests that literal comparison should be possible
 with lower levels as well.  If [[max_level]] is 5 or higher, or the
-explicit [[literal]] flag is set, literal comparison will be made.
+explicit [[do_literal]] flag is set, literal comparison will be made.
 
 <<Unicode UCA function options>>=
 int8_t do_literal;
@@ -16415,7 +16475,18 @@ This requires a single decomposition lookup, followed by multuple ccc
 lookups and a sort.  However, most strings are already close enough to
 being normalized that the DUCET lookup would work anyway.  In
 particular, the standard allows a so-called Fast C or D form (FCD)
-test.  This requires only the ccc of the first and last character of
+test%
+\footnote{<sigh> the CLDR DUCET in 6.2 at least has additional
+problems with this.  Specifically, U+0F73 decomposes to U+0F71 U+0F72.
+U+0F73 is a starter (ccc=0), and the other two are non-starters
+(ccc>0).  This means that the latter two will be reordered to combine
+with U+0FB3, but U+0F73 will not.  Having the string in FCD form makes
+no difference; UCA simply disallows moving starters around.  I don't
+know if this is a bug in the UCD (maybe U+0F73 shouldn't be a starter,
+since it decomposes into two non-starters) or a bug in the claim that
+the UCA can be applied as-is (maybe it needs changes to support FCD)
+or a bug in the CLDR DUCET or what.}%
+.  This requires only the ccc of the first and last character of
 each full canonical decomposition.  Since this property is not
 provided directly in any other way, it is generated here.
 
@@ -17127,7 +17198,8 @@ contains very few elements; in that case, the literal elements can be
 matched instead, much more efficiently.  One aspect that this library
 already provides that others do not is the ability to detect
 multi-character collation elements, given the first character of such
-an element.  Without that, even this approach would not be possible.
+an element.  Without that, even the forward lookup approach would not
+be possible.
 \item Given two collation elements, list all collation elements which
 lie between them.  This is required for regular expressions.  Then
 again, regex could just store the DUCET values for each end of the
@@ -17334,9 +17406,9 @@ for(i = raw_ents_size - 1; /* i >= 0 */ ; i--) {
 
 This transformation alone is already enough to implement the regular
 expression requirements, so a property is created using the results.
-The string table is rather large (58,099 words, with no redundancy due
-to the initial cp differing for each entry), but still barely small
-enough for 16-bit offsets.
+The string table is rather large (53,053 words in 6.2, with no
+redundancy due to the initial cp differing for each entry), but still
+barely small enough for 16-bit offsets.
 
 <<Post-process DUCET>>=
 char rname[strlen(prop->name) + 5];
@@ -17770,6 +17842,7 @@ extern const unsigned int uni_ucd_version, uni_cldr_version;
 
 <<FIXME>>=
 Versions of all other files used.
+  UAX versions (always advance in sync with UCD)
   Unihan (same as UCD version)
   idna (same as UCD version)
   UCA (same as UCD version)
@@ -19589,7 +19662,7 @@ while((de = readdir(d))) {
 	        /* one or more 4-6 hex-digit code points */
 		special = LEXT_CP;
 	      else if(num_val_aliases[parm_prop] == 2 &&
-	                /* FIXME: use bsearch instead */
+	                /* FIXME: use bsearch, in case aliases different */
 	                !strcmp(enum_vals[parm_prop][0].name, "false") &&
 			!strcmp(enum_vals[parm_prop][2].name, "true"))
                 /* booleans don't need enums really */
@@ -20291,26 +20364,6 @@ independent keyword/value pairs.
 
 <<Type cases for locale ext keyword [[ext]]>>=
 default:
-  /*
-    t-k0 - keyboard - not useful; multiple subtags
-           may have as-yet-unspecified tags, but don't care
-    t-i0 - input method xform - not useful; multiple subtags
-           may have as-yet-unspecified tags, but don't care
-    t-t0 - mach-xlate - not useful; probably multiple subtags
-           may have as-yet-unspecified tags, but don't care
-    t-m0 - xform ext - not useful
-    u-cu - currency - not useful
-    u-lb - line break type
-    u-tz - timezone - not useful; most names only valid in @-syntax
-    u-ca - calendar - not useful; may have 2 tags (if name has -)
-    u-nu - number-style - not useful
-    u-va - variant - should translate to equivalent variant tag, really
-    u-co - collation type (FIXME: augmented by locale-specific types)
-    u-ka - collation alt handling
-    u-kf - collation case folding
-    u-ks - collation strength
-    u-kv - collation maxvar
-   */
   if(tl <= 2)
     continue; /* at lest one parameter required */
   do {
@@ -20348,13 +20401,6 @@ truth.  This is supported here as well.
 
 <<Type cases for locale ext keyword [[ext]]>>=
 case UNI_LOCALE_EXT_BOOL: {
-  /*
-    u-kb - collation 2nd level backwards
-    u-kc - collation insert case level
-    u-kh - collation hiragana handling
-    u-kk - collation normalization
-    u-kn - collation numeric handling
-   */
   int val;
   if(tl < 3)
     val = 1; /* if just present, same as "true" */
@@ -20388,9 +20434,6 @@ the raw code points.
 
 <<Type cases for locale ext keyword [[ext]]>>=
 case UNI_LOCALE_EXT_CP: {
-  /*
-    u-vt collation vartop
-   */
   if(tl <= 2)
     continue; /* at lest one parameter required */
   uint32_t lenoff = exts_len; 
@@ -20424,9 +20467,6 @@ following the initial word identify reordering blocks.
 
 <<Type cases for locale ext keyword [[ext]]>>=
 case UNI_LOCALE_EXT_REORD: {
-  /*
-    u-kr collation reordering
-   */
   if(tl <= 2)
     continue; /* at lest one parameter required */
   uint32_t lenoff = exts_len; 
@@ -20587,6 +20627,7 @@ if(*ls == '@') {
       }
       case UNI_LOCALE_EXT_REORD: {
         /* FIXME: support > 1 (what separates? -? ,?) */
+	/* not too important; introduced after u- syntax, so use u- */
         uint32_t b = uni_parse_locale_reorder_block(me.name);
 	if(b == (uint32_t)~0)
 	  continue;
@@ -20725,10 +20766,10 @@ uint32_t uni_locale_triplet_fill(uint32_t triplet, int force)
 @
 
 For fully canonical locale descriptors, duplicate tags must be removed
-(retaining the last one, I guess; there is no guideline for this), and
-tags and variants must be sorted alphabetically, with variants first,
-then [[u]] extensions, with the attributes (none of which currently
-exist%
+(retaining the first one, according to the RFC, although I'd prefer to
+keep the last one), and tags and variants must be sorted
+alphabetically, with variants first, then [[u]] extensions, with the
+attributes (none of which currently exist%
 \footnote{Maybe they also meant booleans whose value is true, since,
 like attributes, they do not need parameters.}%
 ) first, and finally [[t]] extensions.  [[x]] extensions were
@@ -20828,8 +20869,8 @@ int uni_locale_sort_var_exts(uint32_t *locale, int locale_len)
        ((*sort_array[i] & (1UL << 30)) && (*sort_array[i + 1] & (1UL << 30)))) {
       if((*sort_array[i] & (3UL << 30)) ||
          uni_CLDR_locale_ext_nameof[*sort_array[i] & 0xff].short_name[0] != 't') {
-	/* always keep last one */
-	movebuf(sort_array + i, sort_array + i + 1, sort_array_len - i - 1);
+	/* always keep first one */
+	movebuf(sort_array + i + 1, sort_array + i + 2, sort_array_len - i - 2);
 	--sort_array_len;
 	--i; /* recheck */
 	sorted = 0;
@@ -20881,6 +20922,51 @@ convert to canonical string:
   ter = uc
   var = uc or lc (rec. lc, I guess)
 convert to uni_uca_opts_t and various flags
+  triplet, variants, u-va -> select locale
+    UNI_BRK_LOCALE_JA     language=ja
+    UNI_BRK_LOCALE_POSIX  u-va-posix (maybe also en-latn-us)
+    UNI_BRK_LOCALE_EL     language=el
+    UNI_BRK_LOCALE_FI     language=fi
+    UNI_BRK_LOCALE_ZH     language=zh
+    locale selects full default uni_uca_opts_t (including some unimpl.)
+                        due to "settings" tags in locale data
+  t-localeid t-k0 t-i0 t-t0 t-m0 -> ignore translation extension
+  u-cu u-tz u-ca u-nu -> ignore non-collation, non-break tags
+  u-lb - line break type (strict normal loose)
+    unimplemented - see css3-text above
+  u-co - collation type (ducet standard search ...) (default=standard)
+     ducet means use original DUCET table
+     root/standard is the unmodified CLDR table
+     search* becomes search if not available in this locale
+     or default for locale if not search* or search not available
+     or standard if none of above available
+     or root/standard if none of the above avail.
+  u-ka - collation alt handling (noignore shifted) (default noignore)
+    var_mode = UNI_DUCET_VAR_MODE_NON_IGNORABLE
+               UNI_DUCET_VAR_MODE_SHIFTED
+  u-kf - collation case folding (upper lower false) (default false)
+    unimplemented; see caseFirst comment above
+  u-ks - collation strength (level1 level2 level3 level4 identic)
+    max_level = 1/2/3/4/5  (5 gets auto-converted to 4+do_literal)
+  u-kv - collation maxvar (space punct symbol currency)
+           set vartop to top of given reordering block
+  u-kb - collation 2nd level backwards
+    reverse_lev2
+  u-kc - collation insert case level
+    unimplemented; see caseLevel comment above
+  u-kh - collation hiragana handling
+    unimplemented; see hiraganaQuaternary comment aboe
+  u-kk - collation normalization
+    needs to be implemented at a higher level
+    default for UCA is true, but for CLDR is false
+  u-kn - collation numeric handling
+    unimplemented; see numeric comment above
+  u-vt - collation vartop
+    var_top, but must set to top cp in cp's reordering block
+  u-kr - collation reordering
+    unimplemented; see reorder comment above
+  u-va - variant (posix)
+    not sure if affects collation
 @
 
 The main ldml files contain the actual locale data.  Every ldml file
@@ -21228,7 +21314,8 @@ transforms -> mappings (no real single name for each, though)
 
 crappy "set" notation must be implemented for reading LDML files:
  claims UTS18-L1+RL2.5 "with recommended syntax", but then goes on
- to describe a different syntax..  in particular, set ops are different
+ to describe a different syntax (probably because the documents are
+ not kept in sync).  in particular, set ops are different
    "A multi-character string can be in a Unicode set.. uses curly  braces"
      wtf does that mean?  \u{XXXX XXXX}? {c1 c2 c3}?
   literal chars & ranges
@@ -23067,7 +23154,7 @@ be looked up and compared as if they were UCA sort keys.  To retrieve
 the sort key for a string, use the following functions.  The string
 length is negative for zero-terminated strings, or positive for
 strings with an absolute length.  The function returns a sort key
-allocated with [[malloc]], whose length is return in [[*rlen]].  If
+allocated with [[malloc]], whose length is returned in [[*rlen]].  If
 [[llen]] is non-[[NULL]], it points to a 4-element array into which to
 place the number of non-zero elements at each level of the key.
 Remember that the string input should be at least FCD form.%
