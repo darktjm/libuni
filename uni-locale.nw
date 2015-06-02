@@ -1,0 +1,615 @@
+% -*- mode: Noweb; noweb-code-mode: c-mode; -*-
+% Build with noweb:
+%  notangle -t8 build.nw > makefile
+%  make
+\documentclass[twoside,english]{article}
+\usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
+%%% latex preamble
+% Begin-doc uni-rcs
+\RCS $Id$
+\RCS $Revision$
+\RCS $Date$
+% End-doc uni-rcs
+
+%%% requires uni
+
+\begin{document}
+
+\title{Unicode Locale Support Data Files}
+\author{Thomas J. Moore}
+\date{Version 0.\RCSRevision\\\RCSDate}
+\maketitle
+
+\begin{rawhtml}
+<!-->
+\end{rawhtml}
+\iffalse
+<<Sources>>=
+$Id$
+@
+
+<<Version Strings>>=
+"$Id$\n"
+@
+
+<<Common NoWeb Warning>>=
+# $Id$
+@
+\fi
+\begin{rawhtml}
+<-->
+\end{rawhtml}
+
+\begin{abstract}
+
+This document describes and implements a CLDR data parser to provide
+locale support for the basic Unicode support library described in
+[[uni.nw]].
+
+\vspace{0.75in}
+
+This document is \copyright{} 2015 Thomas J. Moore.  This
+document is licensed under the Apache License, Version 2.0 (the
+``License''); you may not use this document except in compliance with
+the License. You may obtain a copy of the License at
+\url{http://www.apache.org/licenses/LICENSE-2.0}.  Unless required by
+applicable law or agreed to in writing, software distributed under the
+License is distributed on an ``AS IS'' BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for
+the specific language governing permissions and limitations under the
+License. 
+
+\vspace{0.25in}
+
+This document was generated from the following sources, all of which are
+attached to the original electronic forms of this document:
+\input{Sources.tex} % txt
+
+\end{abstract}
+
+% Begin-doc Introduction
+\tableofcontents
+\listoftables
+
+\section{Introduction}
+
+The basic Unicode access library has hooks for using locale-specific
+data tables in some of the standard algorithms.  Rather than parsing
+everything in [[parse-ucd]] to produce locale-specific tables, this
+task is delegated to [[parse-cldr]], described and implemented herein.
+See the libuni document for requirements regarding external data files
+and their locations.
+
+<<FIXME>>=
+CLDR 24+ sentence overrides:
+  - provide a table parameter for exceptions
+  - provide a cldr function to retrieve exceptions for current locale
+  - hope that CLDR tracks ULI changes, because I don't want do download
+    and parse a bunch of separate MS Office files with weird URLs
+@
+
+\section{The CLDR}
+
+The CLDR and the ICU library go hand-in-hand; the CLDR is basically
+the ICU data files somewhat sloppily extracted from ICU.  It may be
+best to not support the CLDR data at all, but instead use ICU to query
+it.  A few support functions could be provided to use it along with
+the UCD (but then again, ICU has all of the UCD as well, so why bother
+with libuni at all?).  However, like the POSIX locale functions, the
+ICU functions do not provide a way to query the information needed for
+a compliant regular expression engine.  It is also a fairly large
+library, and I am unsure it does a good job of allowing minimal
+linkage.
+
+The CLDR also uses XML rather than simple tables.  Doing hand-coded
+XSLT for hundreds of data files seemed excessive, which is the main
+reason why I abandoned XSLT.  Note that unlike for the XML entity
+data, there is a local, valid DTD for every CLDR file.
+
+\lstset{language=C}
+<<C Build Executables>>=
+parse-ldml \
+@
+
+<<parse-ldml.c>>=
+<<Common C Header>>
+#include <libxml/parser.h>
+#include <libxml/xmlerror.h>
+#include <dirent.h>
+#include "uni_all.h"
+<<LDML parser local definitions>>
+
+<<LDML parser local functions>>
+
+int main(void)
+{
+  char *cwd = getcwd_full();
+  <<Parse LDML data files>>
+  return 0;
+}
+@
+
+<<LDML parser local definitions>>=
+<<XML Support Definitions>>
+@
+
+<<Parse LDML data files>>=
+<<Prepare for XML parsing>>
+chdir(cwd);
+chdir(CLDR_LOC);
+<<Parse LDML files>>
+@
+
+\lstset{language=make}
+<<makefile.vars>>=
+parse-ldml.o: EXTRA_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\" $(XML_CFLAGS)
+parse-ldml: EXTRA_LDFLAGS += $(XML_LDFLAGS)
+@
+
+The main ldml files contain the actual locale data.  Every ldml file
+at least identifies itself.  All ldml files with the same identity
+are effectively merged into a single tree.  For alias lookups and data
+merging, all available xml files are read in and keyed by their
+primary identity.
+
+\lstset{language=C}
+<<LDML parser local functions>>=
+static void parse_ldml(const char *name, const char *cwd)
+{
+  /* ignore special tags everywhere, since it's undefined */
+  xmlDocPtr doc = xmlReadFile(name, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(name);
+    exit(1);
+  }
+  xmlNodePtr n, c;
+  <<LDML parser globals>>
+  for(n = doc->children; n; n = n->next)
+    /* not sure why 1st entry is always empty ldml */
+    if(n->children && xml_isname(n, "ldml")) {
+      /* ignore draft attribute */
+      /* ignore deprecated fallback tag */
+      for(n = n->children; n; n = n->next) {
+	if(!n->children)
+	  continue;
+	<<Parse ldml sections>>
+      }
+      break;
+    }
+  xmlFreeDoc(doc);
+  <<LDML parser globals cleanup>>
+}
+@
+
+<<LDML parser globals>>=
+char *langfile = NULL;
+@
+
+<<LDML parser globals cleanup>>=
+if(langfile)
+  free(langfile);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "identity")) {
+  /* ignore version, generation */
+  static int LDML_language = -1, LDML_script = -1, LDML_territory = -1,
+             LDML_variant = -1;
+  uint32_t lang = 0, var = ~0;
+  uni_valueof_t me, *v;
+  for(c = n->children; c; c = c->next) {
+    if(xml_isname(c, "language")) {
+#define lang_lookup(t) do { \
+  char *s, *p; \
+  me.name = p = xml_prop(c, "type"); \
+  for(s = p; *s; s++) { \
+    if(*s == '_' || *s == '-') { \
+      *s = 0; \
+      break; \
+    } else \
+      *s = tolower(*s); \
+  } \
+  v = bsearch(&me, uni_CLDR_##t##_valueof, uni_CLDR_##t##_valueof_len, \
+              sizeof(me), uni_cmp_valueof); \
+  if(!v) { \
+    fprintf(stderr, "unknown " #t " %s\n", p); \
+    exit(1); \
+  } \
+  if(strcmp(uni_CLDR_##t##_nameof[v->val].short_name, p)) { \
+    fprintf(stderr, #t " %s is not canonical (%s)\n", p, \
+            uni_CLDR_##t##_nameof[v->val].short_name); \
+    /* exit(1); */ \
+  } \
+  xmlprop_free(p); \
+} while(0)
+      lang_lookup(language);
+      lang = uni_locale_set_language(lang, v->val);
+      {
+        char *p = xml_prop(c, "type");
+	char *s = strchr(p, '_');
+	if(!s)
+	  s = strchr(p, '-');
+	if(s) {  /* piece of shit.  why not use the script/territory tags? */
+	  fprintf(stderr, "multi-tag value %s for language identity in %s\n",
+	          p, name);
+	  /* at least there is never a 3rd tag in current LDML */
+	  me.name = s + 1;
+	  while(*++s)
+	    *s = tolower(*s);
+	  v = bsearch(&me, uni_CLDR_script_valueof, uni_CLDR_script_valueof_len,
+	              sizeof(me), uni_cmp_valueof);
+          if(v)
+	    lang = uni_locale_set_script(lang, v->val);
+          else {
+	    v = bsearch(&me, uni_CLDR_territory_valueof, uni_CLDR_territory_valueof_len,
+	                sizeof(me), uni_cmp_valueof);
+            if(!v) {
+	      fprintf(stderr, "unknown extra tag %s\n", me.name);
+	      exit(1);
+	    }
+	    lang = uni_locale_set_territory(lang, v->val);
+	  }
+	}
+	xmlprop_free(p);
+      }
+    } else if(xml_isname(c, "script")) {
+      lang_lookup(script);
+      lang = uni_locale_set_script(lang, v->val);
+    } else if(xml_isname(c, "territory")) {
+      lang_lookup(territory);
+      lang = uni_locale_set_territory(lang, v->val);
+    } else if(xml_isname(c, "variant")) {
+      lang_lookup(variant);
+      var = v->val; /* never more than one in current LDML, but should verify */
+    }
+    else if(xml_isname(c, "alias")) { /* not in current LDML main or collation */
+      char *alias = xml_prop(c, "source"), *path = xml_prop(c, "path");
+      fprintf(stderr, "Unsupported alias %s %s in %s\n", alias, path, name);
+      exit(1);
+    }
+    /* note that draft, references, alt fields ignored above */
+  }
+  if(langfile) {
+    fprintf(stderr, "duplicate identity in %s\n", name);
+    exit(1);
+  }
+  inisize(langfile, 8 + 1 + 3 + 1);
+  sprintf(langfile, "%08X", lang);
+  if(var != (uint32_t)~0)
+    sprintf(langfile + 8, "-%d", var);
+}
+@
+
+<<Open LDML ouptut data file (@pref)>>=
+if(!langfile) {
+  fprintf(stderr, "No identity before data in %s\n", name);
+  exit(1);
+}
+char langfile_full[8 + 1 + 3 + sizeof("<<@pref>>")];
+strcpy(langfile_full, "<<@pref>>");
+strcpy(langfile_full + sizeof("<<@pref>>") - 1, langfile);
+char *od = getcwd_full();
+chdir(cwd);
+open_wf(of, langfile_full);
+chdir(od);
+@
+
+The collations subdirectory contains locale-specific collation order
+changes.
+
+<<Parse LDML files>>=
+/* collation: locale-specific collation rules */
+struct dirent *de;
+DIR *d = opendir("common/collation");
+if(!d) {
+  perror("LDML collation");
+  exit(1);
+}
+chdir("common/collation");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name, cwd);
+}
+closedir(d);
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "collations")) {
+  char *subl = xml_prop(n, "validSubLocales");
+#if 0
+  /* space-separated list of full locale names */
+  if(subl)
+    printf("sublang: %s\n", subl);
+#endif
+  /* ignore version, draft attrs */
+#if 0
+  const char *def = "standard";
+#endif
+  char *xdef = NULL;
+  for(c = n->children; c; c = c->next) {
+    /* should be same enum type as types below */
+    if(xml_isname(c, "default")) {
+      xdef = xml_prop(c, "choice");
+      if(!xdef)
+        xdef = xml_prop(c, "type"); /* deprecated, but used */
+#if 0
+      def = xdef;
+#endif
+      /* ignore draft, references, alt attrs */
+      /* can have more than one, but why would you? */
+    } else if(xml_isname(c, "collation")) {
+      /* store in file as DUCET/rev_DUCET override tables */
+      /* just mtab version: */
+      /*   <strtab len> */
+      /*   <strtab> */
+      /*   <mtab len> */
+      /*   <mtab> */
+      /*   <rev strtab len> */
+      /*   <rev strtab> */
+      /*   <rev mtab> */
+      /* ignore draft, standard, references, alt */
+      if(!subl) /* technically, this isn't a req, but it's safe */
+        subl = xml_prop(c, "validSubLocales");
+      /* ignore draft, standard, references, alt attrs */
+      /* ignore visibility attr */
+      /* all available types should be an enum */
+      /* or at least easily looked up on per-lang basis */
+      /* most langs have no alt types, but some have many */
+#if 0
+      printf("[rules for type %s]\n", xml_prop(c, "type"));
+#endif
+      xmlNodePtr cc;
+      const char *base = NULL; /* DUCET by default */
+      for(cc = c->children; cc; cc = cc->next) {
+        if(xml_isname(cc, "base")) {
+	  xmlNodePtr ccc;
+	  for(ccc = cc->children; ccc; ccc = ccc->next)
+	    if(xml_isname(ccc, "alias")) {
+	      base = xml_prop(ccc, "source");
+	      /* path should always be /ldml/collations */
+	      break;
+	    }
+	} else if(xml_isname(cc, "settings")) {
+	  /* note: only settings in wild are: */
+	  /*   backwards=on */
+	  /*   caseFirst=upper */
+	  /*   normalization=on */
+	  /*   alternate=shifted */
+	  /*   variableTop=<n> */
+	  /*   strength=Tertiary */
+	  /*   hiraganaQuaterary=on */
+	  /* valid, though: */
+	  /*  strength=primary|secondary|tertiary|quaternary|identical */
+	  /*  alternate=non-ignorable|shifted */
+	  /*  backwards=on|off */
+	  /*  normalization=on|off */
+	  /*  caseLevel=on|off */
+	  /*  caseFirst=upper|lower|off */
+	  /*  hiraganaQuarternary=on|off */
+	  /*  hiraganaQuaternary=on|off */
+	  /*  numeric=on|off */
+	  /*  private=true|false */  /* deprecated */
+	  /*  variableTop='x' */
+	  /*  reorder=? */
+#if 0
+	  xmlAttrPtr a;
+          fputs("  settings", stdout);
+	  for(a = cc->properties; a; a = a->next)
+	    printf(" %s=%s", a->name, a->children->content);
+	  putchar('\n');
+#endif
+        } else if(xml_isname(cc, "rules")) {
+	  xmlNodePtr r;
+	  for(r = cc->children; r; r = r->next) {
+	    if(r->type != XML_ELEMENT_NODE)
+	      continue;
+	    /* r->name may be alias.  not seen in wild. */
+	    /* r->name may be import (repeatedly).  not seen in wild. */
+	    /* r->name should be enum */
+	    /* reset [before=primary/secondary/tertiary] */
+	    /* note: reset arg may be tag: */
+	    /*    <when>_<lev>_ignorable */
+	    /*      <lev>=primary secondary tertiary non */
+	    /*      <when>=first last */
+	    /*    <when>_variable */
+	    /*    <when>_trailing */
+	    /*    cp hex=... */
+	    /* p pc s sc t tc i ic */ /* q qc are deprecated */
+	    /*   each takes interleaved raw data, <cp hex=>, <last_variable/> */
+	    /* x [<context>..</>] {p pc s sc ...}* [<extend>..</>] */
+	    /*  context & extend are interleaved raw data & <cp hex=> */
+#if 0
+            printf(" rule: %s%s '%s'\n", r->name,
+	           r->properties &&
+		     r->properties->children ?
+		       r->properties->children->content : "",
+		   r->children->type == XML_ELEMENT_NODE ?
+		      r->children->name :
+		      r->children->content);
+#endif
+          }
+        } else if(xml_isname(cc, "suppress_contractions")) {
+#if 0
+          printf("  suppress %s\n", cc->children->content);
+	  /* note: may be interleaved raw data and <cp hex="...."> tags */
+#endif
+        } else if(xml_isname(cc, "optimize")) {
+	  /* ??? */
+	  /* interleaved raw data and <cp hex="..."> tags */
+	}
+      }
+      xmlprop_free(base);
+    } else if(xml_isname(c, "alias")) {
+      /* path should always be //ldml/collations */
+#if 0
+      printf("  [copy from %s (%s)]\n", xml_prop(c, "source"), /* leak */
+             xml_prop(c, "path")); /* leak */
+#endif
+    }
+  }
+  xmlprop_free(subl);
+  xmlprop_free(xdef);
+#if 0
+  printf("[default: %s]\n", def);
+#endif
+}
+@
+
+The main subdirectory contains a number of different common locale
+parameters.  The only one we're interested in is the
+[[characters/exemplarCharacters]] property.
+
+<<Parse LDML files>>=
+/* main: "other" rules */
+d = opendir("common/main");
+if(!d) {
+  perror("LDML main");
+  exit(1);
+}
+chdir("common/main");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name, cwd);
+}
+closedir(d);
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "alias")) {
+  /* is this even used?  should it be supported? */
+}
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "characters")) {
+#if 0
+  <<Open LDML ouptut data file [[exemp]]>>
+  /* exemplarCharacters [type=...]>[uniset]</> */
+  /* store root version as cp list or rle cp list plus binary multi-lev */
+  /* store in file as :*/
+  /*   <rle cp list len> */
+  /*   <rle cp list: chars 0-31 indicate run length - 2> */
+  /*   <bin multi-lev tab> */
+  fclose(of);
+#endif
+}
+@
+
+The segmentation exceptions modify the line, paragraph, and word
+breaking rules.  However, the rules are hard to parse, so I just
+generate the replacement tables manually.  The only part of the rules
+that can be parsed and put into a file are the supression rules.
+
+<<Parse LDML files>>=
+/* segments: line, word, sentence breaks */
+d = opendir("common/segments");
+if(!d) {
+  perror("LDML segmentation");
+  exit(1);
+}
+chdir("common/segments");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name, cwd);
+}
+closedir(d);
+chdir(cwd);
+chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(xml_isname(n, "segmentations")) {
+  /* segmentation type="<type>" type == LDML_segmentation_t */
+    /* suppressions/suppression text is only parsable info */
+      /* FIXME: generate */
+      /* generate strs as sorted list (0-term allows bsearch in random text) */
+    /* variables/variable and segmentRules/rule require hard-coding */
+      /* could/should encode some of these as custom lookup tables */
+}
+@
+
+\lstset{language=txt}
+<<FIXME>>=
+implement
+
+need to decide where data files will go (/usr/share/libuni/<locale>/<data>)
+  then again, if the total locale data size is small enough, I guess it
+  could just go in the binary library as well.
+need to decide if an index should be generated (probably yes)
+
+inheritance rules (what a pain)
+  bundle:
+    strip region, then script, then go to "default" & do same, then root
+  item:
+    strip region, then script, then go to "root alias" & do same, then root
+
+transforms -> mappings (no real single name for each, though)
+  main:transformName(s) even does locale-specific transform name translation
+  perhaps for each transorm, add uni_[<var>_]<to>_of_<from>() and vice-versa
+  if direction="both"
+  can't just encode as table; may be multi-step (e.g. normalize before
+  & after).
+  Is this really necessary, though?  It may violate my localized-UCD only rule
+
+crappy "set" notation must be implemented for reading LDML files:
+ claims UTS18-L1+RL2.5 "with recommended syntax", but then goes on
+ to describe a different syntax (probably because the documents are
+ not kept in sync).  in particular, set ops are different
+   "A multi-character string can be in a Unicode set.. uses curly  braces"
+     wtf does that mean?  \u{XXXX XXXX}? {c1 c2 c3}?
+  literal chars & ranges
+  ignore whitespace
+  \uXXXX
+  \UXXXXXXXX
+  \xXX
+  \OOO
+  \a \b \t \n \v \f \r \\
+  \u{X...}
+  \u{X.... X...}
+  \N{<name>}
+  \p{<prop>} [:<prop>:]
+  \P{<prop>} [:&<prop>:]
+   <prop> is binary or prop-name[: = != =/=]val or script or cat
+   script or cat can be ored using |
+   val can be ored using |
+     General_Category Script Alphabetic Uppercase Lowercase
+     White_Space Noncharacter_Code_Point Default_Ignorable_Code_Point
+     ANY (0-10FFFF)
+     ASCII (0-7F)
+     ASSIGNED (!Cn)
+     na/name Name_Alias
+       only non-binary props are name cat script
+       name props must match loosely
+  [ ] for grouping (creates a subset)
+    adjacent for union
+    & for intersection
+    - for set difference
+      all 3 ops are l-r and same precendence level
+      & and - only operate on sets
+  [^ ] for inversion
+  $<varname> needed for contexts which allow variable assignments
+
+locale data file format:
+CLDR-type data:
+  DUCET table as mtab + strs
+  rev_DUCET table as mtab? + strs
+  UNI_NUM_sc + 5 entries for group range as indices in rev_DUCET table
+sentence exceptions:
+  just entries in alphabetical order (case folded?)
+@
+
+\section{Code Index}
+\nowebchunks
+
+% Some might prefer having the Code Index in an appendix as well.
+% For this document, I'm making the appendix the "user documentation"
+\appendix
+
+\end{document}
