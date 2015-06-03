@@ -5,11 +5,9 @@
 \documentclass[twoside,english]{article}
 \usepackage[letterpaper,rmargin=1.5in,bmargin=1in]{geometry}
 %%% latex preamble
-% Begin-doc uni-rcs
 \RCS $Id$
 \RCS $Revision$
 \RCS $Date$
-% End-doc uni-rcs
 
 %%% requires uni
 
@@ -80,14 +78,6 @@ task is delegated to [[parse-cldr]], described and implemented herein.
 See the libuni document for requirements regarding external data files
 and their locations.
 
-<<FIXME>>=
-CLDR 24+ sentence overrides:
-  - provide a table parameter for exceptions
-  - provide a cldr function to retrieve exceptions for current locale
-  - hope that CLDR tracks ULI changes, because I don't want do download
-    and parse a bunch of separate MS Office files with weird URLs
-@
-
 \section{The CLDR}
 
 The CLDR and the ICU library go hand-in-hand; the CLDR is basically
@@ -118,32 +108,49 @@ parse-ldml \
 #include <dirent.h>
 #include "uni_all.h"
 <<LDML parser local definitions>>
+// static_proto
 
 <<LDML parser local functions>>
 
 int main(void)
 {
   char *cwd = getcwd_full();
-  <<Parse LDML data files>>
+  xmlInitParser();  /* xmlCleanupParser() when done */
+  mkdir("uni_locale_data", 0777); /* ignore errors until file write errors */
+  force_chdir(CLDR_LOC);
+  <<Parse LDML files>>
   return 0;
 }
 @
 
 <<LDML parser local definitions>>=
+#include <sys/stat.h>
 <<XML Support Definitions>>
 @
 
-<<Parse LDML data files>>=
-<<Prepare for XML parsing>>
-chdir(cwd);
-chdir(CLDR_LOC);
-<<Parse LDML files>>
+\lstset{language=make}
+<<Plain Files to Install>>=
+uni_locale_data/* \
 @
 
-\lstset{language=make}
+<<makefile.rules>>=
+misc: uni_locale_data.stamp
+uni_locale_data.stamp: parse-ldml
+	rm -rf uni_locale_data && ./parse-ldml && touch uni_locale_data.stamp
+@
+
 <<makefile.vars>>=
 parse-ldml.o: EXTRA_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\" $(XML_CFLAGS)
 parse-ldml: EXTRA_LDFLAGS += $(XML_LDFLAGS)
+parse-ldml: $(LOCAL_LIB_FILES)
+@
+
+<<Clean temporary files>>=
+rm -rf uni_locale_data.stamp
+@
+
+<<Clean built files>>=
+rm -rf uni_locale_data
 @
 
 The main ldml files contain the actual locale data.  Every ldml file
@@ -193,8 +200,6 @@ if(langfile)
 <<Parse ldml sections>>=
 else if(xml_isname(n, "identity")) {
   /* ignore version, generation */
-  static int LDML_language = -1, LDML_script = -1, LDML_territory = -1,
-             LDML_variant = -1;
   uint32_t lang = 0, var = ~0;
   uni_valueof_t me, *v;
   for(c = n->children; c; c = c->next) {
@@ -261,8 +266,7 @@ else if(xml_isname(n, "identity")) {
     } else if(xml_isname(c, "variant")) {
       lang_lookup(variant);
       var = v->val; /* never more than one in current LDML, but should verify */
-    }
-    else if(xml_isname(c, "alias")) { /* not in current LDML main or collation */
+    } else if(xml_isname(c, "alias")) { /* not in current LDML main or collation */
       char *alias = xml_prop(c, "source"), *path = xml_prop(c, "path");
       fprintf(stderr, "Unsupported alias %s %s in %s\n", alias, path, name);
       exit(1);
@@ -280,18 +284,321 @@ else if(xml_isname(n, "identity")) {
 }
 @
 
-<<Open LDML ouptut data file (@pref)>>=
+<<LDML parser local definitions>>=
+#define open_wf(f, fn) \
+  FILE *f; \
+  if(!(f = fopen(fn, "w"))) { \
+    perror(fn); \
+    exit(1); \
+  }
+#define wrbuf(f, buf, len) do { \
+  if(fwrite(buf, sizeof(*(buf)), len, f) != len) { \
+    perror(#f); \
+    exit(1); \
+  } \
+} while(0)
+#define close_wf(f) do { \
+  if(fclose(f)) { \
+    perror(#f); \
+    exit(1); \
+  } \
+} while(0)
+#define force_chdir(d) do { \
+  if(chdir(d)) { \
+    perror(d); \
+    exit(1); \
+  } \
+} while(0)
+@
+
+<<Open LDML output data file (@pref)>>=
 if(!langfile) {
   fprintf(stderr, "No identity before data in %s\n", name);
   exit(1);
 }
+<<Open LDML output data file [[<<@pref>>]] without lang check>>
+@
+
+<<Open LDML output data file (@pref) without lang check>>=
 char langfile_full[8 + 1 + 3 + sizeof("<<@pref>>")];
 strcpy(langfile_full, "<<@pref>>");
 strcpy(langfile_full + sizeof("<<@pref>>") - 1, langfile);
 char *od = getcwd_full();
-chdir(cwd);
+force_chdir(cwd);
+force_chdir("uni_locale_data");
 open_wf(of, langfile_full);
-chdir(od);
+force_chdir(od);
+@
+
+The segmentation exceptions modify the line, paragraph, and word
+breaking rules.  However, the rules are hard to parse, so they are
+encoded as a combination of lookup table replacements and hard-coded
+rule changes.
+
+For the word break rules, special rules are inserted in Japanese
+locales for Hiragana and Ideograph characters.  These require new,
+special WB codes that are hard-coded into the word break algorithm
+(and are supported regardless of locale).  The only other modification
+is for the en\_US\_POSIX locale, which replaces two codes.
+
+<<Parse LDML files>>=
+uni_chrrng_dat8_t *dat8 = NULL;
+unsigned int dat8_max = 0, dat8_len = uni_WB_rng_len;
+/* JA locale: */
+char langfile[8 + 1 + 3 + 1];
+sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_ja, ~0, ~0));
+check_size(dat8, dat8_max, dat8_len);
+cpybuf(dat8, uni_WB_rng, dat8_len);
+/*  hira -> UNI_WB_HI */
+int i;
+for(i = 0; i < uni_blk_rng_len; i++)
+  if(uni_blk_rng[i].dat == UNI_blk_Hiragana)
+    replace_range_dat8(&dat8, &dat8_max, &dat8_len, uni_blk_rng[i].low,
+                       uni_blk_rng[i].high, UNI_WB_HI);
+/*  ideo -> UNI_WB_ID */
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x3005, 0x3005, UNI_WB_ID);
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x3007, 0x3007, UNI_WB_ID);
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x300B, 0x300B, UNI_WB_ID);
+for(i = 0; i < uni_Ideo_rng_len; i++)
+  replace_range_dat8(&dat8, &dat8_max, &dat8_len, uni_Ideo_rng[i].low,
+                     uni_Ideo_rng[i].high, UNI_WB_ID);
+uint32_t *mtab, mtab_len;
+mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_WB_XX);
+{
+  <<Open LDML output data file [[WB]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+/* en_US_POSIX: */
+sprintf(langfile, "%08X-%d", uni_locale_triplet(UNI_CLDR_language_en,
+                                                ~0,
+						UNI_CLDR_territory_us),
+                             UNI_CLDR_variant_posix);
+cpybuf(dat8, uni_WB_rng, dat8_len = uni_WB_rng_len);
+/* : -> XX */
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, ':', ':', UNI_WB_XX);
+/* . -> MN */
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, '.', '.', UNI_WB_MN);
+mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_WB_XX);
+{
+  <<Open LDML output data file [[WB]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+@
+
+The line breaking rules change the tables for a few locales as well.
+In particular, for the fi locale, hard-coded changes and an additional
+code are once again necessary.  I am unsure of what is intended by the
+zh locale changes, as they are marked as placeholders, but they are
+just a duplicate of the ja modifications, as of CLDR 27.
+
+<<Parse LDML files>>=
+/* JA ZH ZH_HANT locales: (ZH_HANT is covered by ZH) */
+sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_ja, ~0, ~0));
+check_size(dat8, dat8_max, dat8_len = uni_lb_rng_len);
+cpybuf(dat8, uni_lb_rng, dat8_len);
+/* convert CJ to ID */
+for(i = 0; i < dat8_len; i++)
+  if(dat8[i].dat == UNI_lb_CJ)
+    dat8[i].dat = UNI_lb_ID;
+mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_lb_XX);
+{
+  <<Open LDML output data file [[lb]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_zh, ~0, ~0));
+{
+  <<Open LDML output data file [[lb]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+/* FI locale: */
+sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_fi, ~0, ~0));
+/* 2010 -> HH */
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x2010, 0x2010, UNI_lb_HH);
+{
+  <<Open LDML output data file [[lb]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+@
+
+For sentence breaks, only the el locale has a few customizations.
+
+<<Parse LDML files>>=
+/* EL locale: */
+sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_el, ~0, ~0));
+check_size(dat8, dat8_max, dat8_len = uni_SB_rng_len);
+cpybuf(dat8, uni_SB_rng, dat8_len);
+/*  003B, 037E -> ST */
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x003B, 0x003B, UNI_SB_ST);
+replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x037E, 0x037E, UNI_SB_ST);
+mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_SB_XX);
+{
+  <<Open LDML output data file [[SB]] without lang check>>
+  /* FIXME: add magic */
+  wrbuf(of, &mtab_len, 1);
+  wrbuf(of, mtab, mtab_len);
+  close_wf(of);
+}
+@
+
+When replacing/inserting new values into a range, there is no effort
+made to make the new range table optimal; only the mult-level table
+will be kept, anyway.  In other words, replacing with the default
+value does not cause deletion, and ranges are not merged if consecutive
+ranges have the same value.
+
+<<LDML parser local functions>>=
+static void replace_range_dat8(uni_chrrng_dat8_t **rng, unsigned int *max,
+                               unsigned int *len, uint32_t low, uint32_t high,
+			       uint8_t val)
+{
+  int l = 0, h = *len - 1;
+  while(l <= h) {
+    int m = (l + h) / 2;
+    if(low <= (*rng)[m].high)
+      h = m - 1;
+    else
+      l = m + 1;
+  }
+  if(l == *len) {
+    /* just append */
+    check_size(*rng, *max, *len = l + 1);
+    (*rng)[l].low = low;
+    (*rng)[l].high = high;
+    (*rng)[l].dat = val;
+    return;
+  }
+  if(low > (*rng)[l].low && low <= (*rng)[l].high) {
+    /* chop and skip, possibly inserting up to two */
+    uint32_t l_h = (*rng)[l].high;
+    (*rng)[l++].high = low - 1;
+    if(l_h > high) {
+      check_size(*rng, *max, *len + 2);
+      movebuf(*rng + l + 2, *rng + l, *len - l);
+      (*rng)[l].low = low;
+      (*rng)[l].high = high;
+      (*rng)[l].dat = val;
+      ++l;
+      (*rng)[l].low = high + 1;
+      (*rng)[l].high = l_h;
+      (*rng)[l].dat = (*rng)[l - 2].dat;
+      *len += 2;
+      return;
+    }
+  }
+  if(low <= (*rng)[l].low && high >= (*rng)[l].high) {
+    /* just replace, possibly deleting/adjusting next */
+    (*rng)[l].low = low;
+    (*rng)[l].high = high;
+    (*rng)[l].dat = val;
+    for(h = l + 1; h < *len; h++)
+      if((*rng)[h].low > high)
+        break;
+    if(h > l + 1 && (*rng)[h - 1].high > high)
+      (*rng)[--h].low = high + 1;
+    if(h > l + 1) {
+      if(h < *len)
+        movebuf(*rng + l + 1, *rng + h, *len - h);
+      *len -= h - l - 1;
+    }
+    return;
+  }
+  /* chop l and insert new */
+  if((*rng)[l].low <= high)
+    (*rng)[l].low = high + 1;
+  check_size(*rng, *max, *len + 1);
+  movebuf(*rng + l + 1, *rng + l, *len - l);
+  ++*len;
+  (*rng)[l].low = low;
+  (*rng)[l].high = high;
+  (*rng)[l].dat = val;
+}
+@
+
+The only part of the rules that can be parsed and put into a file are
+the sentence break supression rules.
+
+<<Parse LDML files>>=
+/* segments: line, word, sentence breaks */
+struct dirent *de;
+DIR *d = opendir("common/segments");
+if(!d) {
+  perror("LDML segmentation");
+  exit(1);
+}
+force_chdir("common/segments");
+while((de = readdir(d))) {
+  if(de->d_name[0] == '.')
+    continue;
+  parse_ldml(de->d_name, cwd);
+}
+closedir(d);
+force_chdir(cwd);
+force_chdir(CLDR_LOC);
+@
+
+<<Parse ldml sections>>=
+else if(n->children && xml_isname(n, "segmentations")) {
+  for(n = n->children; n; n = n->next) {
+    if(n->children && xml_isname(n, "segmentation")) {
+      char *t = xml_prop(n, "type");
+      if(!t || strcmp(t, "SentenceBreak")) {
+        xmlprop_free(t);
+	continue;
+      }
+      xmlprop_free(t);
+      for(c = n->children; c; c = c->next) {
+        if(!c->children || !xml_isname(c, "suppressions"))
+	  continue;
+	xmlChar **sup = NULL;
+	uint32_t nsup = 0, flen = 0;
+	for(c = c->children; c; c = c->next) {
+	  if(!xml_isname(c, "suppression"))
+	    continue;
+	  grow_size(sup, nsup, nsup + 1);
+	  sup[nsup - 1] = xmlNodeGetContent(c);
+	  flen += strlen((char *)sup[nsup - 1]) + 1;
+	}
+	if(nsup) {
+	  qsort(sup, nsup, sizeof(*sup), bytecmp);
+	  <<Open LDML output data file [[SBsup]]>>
+	  /* FIXME: add magic */
+	  wrbuf(of, &flen, 1);
+	  int i;
+	  for(i = 0; i < nsup; i++) {
+	    wrbuf(of, sup[i], strlen((char *)sup[i]) + 1);
+	    xmlFree(sup[i]);
+	  }
+	  close_wf(of);
+	  free(sup);
+	}
+	break;
+      }
+    }
+  }
+  break;
+}
+@
+
+<<LDML parser local functions>>=
+static int bytecmp(const void *a, const void *b)
+{
+  return strcmp(*(const char **)a, *(const char **)b);
+}
 @
 
 The collations subdirectory contains locale-specific collation order
@@ -299,21 +606,20 @@ changes.
 
 <<Parse LDML files>>=
 /* collation: locale-specific collation rules */
-struct dirent *de;
-DIR *d = opendir("common/collation");
+d = opendir("common/collation");
 if(!d) {
   perror("LDML collation");
   exit(1);
 }
-chdir("common/collation");
+force_chdir("common/collation");
 while((de = readdir(d))) {
   if(de->d_name[0] == '.')
     continue;
   parse_ldml(de->d_name, cwd);
 }
 closedir(d);
-chdir(cwd);
-chdir(CLDR_LOC);
+force_chdir(cwd);
+force_chdir(CLDR_LOC);
 @
 
 <<Parse ldml sections>>=
@@ -321,6 +627,15 @@ else if(xml_isname(n, "collations")) {
   char *subl = xml_prop(n, "validSubLocales");
 #if 0
   /* space-separated list of full locale names */
+  /* deprecated, poorly described in previous versions */
+  /* basically means "empty file exists for all listed locales" */
+  /* I'm not sure that affects anything */
+  /* lookup order: */
+  /*  full name w/ variants (including POSIX) */
+  /*  full name w/o variants */
+  /*  lang_region */
+  /*  lang_script */
+  /*  lang */
   if(subl)
     printf("sublang: %s\n", subl);
 #endif
@@ -331,7 +646,8 @@ else if(xml_isname(n, "collations")) {
   char *xdef = NULL;
   for(c = n->children; c; c = c->next) {
     /* should be same enum type as types below */
-    if(xml_isname(c, "default")) {
+    /* "default" is deprecated */
+    if(xml_isname(c, "default") || xml_isname(c, "defaultCollation")) {
       xdef = xml_prop(c, "choice");
       if(!xdef)
         xdef = xml_prop(c, "type"); /* deprecated, but used */
@@ -341,7 +657,9 @@ else if(xml_isname(n, "collations")) {
       /* ignore draft, references, alt attrs */
       /* can have more than one, but why would you? */
     } else if(xml_isname(c, "collation")) {
+      char *type = xml_prop(c, "type");
       /* store in file as DUCET/rev_DUCET override tables */
+      /* append -<type> for non-standard type? */
       /* just mtab version: */
       /*   <strtab len> */
       /*   <strtab> */
@@ -350,7 +668,6 @@ else if(xml_isname(n, "collations")) {
       /*   <rev strtab len> */
       /*   <rev strtab> */
       /*   <rev mtab> */
-      /* ignore draft, standard, references, alt */
       if(!subl) /* technically, this isn't a req, but it's safe */
         subl = xml_prop(c, "validSubLocales");
       /* ignore draft, standard, references, alt attrs */
@@ -373,34 +690,77 @@ else if(xml_isname(n, "collations")) {
 	      break;
 	    }
 	} else if(xml_isname(cc, "settings")) {
-	  /* note: only settings in wild are: */
-	  /*   backwards=on */
-	  /*   caseFirst=upper */
-	  /*   normalization=on */
-	  /*   alternate=shifted */
-	  /*   variableTop=<n> */
-	  /*   strength=Tertiary */
-	  /*   hiraganaQuaterary=on */
-	  /* valid, though: */
-	  /*  strength=primary|secondary|tertiary|quaternary|identical */
-	  /*  alternate=non-ignorable|shifted */
-	  /*  backwards=on|off */
-	  /*  normalization=on|off */
-	  /*  caseLevel=on|off */
-	  /*  caseFirst=upper|lower|off */
-	  /*  hiraganaQuarternary=on|off */
-	  /*  hiraganaQuaternary=on|off */
-	  /*  numeric=on|off */
-	  /*  private=true|false */  /* deprecated */
-	  /*  variableTop='x' */
-	  /*  reorder=? */
-#if 0
-	  xmlAttrPtr a;
-          fputs("  settings", stdout);
-	  for(a = cc->properties; a; a = a->next)
-	    printf(" %s=%s", a->name, a->children->content);
-	  putchar('\n');
-#endif
+	  char *v;
+	  if((v = xml_prop(cc, "strength"))) {
+	    /* opts->max_level default */
+	    /* seen in wild: strength=Tertiary (which is default anyway) */
+	    int x = uni_CLDR_locale_u_ks_lookup(v);
+	    xmlprop_free(v);
+          }
+	  if((v = xml_prop(cc, "alternate"))) {
+	    /* opts->var_mode default */
+	    /* seen in wild: alternate=shifted (ignorable is default) */
+	    int x = uni_CLDR_locale_u_ka_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "backwards"))) {
+	    /* opts->reverse_lev2 default */
+	    /* seen in wild: backwards=on (default off) */
+	    int x = uni_locale_bool_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "normalization"))) {
+	    /* not implemented (higher level) */
+	    /* seen in wild: normalization=on (default off) */
+	    int x = uni_locale_bool_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "caseLevel"))) {
+	    /* unimplemented - add "level 2.5" case characteristics */
+	    /* not seen in wild */
+	    int x = uni_locale_bool_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "caseFirst"))) {
+	    /* unimplemented; reordering */
+	    /* seen in wild: caseFirst=upper (default off) */
+	    int x = uni_CLDR_locale_u_kf_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "hiraganaQuaternary"))) {
+	    /* unimplemented - set l4 to FFFE for sc=Hiragana */
+	    /* deprecated */
+	    /* seen in wild: hiraganaQuaterary=on (default off) */
+	    int x = uni_locale_bool_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "numeric"))) {
+	    /* unimplemented - change numeric strings to value @ digits group */
+	    /* not seen in wild */
+	    int x = uni_locale_bool_lookup(v);
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "reorder"))) {
+	    /* unimplemented; reordering */
+	    /* space-separated list of tokens */
+	    /* convert to lower-case and call: */
+	    /* uni_parse_locale_reorder_block(s); */
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "maxVariable"))) {
+	    /* opts->var_top default (must find last of reordering group) */
+	    /* assume case already lower */
+	    int x = uni_parse_locale_reorder_block(v);
+	    /* could verify only space/punct/symbol/currency */
+	    xmlprop_free(v);
+	  }
+	  if((v = xml_prop(cc, "variableTop"))) {
+	    /* opts->var_top default (must snap to last of reordering group) */
+	    /* seen in wild, but only in root */
+	    /* deprecated */
+	    /* value is actually character to look up */
+	    xmlprop_free(v);
+	  }
         } else if(xml_isname(cc, "rules")) {
 	  xmlNodePtr r;
 	  for(r = cc->children; r; r = r->next) {
@@ -469,15 +829,15 @@ if(!d) {
   perror("LDML main");
   exit(1);
 }
-chdir("common/main");
+force_chdir("common/main");
 while((de = readdir(d))) {
   if(de->d_name[0] == '.')
     continue;
   parse_ldml(de->d_name, cwd);
 }
 closedir(d);
-chdir(cwd);
-chdir(CLDR_LOC);
+force_chdir(cwd);
+force_chdir(CLDR_LOC);
 @
 
 <<Parse ldml sections>>=
@@ -486,52 +846,34 @@ else if(xml_isname(n, "alias")) {
 }
 @
 
-<<Parse ldml sections>>=
-else if(xml_isname(n, "characters")) {
-#if 0
-  <<Open LDML ouptut data file [[exemp]]>>
-  /* exemplarCharacters [type=...]>[uniset]</> */
-  /* store root version as cp list or rle cp list plus binary multi-lev */
-  /* store in file as :*/
-  /*   <rle cp list len> */
-  /*   <rle cp list: chars 0-31 indicate run length - 2> */
-  /*   <bin multi-lev tab> */
-  fclose(of);
-#endif
-}
-@
-
-The segmentation exceptions modify the line, paragraph, and word
-breaking rules.  However, the rules are hard to parse, so I just
-generate the replacement tables manually.  The only part of the rules
-that can be parsed and put into a file are the supression rules.
-
-<<Parse LDML files>>=
-/* segments: line, word, sentence breaks */
-d = opendir("common/segments");
-if(!d) {
-  perror("LDML segmentation");
-  exit(1);
-}
-chdir("common/segments");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name, cwd);
-}
-closedir(d);
-chdir(cwd);
-chdir(CLDR_LOC);
-@
+Rather than create a new merger function for the boolean exemplar
+property, it is treated as an enumeration (8-bit data) whose value is
+always 1 (or 0 if not present).  There are actually multiple exemplar
+character sets; I am only interested in the typeless one.
 
 <<Parse ldml sections>>=
-else if(xml_isname(n, "segmentations")) {
-  /* segmentation type="<type>" type == LDML_segmentation_t */
-    /* suppressions/suppression text is only parsable info */
-      /* FIXME: generate */
-      /* generate strs as sorted list (0-term allows bsearch in random text) */
-    /* variables/variable and segmentRules/rule require hard-coding */
-      /* could/should encode some of these as custom lookup tables */
+else if(n->children && xml_isname(n, "characters")) {
+  for(n = n->children; n; n = n->next) {
+    if(!n->children || !xml_isname(n, "exemplarCharacters"))
+      continue;
+    char *t = xml_prop(n, "type");
+    if(t && t[0]) {
+      xmlprop_free(t);
+      continue;
+    }
+    <<Open LDML output data file [[exemp]]>>
+    /* store in file as :*/
+    /*   <rle cp list len> */
+    /*   <rle cp list: chars 0-31 indicate run length - 2> */
+    /*   <bin multi-lev tab> */
+    /* what about multi-cp entries? */
+    /* for now, just write out value raw */
+    t = (char *)xmlNodeGetContent(n);
+    wrbuf(of, t, strlen(t));
+    xmlFree(t);
+    close_wf(of);
+  }
+  break;
 }
 @
 

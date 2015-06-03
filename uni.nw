@@ -142,6 +142,10 @@ to selected parts of the CLDR data to C programs.
 #endif /* UNI_ALL_H */
 @
 
+<<Headers to Install>>=
+uni/uni_all.h \
+@
+
 % Begin-doc Introduction
 This document does not contain the UCD or CLDR itself; it is expected
 that the user download them manually and place them where they can be
@@ -282,6 +286,10 @@ encoding input.
 uni_io.o
 @
 
+<<Libraries to Install>>=
+uni \
+@
+
 \lstset{language=C}
 <<uni_io.c>>=
 <<Common C Header>>
@@ -306,6 +314,10 @@ uni_io.o
 
 <<Unicode I/O Exports>>
 #endif
+@
+
+<<Headers to Install>>=
+uni/uni_io.h \
 @
 
 \section{Basic Unicode I/O}
@@ -1809,6 +1821,10 @@ shared by all properties, though; this is placed in a common file.
 #include "uni_io.h"
 <<Unicode property exports>>
 #endif /* UNI_PROP_H */
+@
+
+<<Headers to Install>>=
+uni/uni_prop.h \
 @
 
 \lstset{language=make}
@@ -3756,9 +3772,9 @@ static void doit_bool(const char *name, const uni_chrrng_t *rng, uint32_t nent,
     uni_chrrng_t *rng2;
     uint32_t nent2;
     uni_multi_bit_to_range(mtab, &rng2, &nent2);
-    if(nent2 != nent || memcmp(rng, rng2, nent * sizeof(*rng))) {
+    if(nent2 != nent || cmpbuf(rng, rng2, nent)) {
       for(j = 0; j < nent && j < nent2; j++)
-        if(memcmp(&rng[j], &rng2[j], sizeof(*rng)))
+        if(cmpbuf(&rng[j], &rng2[j], 1))
 	  break;
       fprintf(stderr, "misconvert %d/%d @%d\n", (int)nent, (int)nent2, j);
       exit(1);
@@ -3866,7 +3882,8 @@ int main(void)
 
 \lstset{language=make}
 <<makefile.vars>>=
-PARSE_UCD_DEPS := parse-ucd.c $(SUPT_LIB_LOC)/libsupt.a <<Additional parse-ucd C files>>
+PARSE_UCD_DEPS := parse-ucd.c $(SUPT_LIB_LOC)/libtjm-supt.a \
+                  <<Additional parse-ucd C files>>
 
 PARSER_CFLAGS :=
 PARSER_LDFLAGS :=
@@ -3881,7 +3898,7 @@ SUPT_LIB_LOC := ../build
 <<makefile.rules>>=
 parse-ucd: $(PARSE_UCD_DEPS)
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(PARSER_CFLAGS) \
-	   -o $@ parse-ucd.c -L$(SUPT_LIB_LOC) -lsupt $(LDFLAGS) $(PARSER_LDFLAGS)
+	   -o $@ parse-ucd.c -L$(SUPT_LIB_LOC) -ltjm-supt $(LDFLAGS) $(PARSER_LDFLAGS)
 @
 
 <<Additional parse-ucd C files>>=
@@ -3942,6 +3959,12 @@ unsigned int lbuflen, llen;
     exit(1); \
   } \
 } while(0)
+#define force_chdir(d) do { \
+  if(chdir(d)) { \
+    perror(d); \
+    exit(1); \
+  } \
+} while(0)
 @
 
 <<Parse character data files>>=
@@ -3952,16 +3975,16 @@ unsigned int lbuflen, llen;
 @
 
 <<Initialize UCD files>>=
-chdir(UCD_LOC);
+force_chdir(UCD_LOC);
 @
 
 <<Initialize Unihan files>>=
-chdir(cwd); /* in case unihan_loc is relative */
-chdir(UNIHAN_LOC);
+force_chdir(cwd); /* in case unihan_loc is relative */
+force_chdir(UNIHAN_LOC);
 @
 
 <<Dump character information as C code>>=
-chdir(cwd);
+force_chdir(cwd);
 free(cwd);
 @
 
@@ -4487,6 +4510,10 @@ is dependent on the generated code.
 <<makefile.rules>>=
 uni_prop.gen.h: parse-ucd
 	./parse-ucd
+@
+
+<<Headers to Install>>=
+uni/uni_prop.gen.h \
 @
 
 \lstset{language=C}
@@ -6340,13 +6367,14 @@ CLDR provides a few, but its entire specification of word boundary
 rules expects a regular expression storage format.  This library does
 not use or implement pure regular expressions, though, so reading the
 data files will not work. Instead, the locale-specific alterations are
-provided in a different form: simple flags to enable each of the
-current overrides.  This has the huge disadvantage that future
-revisions of the CLDR will likely require additional hand-coded
-overrides, which must be detected by human perusal of the CLDR files.
-The regular expressions will not be provided as a property, either, so
-an application which needs to use the regular expression form will
-either have to use ICU or read the CLDR manually.
+provided in a different form: alternate property lookup tables and
+special lookup codes to enable each of the current overrides.  This
+has the huge disadvantage that future revisions of the CLDR will
+likely require additional hand-coded overrides, which must be detected
+by human perusal of the CLDR files. The regular expressions will not
+be provided as a property, either, so an application which needs to
+use the regular expression form will either have to use ICU or read
+the CLDR manually.
 
 Once again the first two rules are ignored, as they simply express
 that words cannot extend past text boundaries.  The rest of the rules
@@ -6376,18 +6404,14 @@ so the function gets its own object file.
    <-1 -> no break
    -1,1  -> 1st -1/1 matches next break/nobreak; remaining -1/1s are no break
    >1 -> break */
-<<Boundary determination locale flags>>
-int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab);
 @
 
 <<Library [[uni]] Members>>=
 wbrk.o
 @
 
-<<wbrk.c>>=
-<<Common C Header>>
-#include "uni_prop.h"
-
+<<Unicode property exports>>=
 /* < 6.3 compat */
 #if UNI_UCD_VER < 630
 #define UNI_WB_SQ UNI_WB_MB
@@ -6400,9 +6424,18 @@ wbrk.o
 #define UNI_WB_ID (UNI_WB_HI + 1)
 /* extra WB value for 6.3 */
 #define UNI_WB_SQ2 (UNI_WB_HI + 2)
-int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+@
+
+<<wbrk.c>>=
+<<Common C Header>>
+#include "uni_prop.h"
+
+int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
 {
-  uni_WB_t pwb, nwb = uni_WB_of(next);
+  if(!tab)
+    tab = uni_WB_mtab;
+#define get_WB(x) uni_x_of(x, tab, UNI_WB_XX)
+  uni_WB_t pwb, nwb = get_WB(next);
   if(prevret > 1)
     pwb = prevret - 2;
   else if(prevret < -1)
@@ -6410,8 +6443,7 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
   else if(prevret)
     pwb = UNI_WB_LE; /* don't care */
   else
-    pwb = uni_WB_of(prev);
-  <<Perform word break property locale adjustments>>
+    pwb = get_WB(prev);
   switch(pwb) {
     case UNI_WB_CR:
       if(nwb == UNI_WB_LF) /* WB3 */
@@ -6427,7 +6459,7 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
     return prevret && prevret <= 1 ? prevret : -(pwb + 2);
   if(prevret == 1
 #if UNI_UCD_VER >= 630
-     && uni_WB_of(prev) != UNI_WB_DQ
+     && get_WB(prev) != UNI_WB_DQ
 #endif
      ) /* WB5, WB6 */
     return nwb != UNI_WB_LE && nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
@@ -6520,61 +6552,30 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, int locale)
 }
 @
 
-<<Boundary determination locale flags>>=
-/* I expect more in the future, e.g. some of the recommended tailorings */
-#define UNI_BRK_LOCALE_JA    1 /* ja locale */
-#define UNI_BRK_LOCALE_POSIX 2 /* en_US_POSIX locale */
-@
-
-<<Perform word break property locale adjustments>>=
-/* FIXME: it would be faster to use updated WB tables for this */
-if(locale & UNI_BRK_LOCALE_JA) {
-#if 0
-#define is_hira(x) (uni_blk_of(x) == UNI_blk_Hiragana)
-#else
-#define is_hira(x) ((x) >= 0x3040 && (x) <= 0x309F)
-#endif
-#define is_ideo(x) ((x) == 0x3005 || (x) == 0x3007 || (x) == 0x303B || \
-                    uni_is_Ideo(x))
-  if(!prevret) {
-    if(is_hira(prev))
-      pwb = UNI_WB_HI;
-    else if(is_ideo(prev))
-      pwb = UNI_WB_ID;
-  }
-  if(is_hira(next))
-    nwb = UNI_WB_HI;
-  else if(is_ideo(next))
-    nwb = UNI_WB_ID;
-}
-if(locale & UNI_BRK_LOCALE_POSIX) {
-  if(!prevret) {
-    if(prev == ':')
-      pwb = UNI_WB_XX;
-    else if(prev == '.')
-      pwb = UNI_WB_MN;
-  }
-  if(next == ':')
-    nwb = UNI_WB_XX;
-  else if(next == '.')
-    nwb = UNI_WB_MN;
-}
-@
-
 The next larger boundary is a sentence, also specfified by UAX~\#29. 
 Again, CLDR overrides may be provided, but they are in an unusable
-format.  While the only override in CLDR 23.1 could be implemented by
-supporting a table override, once again the override is just
-hand-coded and enabled with a flag.  The version 24 CLDR introduces
-known abbreviations (mostly titles) as non-sentence overrides.  This
-is present for seven additional locales.
+format.  Once again simple locale overrides are supported by replacing
+the lookup table.  The version 24 CLDR introduces known abbreviations
+(mostly titles) as non-sentence overrides.  This is present for seven
+additional locales.  To support this, the routine does dead-simple
+matching.  No case folding, normalization, word boundary detection, or
+anything else is done.  The matching algorithm is also suboptimal, but
+good enough given that sentence boundary detection is pretty awful.
 
-<<FIXME>>=
-CLDR 24+ sentence overrides:
-  - provide a table parameter for exceptions
-  - provide a cldr function to retrieve exceptions for current locale
-  - hope that CLDR tracks ULI changes, because I don't want do download
-    and parse a bunch of separate MS Office files with weird URLs
+<<Unicode property exports>>=
+<<[[uni_sb_locale_t]]>>
+@
+
+<<[[uni_sb_locale_t]]>>=
+typedef struct {
+  const uint32_t *tab; /* lookup table for SB property */
+  const uint8_t * const * suppressions; /* utf8; sorted by byte */
+  unsigned int num_sup; /* length of above table */
+} uni_sb_locale_t;
+@
+
+<<Known Data Types>>=
+uni_sb_locale_t,%
 @
 
 This break algorithm is the most complex so far.  There are patterns
@@ -6601,7 +6602,8 @@ does not match.
          -> if sign changes, then current is no break, but prev was break
 	 -> at end of string, sign of 1 is used
    >1 -> break */
-int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
+                     const uni_sb_locale_t *locale, uint32_t *sup_state);
 @
 
 <<Library [[uni]] Members>>=
@@ -6622,16 +6624,19 @@ enum sb_state {
   sb_st_ST, sb_st_ST_CL, sb_st_ST_CL_SP, /* SB8a-SB11 */
   sb_st_CR, sb_st_end /* SB9-SB11 */
 };
-int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
+                     const uni_sb_locale_t *locale, uint32_t *sup_state)
 {
-  uni_SB_t psb, nsb = uni_SB_of(next);
+  const uint32_t *tab = locale && locale->tab ? locale->tab : uni_SB_mtab;
+#define get_SB(x) uni_x_of(x, tab, UNI_SB_XX)
+  uni_SB_t psb, nsb = get_SB(next);
   if(prevret == 1 || prevret == -1)  {
     <<Adjust [[prevret]] at end of [[sb_st_AT_CL_SP_X]]>>
   } else if(prevret)
     psb = UNI_SB_XX; /* don't care */
   else {
     uni_SB_t tsb = nsb;
-    nsb = psb = uni_SB_of(prev);
+    nsb = psb = get_SB(prev);
     <<Set default sentence state>>
     nsb = tsb;
   }
@@ -6789,7 +6794,7 @@ switch(nsb) {
 <<Adjust [[prevret]] at end of [[sb_st_AT_CL_SP_X]]>>=
 /* only needs to be done on sign change */
 /* can't really detect sign change, though */
-psb = uni_SB_of(prev);
+psb = get_SB(prev);
 switch(psb) {
   case UNI_SB_UP:
     prevret = sb_st_UP;
@@ -6812,20 +6817,101 @@ switch(psb) {
 }
 @
 
-<<Boundary determination locale flags>>=
-#define UNI_BRK_LOCALE_EL    4 /* el locale */
-@
+The suppression matcher always finds the lowest array entry which
+matches the text so far.  Once a character mismatches, it can move up
+in the array until a match is found or the prefix no longer matches.
+This is inefficient if there are a lot of entries with the same
+starting text.  Even more inefficient is the method of dealing with
+match failure.  In that case, the text matched so far is advanced one
+character at a time until a match is found, or all previously matched
+text is exhausted.  Once a suppression is fully matched, a forced
+non-break is returned, and matching is reset.  This means that
+multi-part matches are not supported.  If this becomes a problem, the
+[[sup_state]] reset upon match could be removed.
 
 <<Perform sentence break property locale adjustments>>=
-/* FIXME: it would be faster to use updated SB tables for this */
-if(locale & UNI_BRK_LOCALE_EL) {
-  if(!prevret) {
-    if(prev == 0x003B || prev == 0x037E)
-      psb = UNI_SB_ST;
+if(locale && sup_state && locale->suppressions) {
+  const uint8_t * const * suppressions = locale->suppressions;
+  const unsigned int num_sup = locale->num_sup;
+  uint16_t match = *sup_state >> 16, pos = *sup_state & 0xffff;
+  if(pos) {
+    const uint8_t *sup = suppressions[match];
+    unsigned int sclen;
+    uint32_t sc = uni_int_utf8_decode(sup + pos, &sclen);
+    if(sc == next) {
+      pos += sclen;
+      *sup_state = ((uint32_t)match << 16) + pos;
+      goto matched1;
+    } else if(!sc) {
+      *sup_state = 0;
+      return -sb_st_none; /* full match; no break & reset machine */
+    } else {
+      /* try to find another w/ same prefix */
+      while(match < num_sup - 1 && !memcmp(sup, suppressions[match + 1], pos)) {
+	sup = suppressions[++match];
+	sc = uni_int_utf8_decode(sup + pos, &sclen);
+	if(sc == next) {
+	  pos += sclen;
+	  *sup_state = ((uint32_t)match << 16) + pos;
+	  goto matched1;
+	} else if(!sc) {
+	  *sup_state = 0;
+	  return -sb_st_none; /* full match; no break & reset machine */
+	} else if(sc > next)
+	  break;
+      }
+      /* no luck; try to find first entry starting with already-matched chars */
+      /* this is where an aho-corasik matcher would be faster, but oh well */
+      unsigned int lpos, maxpos = pos;
+      uni_int_utf8_decode(sup, &lpos);
+      while(lpos < maxpos) {
+        int l = 0, h = num_sup - 1;
+	while(l <= h) {
+          int m = l + (h - l) / 2, c;
+	  c = memcmp(suppressions[m], sup + lpos, maxpos - lpos);
+	  if(c >= 0)
+	    h = m - 1;
+	  else
+	    l = m + 1;
+	}
+	while(l < num_sup && !memcmp(suppressions[l], sup + lpos, maxpos - lpos)) {
+	  sc = uni_int_utf8_decode(suppressions[l] + maxpos - lpos, &sclen);
+	  if(sc > next)
+	    break;
+	  if(sc == next) {
+	    match = l;
+	    pos = maxpos - lpos + sclen;
+	    *sup_state = ((uint32_t)match << 16) + pos;
+	    goto matched1;
+	  }
+	}
+	uni_int_utf8_decode(sup + lpos, &sclen);
+	lpos += sclen;
+      }
+    }
+    *sup_state = 0;
   }
-  if(next == 0x003B || next == 0x037E)
-    nsb = UNI_SB_ST;
+  /* still no luck; try to find first entry starting with current char */
+  int l = 0, h = num_sup - 1;
+  unsigned int sclen;
+  uint32_t sc;
+  while(l <= h) {
+    int m = l + (h - l) / 2;
+    sc = uni_int_utf8_decode(suppressions[m], &sclen);
+    if(sc >= next)
+      h = m - 1;
+    else
+      l = m + 1;
+  }
+  if(l < num_sup && uni_int_utf8_decode(suppressions[l], &sclen) == next) {
+    match = l;
+    pos = sclen;
+    *sup_state = ((uint32_t)match << 16) + pos;
+    goto matched1;
+  }
+  /* still no luck: no matches */
 }
+matched1:
 @
 
 The next larger boundary is a paragraph.  There is no implementation
@@ -6889,18 +6975,21 @@ the test to work.
          -> if sign changes, then current is no break, but prev was break
 	 -> at end of string, sign of -1/1 is used
    >1 -> break */
-int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale);
+int uni_line_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab);
 @
 
 <<Library [[uni]] Members>>=
 lbrk.o
 @
 
+<<Unicode property exports>>=
+#define UNI_lb_HH UNI_NUM_lb
+@
+
 <<lbrk.c>>=
 <<Common C Header>>
 #include "uni_prop.h"
 
-#define UNI_lb_HH UNI_NUM_lb
 typedef enum {
   lb_st_reset = 0,
   /* 2nd states */
@@ -6919,12 +7008,15 @@ typedef enum {
   lb_num_st
 } lb_state_t;
 
-int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale)
+int uni_line_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
 {
-  uni_lb_t plb, nlb = uni_lb_of(next);
+  if(!tab)
+    tab = uni_lb_mtab;
+#define get_lb(x) uni_x_of(x, tab, UNI_lb_XX)
+  uni_lb_t plb, nlb = get_lb(next);
   if(prevret == -lb_st_PRO_OP) {
     /* ret was just negated; fix it to a real value */
-    plb = uni_lb_of(prev);
+    plb = get_lb(prev);
     if(plb == UNI_lb_SP)
       prevret = -lb_st_OP_SP; /* LB14/LB7 */
     else
@@ -6945,10 +7037,9 @@ int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale)
     else
       plb = p - lb_num_st;
   } else {
-    plb = uni_lb_of(prev);
+    plb = get_lb(prev);
     prevret = plb + lb_num_st;
   }
-  <<Perform line break property locale adjustments>>
   if(nlb == UNI_lb_SA) {
     /* LB1 */
     /* note that if prev == SA, it doesn't matter (CM/AL are the same) */
@@ -7237,27 +7328,6 @@ int uni_line_brk(uint32_t prev, uint32_t next, int prevret, int locale)
 }
 @
 
-<<Boundary determination locale flags>>=
-#define UNI_BRK_LOCALE_FI    8 /* fi locale */
-#define UNI_BRK_LOCALE_ZH    16 /* zh locale */
-@
-
-<<Perform line break property locale adjustments>>=
-/* FIXME: it would be faster to use updated lb tables for this */
-if(locale & (UNI_BRK_LOCALE_JA | UNI_BRK_LOCALE_ZH)) {
-  if(plb == UNI_lb_CJ)
-    plb = UNI_lb_ID;
-  if(nlb == UNI_lb_CJ)
-    nlb = UNI_lb_ID;
-}
-if(locale & UNI_BRK_LOCALE_FI) {
-  if(prev == 0x2010)
-    plb = UNI_lb_HH;
-  if(next == 0x2010)
-    nlb = UNI_lb_HH;
-}
-@
-
 <<FIXME>>=
 Support u-lb locale extension.  Seems to be a reference to css3-text:
 http://www.w3.org/TR/css3-text/#line-break-property
@@ -7397,13 +7467,13 @@ while(s < e) {
       ret = uni_gc_brk(p, n, ret, 0);
       break;
     case 'w':
-      ret = uni_word_brk(p, n, ret, 0);
+      ret = uni_word_brk(p, n, ret, NULL);
       break;
     case 's':
-      ret = uni_sentence_brk(p, n, ret, 0);
+      ret = uni_sentence_brk(p, n, ret, NULL, NULL);
       break;
     case 'l':
-      ret = uni_line_brk(p, n, ret, 0);
+      ret = uni_line_brk(p, n, ret, NULL);
       break;
   }
   int match = 0;
@@ -8237,7 +8307,7 @@ static int cmp_strs(const void *a, const void *b)
 
    if(len > B->len)
      len = B->len;
-   c = memcmp(sort_strs + A->off, sort_strs + B->off, len * 4);
+   c = cmpbuf(sort_strs + A->off, sort_strs + B->off, len);
    if(c)
      return c;
    return (int32_t)A->len - (int32_t)B->len;
@@ -8253,9 +8323,9 @@ static void merge_strs(prop_t *p)
   qsort(p->str_arr, p->len, sizeof(*p->str_arr), cmp_strs);
   for(i = p->len - 1; i; i--)
     if(p->str_arr[i - 1].len <= p->str_arr[i].len &&
-       !memcmp(p->strs + p->str_arr[i - 1].off,
+       !cmpbuf(p->strs + p->str_arr[i - 1].off,
                p->strs + p->str_arr[i].off,
-	       p->str_arr[i - 1].len * 4)) {
+	       p->str_arr[i - 1].len)) {
       p->str_arr[i - 1].off = p->str_arr[i].off;
   }
 }
@@ -8747,7 +8817,7 @@ static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
       r = bsearch(&i, rng, nent, sizeof(*rng), uni_cmp_cp);
       rs = r ? (uni_str_ptr_t *)&r->off : &z;
       ms = uni_x_str_of(i, mtab);
-      if(memcmp(ms, rs, sizeof(*ms))) {
+      if(cmpbuf(ms, rs, 1)) {
         fprintf(stderr, "mismatch %s@%d %d/%d/%d %d/%d/%d\n", name, i,
 	                (int)rs->off, (int)rs->len & 0x7fff, (int)rs->len >> 15,
 			(int)ms->off, (int)ms->len & 0x7fff, (int)ms->len >> 15);
@@ -9908,7 +9978,7 @@ while(1) {
   gc_res = uni_gc_brk(next_cp, ncp, gc_res, 0);
 #if 0
   /* finding word break is pointless, since it happens too late */
-  word_res = uni_word_brk(next_cp, ncp, word_res, 0);
+  word_res = uni_word_brk(next_cp, ncp, word_res, NULL);
   if(word_res > 0)
     cond |= UNI_SC_FL_FINAL_SIGMA;
 #else
@@ -9951,27 +10021,25 @@ else if(next_cp == 0x0300 || /* COMBINING GRAVE ACCENT */
 
 However, title casing does need to know the start of a new word.  For
 this, the official algorithm is used to set a flag.  This algorithm
-requires locale knowledge, so the two supported locales get artificial
-casing flags, as well.  Since it technically applies to the next
-character, two flags are used.  Also, since grapheme cluster
-extensions are generally ignored, only the two cluster start
-characters are compared.
+requires locale knowledge, so the word break table needs to be passed
+in, as well.  Since it technically applies to the next character, two
+flags are used.  Also, since grapheme cluster extensions are generally
+ignored, only the two cluster start characters are compared.
 
-<<Special casing conditions>>=
-
-/* additional casing conditions when doing string-at-time */
-#define UNI_SC_FL_JA    (1<<4) /* ja locale */
-#define UNI_SC_FL_POSIX (1<<3) /* en_US_POSIX locale */
+<<[[uni_str_]][[tc]](@sz) proto>>=
+int uni_str_tc<<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
+                         uint32_t cond, const uint32_t *WB_tab,
+			 <<Buffer return parameters for UTF-[[<<@sz>>]]>>)
 @
 
-<<Initialize string case conversion>>=
-#ifdef USE_TC_CODE
-int locale = 0;
-if(cond & UNI_SC_FL_JA)
-  locale |= UNI_BRK_LOCALE_JA;
-if(cond & UNI_SC_FL_POSIX)
-  locale |= UNI_BRK_LOCALE_POSIX;
-#endif
+<<[[uni_str_is_]][[tc]](@sz) proto>>=
+int uni_str_is_tc<<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
+                            uint32_t cond, const uint32_t *WB_tab)
+@
+
+<<[[uni_str_is_]][[cased]](@sz) proto>>=
+int uni_str_is_cased<<@sz>>(const uint<<@sz>>_t *s, unsigned int slen,
+                            uint32_t cond, const uint32_t *WB_tab)
 @
 
 <<Initialize string case conversion>>=
@@ -9985,7 +10053,7 @@ int word_res = 0;
 #ifdef USE_TC_CODE
 next_word = prev_word;
 if(next_gc != slen) {
-  word_res = uni_word_brk(cp, next_cp, word_res, locale);
+  word_res = uni_word_brk(cp, next_cp, word_res, WB_tab);
   prev_word = word_res > 0;
 }
 #endif
@@ -10958,6 +11026,10 @@ uni_norm.o
 #endif /* UNI_NORM_H */
 @
 
+<<Headers to Install>>=
+uni/uni_norm.h \
+@
+
 <<uni_norm.c>>=
 <<Common C Header>>
 #include "uni_all.h"
@@ -11860,7 +11932,7 @@ Then, run the conformance tests.
 for(i = <<@i0>>; i < <<@il>>; i++) {
   cpybuf(obuf, ibuf[i], ilen[i]);
   int l = uni_<<@type>>32(NULL, ilen[i], &obptr, -1, &oblen);
-  if(l != ilen[<<@r>>] || memcmp(obuf, ibuf[<<@r>>], l * sizeof(obuf[0]))) {
+  if(l != ilen[<<@r>>] || cmpbuf(obuf, ibuf[<<@r>>], l)) {
     ret = 1;
     fprintf(stderr, "Failed <<@type>> test %d/%d on %s\nGot: ",
                     <<@r>> + 1, i + 1, lbuf);
@@ -14021,6 +14093,8 @@ cmph_rev_na.c: cmph_in_na.gen.mph
 else
 cmph_rev_na.c: uni_prop.gen.h
 	echo >$@
+# don't offer CMPH if it's not supported in binary
+NOTANGLE_POSTPROC+=|sed -e 's/ifdef USE_CMPH/if 0/'
 endif
 
 # needed for cproto.h, so may as well include everywhere
@@ -14388,11 +14462,11 @@ prop_DUCET_CLDR = add_prop("DUCET_CLDR");
 cldr_vartop = parse_ducet("CollationAuxiliary/allkeys_CLDR.txt",
                           prop_DUCET_CLDR);
 if(!cldr_vartop) {
-  chdir(cwd);
-  chdir(CLDR_LOC);
+  force_chdir(cwd);
+  force_chdir(CLDR_LOC);
   cldr_vartop = parse_ducet("common/uca/allkeys_CLDR.txt", prop_DUCET_CLDR);
-  chdir(cwd);
-  chdir(UCD_LOC);
+  force_chdir(cwd);
+  force_chdir(UCD_LOC);
   if(!cldr_vartop) {
     perror("allkeys_CLDR.txt");
     exit(1);
@@ -16793,7 +16867,7 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
   /* needs to be NFD for literal append */
   buf_len = uni_NFD32(NULL, buf_len, &buf, 0, &max_buf);
   key = uni_str_uca_raw32(buf, buf_len, &opts, &key_len, NULL);
-  if(fcd && (fcd_len != key_len || memcmp(fcd, key, fcd_len * 4))) {
+  if(fcd && (fcd_len != key_len || cmpbuf(fcd, key, fcd_len))) {
     fprintf(stderr, "key/fcd mismatch\n%s\n", lbuf);
     s = build_kbuf1234(kbuf, fcd, fcd_len, opts.max_level > 3);
     strcpy(s, "]\n");
@@ -18146,10 +18220,6 @@ PARSER_LDFLAGS += $(XML_LDFLAGS)
 @
 
 <<Parse character data files>>=
-<<Prepare for XML parsing>>
-@
-
-<<Prepare for XML parsing>>=
 xmlInitParser();  /* xmlCleanupParser() when done */
 xmlDocPtr doc; /* the document under consideration */
 xmlNodePtr n, c; /* for traversing the nodes */
@@ -18890,6 +18960,10 @@ cmph_na_xml_supt.o
 cmph_na_xml_xlate.gen.o
 @
 
+<<Libraries to Install>>=
+$(if $(CMPH),uni_cmph) \
+@
+
 <<makefile.rules>>=
 ifneq ($(CMPH),)
 cmph_in_na_xml.gen: cmph_in_na_xml_gen
@@ -19098,8 +19172,8 @@ PARSER_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\"
 @
 
 <<Parse character data files>>=
-chdir(cwd);
-chdir(CLDR_LOC);
+force_chdir(cwd);
+force_chdir(CLDR_LOC);
 <<Parse CLDR files>>
 @
 
@@ -19691,6 +19765,10 @@ it is absent.
 #endif /* UNI_LOCALE_H */
 @
 
+<<Headers to Install>>=
+uni/uni_locale.h \
+@
+
 <<Unicode locale exports>>=
 uint32_t uni_locale_triplet(uni_CLDR_language_t l, uni_CLDR_script_t s,
                             uni_CLDR_territory_t t);
@@ -19866,7 +19944,7 @@ if(!d) {
   perror("CLDR bcp47");
   exit(1);
 }
-chdir("common/bcp47");
+force_chdir("common/bcp47");
 while((de = readdir(d))) {
   if(de->d_name[0] == '.')
     continue;
@@ -19965,8 +20043,8 @@ while((de = readdir(d))) {
   xmlFreeDoc(doc);
 }
 closedir(d);
-chdir(cwd);
-chdir(CLDR_LOC);
+force_chdir(cwd);
+force_chdir(CLDR_LOC);
 @
 
 <<Add enum lit for locale extension>>=
@@ -20859,15 +20937,12 @@ if(*ls == '@') {
         exts[exts_len - 1] = ext + (v->val << 8);
         continue;
       case UNI_LOCALE_EXT_BOOL: {
-        int val;
-        if(!strcmp(me.name, "false") || !strcmp(me.name, "no"))
-          val = 0;
-        else if(!strcmp(me.name, "true") || !strcmp(me.name, "yes"))
-          val = 1;
-        else
+        v = bsearch(&me, uni_locale_bool_approx, uni_locale_bool_approx_len,
+	            sizeof(me), uni_cmp_valueof);
+        if(!v)
           continue; /* invalid */
         grow_size(exts, exts_len, exts_len + 1);
-        exts[exts_len - 1] = ext + (val << 8);
+        exts[exts_len - 1] = ext + (v->val << 8);
         break;
       }
       case UNI_LOCALE_EXT_ATTR:
@@ -20912,6 +20987,25 @@ if(*ls == '@') {
     }
   } while(*ls && *ls != '.');
 }
+@
+
+<<Unicode locale exports>>=
+extern const uni_valueof_t uni_locale_bool_approx[];
+#define uni_locale_bool_approx_len 6
+#define uni_locale_bool_lookup(s) \
+  uni_x_valueof_approx(s, uni_locale_bool_approx, uni_locale_bool_approx_len, ~0)
+@
+
+<<Unicode locale functions>>=
+/* note: added on/off for XML support */
+const uni_valueof_t uni_locale_bool_approx[] = {
+  { "false", 0 },
+  { "no", 0 },
+  { "off", 0 },
+  { "on", 1 },
+  { "true", 1 },
+  { "yes", 1 }
+};
 @
 
 The only thing left to do is return a value, after freeing any
@@ -21194,13 +21288,9 @@ convert to canonical string:
   scr = tc
   ter = uc
   var = uc or lc (rec. lc, I guess)
-convert to uni_uca_opts_t and various flags
+convert to uni_uca_opts_t and various tables
   triplet, variants, u-va -> select locale
-    UNI_BRK_LOCALE_JA     language=ja
-    UNI_BRK_LOCALE_POSIX  u-va-posix (maybe also en-latn-us)
-    UNI_BRK_LOCALE_EL     language=el
-    UNI_BRK_LOCALE_FI     language=fi
-    UNI_BRK_LOCALE_ZH     language=zh
+    break tabs: WB SB lb
     locale selects full default uni_uca_opts_t (including some unimpl.)
                         due to "settings" tags in locale data
   t-localeid t-k0 t-i0 t-t0 t-m0 -> ignore translation extension
@@ -21260,7 +21350,7 @@ this, build.nw and tjm-ext.nw are required.  If you obtained the PDF
 or HTML version of this document, these are included.  Otherwise, they
 may be obtained the same place you got this.  In addition, tjm-ext.nw
 must be built (using the same build instructions as below, although
-the command \texttt{make~libsupt.a} is probably sufficient) in a
+the command \texttt{make~libtjm-supt.a} is probably sufficient) in a
 separate directory (i.e., without uni.nw in the same directory).  The
 other prerequisites are the Unicode data files.  Make sure the file
 locations are also set correctly in the config file.
@@ -22283,11 +22373,8 @@ backtracking session.
 
 % uni_word_brk prototype
 
-Currently, the only locale depencdencies supported must be enabled
-using explicit flags; the current locale is not checked.   The
-following flags can be set:
-
-\input{Boundary determination locale flags.tex} % C
+Currently, locale dependencies are hard-coded, and enabled by using
+locale-dependent word break property tables ([[tab]]).
 
 What constitutes a sentence in text is even more context and locale
 dependent.  Unicode tries to provide a standard means to do so,
@@ -22334,6 +22421,18 @@ backtrack position is no longer needed once it is resolved.  The next
 $-1$ or $1$ starts a new backtracking session.
 
 % uni_sentence_brk prototype
+
+In addition to a property table override for locale support, this
+function also supports a break suppression list.  This list must be a
+sorted array of UTF-8 encoded strings (sorted by simple byte value)
+normalized the same way as text to be scanned.  Any text matching a
+suppression never breaks a sentence after the next character.  No
+attempts are made to ensure matches start at a word boundary, and no
+transformations are done to the list or to text being scanned prior to
+matching.  If the override list is given, it is only enabled if an
+additional state parameter ([[sup_state]]) is supplied as well.
+
+\input{[[uni_sb_locale_t]].tex} % C
 
 Unicode assumes in the above function that paragraphs are ended by
 either explicit end-of-line characters or paragraph separators.  This
@@ -22383,6 +22482,9 @@ indicates a break is permitted, and $-1$ indicates no break is
 permitted.  See [[uni_sentence_brk]] for an example.
 
 % uni_line_brk prototype
+
+As with the above two functions, [[tab]] may be set for
+locale-specific property table overrides.
 
 \section{Numeric Properties}
 
@@ -23313,7 +23415,8 @@ Unlike the character conversion functions, the title case conversion
 function uses the upper-case and lower-case conversions as necessary
 according to the full title case conversion algorithm.  That is, words
 only have their first character capitalized, and everything else is
-converted to lower-case.
+converted to lower-case.  This requires word boundary detection, which
+can be localized with a property table override ([[WB_tab]]).
 
 Also unlike the character conversion functions, the special value
 [[~0]] is not supported for [[cond]]; it is not possible to query
@@ -23440,7 +23543,10 @@ appropriate tables.
 % uni_case_check prototype
 
 The string equivalents of the above functions check if any part of the
-string would change if a conversion function were applied.
+string would change if a conversion function were applied.  Anything
+doing title case checks needs to know about word boundaries, so a
+locale word boundary property override can be specified for them
+([[WB_tab]]).
 
 % uni_str_is_lc8 prototype
 % uni_str_is_lc16 prototype
