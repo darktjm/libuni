@@ -54,7 +54,7 @@ $Id$
 "$Id$\n"
 @
 
-<<Common NoWeb Warning>>=
+<<Common noweb Warning>>=
 # $Id$
 @
 \fi
@@ -2201,7 +2201,7 @@ uni_set_op_t,%
 
 The set \emph{operations} must be performed on arrays of a particular
 type.  Since C does not really support generics, and using the
-preprocessor would be impractical, the NoWeb parameterized macro
+preprocessor would be impractical, the noweb parameterized macro
 facility is used.  Previous versions of this document wrote the
 function definition to an include file, and used the preprocessor to
 redefine types and names for four separate [[#include]]s.  That is
@@ -11735,7 +11735,7 @@ difference in the three function groups is what table they use, so
 only one group of functions exists; each group just calls the helper
 with the appropriate tables.  This is one case where Ada or C++
 generics would be very handy; each group of functions is virtually
-triplicated with minor changes due to character type.  NoWeb makes
+triplicated with minor changes due to character type.  noweb makes
 things additionally complicated by disallowing chunk references inside
 preprocessor macro definitions; otherwise, the definition of each
 group could have been made using a single preprocessor call.

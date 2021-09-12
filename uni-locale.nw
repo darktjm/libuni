@@ -30,7 +30,7 @@ $Id$
 "$Id$\n"
 @
 
-<<Common NoWeb Warning>>=
+<<Common noweb Warning>>=
 # $Id$
 @
 \fi
