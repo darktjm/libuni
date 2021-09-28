@@ -57,6 +57,7 @@ $Id$
 <<Common noweb Warning>>=
 # $Id$
 @
+
 \fi
 \begin{rawhtml}
 <-->
@@ -71,7 +72,7 @@ However, this library does things my way, which allows me to e.g.
 build a regular expression library and a compiler using these
 routines.  A large number of properties can be queried, and selected
 properties have additional support routines.  All algorithms listed in
-Table 3-1, Named Unicode Algorithms, in version 7.0 of the Unicode
+Table 3-1, Named Unicode Algorithms, in version 14.0 of the Unicode
 standard are implemented except for the Bidirectional Algorithm (UBA)
 and the Standard Compression Scheme for Unicode (SCSU).  Several of
 these have additional modifications for localization using the Common
@@ -79,16 +80,9 @@ Locale Data Repository (CLDR).
 
 \vspace{0.75in}
 
-This document is \copyright{} 2012--2015 Thomas J. Moore.  This
-document is licensed under the Apache License, Version 2.0 (the
-``License''); you may not use this document except in compliance with
-the License. You may obtain a copy of the License at
-\url{http://www.apache.org/licenses/LICENSE-2.0}.  Unless required by
-applicable law or agreed to in writing, software distributed under the
-License is distributed on an ``AS IS'' BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for
-the specific language governing permissions and limitations under the
-License. 
+This document, its contents and all prior versions published by the
+same author are granted to the Public Domain in 2021 by Thomas J.
+Moore.
 
 \vspace{0.25in}
 
@@ -152,26 +146,35 @@ This document does not contain the UCD or CLDR itself; it is expected
 that the user download them manually and place them where they can be
 found.  Some Linux distributions may already provide at least the UCD
 as a package, although the CLDR is probably less common.  This package
-was tested with versions 6.0.0, 6.2.0, 6.3.0 and 7.0.0 of the UCD, but
-the file formats are relatively stable and it should work with later
-versions as well, other than algorithm changes.  I recommend at least
-version 6.1.0, as that is the first version where the control
-character names were finally made official.  An earlier version of
-this library actually had hard-coded names for ASCII control
-characters optionally added to the name database.  This package was
-tested against CLDR version 24; I recommend always getting the
-latest version available.  In particular, care must be taken that the
-CLDR and UCD versions are compatible.
+was tested with version 14.0.0 of the UCD, but the file formats are
+relatively stable and it should work with later versions as well,
+other than algorithm changes.  There is little reason to not use the
+latest available version.%
+\footnote{Other than the data growing rapidly with each release, but
+there's no fighting that.  And, of course, related breakages, such as
+the blk property exceeding 8 bits as of 9.0.0, and the cjkRSUnicode
+property switching files in 7.0.0.}
+This package was tested against CLDR version 39; I recommend always
+getting the latest version available.  In particular, care must be
+taken that the CLDR and UCD versions are compatible.  Some CLDR
+changes require modification of algorithms, so you may need to wait
+for an update in this library before full support for a later version
+is present.
 
-Originally, I didn't care what version was used, but 6.3.0 introduces
-some incompatible algorithm changes.  Thus, the version must be known
-as well.  The UCD version can be extracted from the first line of many
-of the data files (e.g. the first line of \texttt{PropertyAliases.txt}
-is \texttt{\# PropertyAliases-}\emph{ver}\texttt{.txt}), but there is
-no guarantee that it is always present, so an explicit value must be
-set.  The CLDR has nothing which indicates the current version, so
-again, an explicit value must be set.  Note that the CLDR version is
-currently ignored.
+Originally, I didn't care what version of the UCD was used, but 6.3.0
+introduced some incompatible algorithm changes.  My original solution
+was to support every algorithm change based on the UCD version used,
+but instead, I will now only support one.  There are simply too many
+algorithm changes in every major Unicode revision (and the major
+revisions come too often).  I won't even abort if the UCD version is
+too low; it is your responsibility to use the correct, latest
+available version.  It is possible that the library will work with
+older versions of the UCD (but probably not, as new symbols are often
+introduced as well, and I even removed the pre-6.3 compatibility
+symbols), using algorithms from later versions of Unicode, but I will
+no longer put effort into ensuring support.  One of the advantages of
+freely available data files is that I can force you to use the one I
+want.
 
 % End-doc Introduction
 
@@ -181,10 +184,6 @@ currently ignored.
 # http://www.unicode.org/Public/zipped/<version>/UCD.zip
 UCD_LOC = /usr/share/unicode-data
 
-# The version of the UCD/Unihan data: major*100+minor*10+sub
-# Leave blank to automatically determine from data
-#UCD_VER = 700
-
 # The location of the Unicode Han Database (unzipped)
 # http://www.unicode.org/Public/zipped/<version>/Unihan.zip
 UNIHAN_LOC = $(UCD_LOC)
@@ -192,10 +191,6 @@ UNIHAN_LOC = $(UCD_LOC)
 # The location of the Unicode Common Locale Data Repository (unzipped)
 # http://www.unicode.org/Public/cldr/latest/core.zip
 CLDR_LOC = /usr/share/unicode-data/cldr
-
-# The version of the CLDR data: major*10+minor
-# Leave blank to automatically determine from data
-#CLDR_VER=270
 
 @
 
@@ -642,7 +637,7 @@ int uni_utf8_enclen(uint32_t cp);
 #define uni_utf8_enclen(cp) \
   (1 + ((cp) >= 0x80) + ((cp) >= 0x800) + ((cp) >= 0x10000))
 /** Encodes Unicode code point \p cp into \p buf using UTF-8.
-  * Returns number of bytes generated.  Ensure that at least 3 bytes are
+  * Returns number of bytes generated.  Ensure that at least 4 bytes are
   * available in \p buf, or use \ref uni_utf8_enclen to size the buffer
   * first.  Invalid Unicode code points will not be encoded */
 int uni_utf8_encode(uint8_t *buf, uint32_t cp);
@@ -1711,7 +1706,7 @@ static int uni_int_utf16_encode(uint16_t *buf, uint32_t cp)
   * of words written */
 int uni_int_utf16_encode(uint16_t *buf, uint32_t cp);
 /** Encodes Unicode code point \p cp into \p buf using UTF-8.
-  * Returns number of bytes generated.  Ensure that at least 3 bytes are
+  * Returns number of bytes generated.  Ensure that at least 4 bytes are
   * available in \p buf, or use \ref uni_utf8_enclen to size the buffer
   * first.  Invalid Unicode code points will not be encoded */
 int uni_int_utf8_encode(uint8_t *buf, uint32_t cp);
@@ -3019,7 +3014,7 @@ void uni_bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
   * by a bit mask.  Note that \p ret is NULL for all zeroes and all ones
   * returns as well */
 int uni_multi_tab_lookup(const <<Multi-level table type>> *dat, uint32_t val,
-                         const uint8_t **ret, uint8_t def);
+                         const uint8_t **ret, int def);
 @
 
 <<Unicode property functions for generator>>=
@@ -3034,7 +3029,7 @@ void uni_bits_to_multi(const uint8_t *bits, uint32_t len, uint32_t low,
 
 <<Unicode property functions>>=
 int uni_multi_tab_lookup(const <<Multi-level table type>>*dat, uint32_t val,
-                         const uint8_t **ret, uint8_t def)
+                         const uint8_t **ret, int def)
 {
   <<Find multi-level table entry [[val]]>>
 }
@@ -4047,6 +4042,10 @@ static void print_mtab_info(const uint32_t *mt, uint32_t rsize)
 }
 @
 
+<<FIXME>>=
+emoji/emoji-test.txt -> run it, somehow
+@
+
 \subsection{Parsing the UCD}
 
 A parser program is used to generate these tables as static,
@@ -4144,23 +4143,21 @@ convenience, the known (but not enforcably standardized) format of the
 version string in a UCD file can be used to extract its version.
 Similarly, the version can be extracted from the DTD of the CLDR; this
 is less likely to change without notice, but it is still not
-enforcably standardized.
+enforcably standardized.  Since it's too much trouble to keep the
+version numbers up-to-date in the configuration file, I always attempt
+to extract the version from the data.
 
 \lstset{language=make}
 <<makefile.vars>>=
 PARSER_CFLAGS += -DUCD_LOC=\"$(UCD_LOC)\" -DUNIHAN_LOC=\"$(UNIHAN_LOC)\"
-ifeq ($(UCD_VER),)
 # $(shell ...) expands $(..._LOC) incorrectly, so use shell's $() instead
 UCD_VER = $$( \
      sed -n -e '1{s/.*-//;s/\.txt.*//;s/\.//g;p;}' $(UCD_LOC)/PropList.txt)
-endif
-ifeq ($(CLDR_VER),)
 # plain versions don't have .0 attached, so attach .0 and strip if wrong
 CLDR_VER = $$( \
    sed -n -e '/cldrVersion/{ \
       s/[^"]*"//;s/".*//;s/$$/.0/;s/\(\..*\)\..*/\1/;s/\.//g;p;}' \
        $(CLDR_LOC)/common/dtd/ldml.dtd)
-endif
 PARSER_CFLAGS += -DUCD_VER=$(UCD_VER) -DCLDR_VER=$(CLDR_VER)
 @
 
@@ -4599,9 +4596,10 @@ on the name (assuming the name exists), it can be called every time,
 and the correct entry will be updated.  Hyphen is a deprecated
 property, so it is explicitly excluded.  It would be nice if there
 were some place where a list of deprecated propreties could be read.
+At the moment, there's only a table in the human-readable UAX\#44.
 
 <<Process a line of [[PropList.txt]]>>=
-if(!strcmp(fields[1], "Hyphen"))
+if(!strcmp(fields[1], "Hyphen")) /* deprecated 6.0.0 */
   continue;
 <<Just add field two as binary property>>
 @
@@ -4611,16 +4609,27 @@ add_bool_rng(&parsed_props[add_prop(fields[1])], low, high);
 @
 
 Speaking of [[DerivedCoreProperties.txt]], this file has entirely
-boolean properties as well.  The Grapheme\_Link property is
-deprecated, so it is explicitly excluded.  It would be nice if there
-were a file listing all deprecated properties to exclude.
+boolean properties as well, including a deprecated one.
 
 <<Parse UCD files>>=
 open_f("DerivedCoreProperties.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
-  if(!strcmp(fields[1], "Grapheme_Link"))
+  if(!strcmp(fields[1], "Grapheme_Link")) /* deprecated 5.0.0 */
     continue;
+  <<Just add field two as binary property>>
+}
+fclose(f);
+@
+
+The Emoji property, introduced in 9.0.0, is listed in a separate file,
+[[emoji-data.txt]].  This is distributed separately from the UCD prior
+to 13.0.0, but I will only look for it in the UCD emoji subdirectory.
+
+<<Parse UCD files>>=
+open_f("emoji/emoji-data.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
   <<Just add field two as binary property>>
 }
 fclose(f);
@@ -4696,25 +4705,17 @@ fclose(f);
 
 <<Process a line of [[DerivedNormalizationProps.txt]]>>=
 if(num_fields == 2) {
-  if(!strncmp(fields[1], "Expands_On_", 11))
+  if(!strncmp(fields[1], "Expands_On_", 11)) /* deprecated 6.0.0 */
     continue;
   <<Just add field two as binary property>>
   continue;
 }
 @
 
-There are no boolean fields exported from Unihan.  The only field
-which might be considered boolean (kIICore) is not required by
-anything I use.
-
-\lstset{language=txt}
-<<FIXME>>=
-Unihan_IRGSources.txt: kIICore
-@
+There are no boolean fields exported from Unihan.
 
 Now, to finish up post-processing, the multi-level table is generated.
 
-\lstset{language=C}
 <<Post-process property data>>=
 uint32_t ml_len;
 for(i = 0; i < nparsed; i++)
@@ -4998,7 +4999,8 @@ Again, for the \emph{of} operation, the multi-level table seems
 appropriate.  Rather than storing the actual string value, the
 enumeration is simply converted into an integer from zero to the
 number of elements, and that integer is stored.  For all enumerations
-but the character name, this just one byte.  For the character name, a
+but the character name, this used to be just one byte.  As of Unicode
+8, the [[blk]] property requires 2 bytes.  For the character name, a
 different approach is required.  Since every code point has a
 different name, there will never be any sharing of lower-level tables.
 The only possible sharing would be in the algorithmically generated
@@ -5017,25 +5019,30 @@ typedef struct {
     uint32_t low, /**< Low end of range */ high:24, /**< High end of range */
              dat:8; /**< Value for all code points within this range */
 } uni_chrrng_dat8_t;
+#define uni_chrrng_dat8_val(x) (x).dat
+#define uni_set_chrrng_dat8_val(x, v) (x).dat = v
+#define uni_chrrng_high8(x) (x).high
 @
 
 <<Unicode property exports for generator>>=
-#if 1
 <<[[uni_chrrng_dat8_t]]>>
-#else /* 32-bit dat during testing */
-typedef struct {
-    uint32_t low, high, dat;
-} uni_chrrng_dat8_t;
-#endif
-/** Compare \ref uni_chrrng_dat8_t code point ranges pointed to by \p a and \p b.
+<<[[uni_cmprng_dat]][[8]] Prototype>>
+<<[[uni_chrrng_dat]][[8]] Prototype>>
+@
+
+<<[[uni_cmprng_dat]](@sz) Prototype>>=
+/** Compare \ref uni_chrrng_dat<<@sz>>_t code point ranges pointed to by \p a and \p b.
   * Intended for use with qsort and bsearch */
-int uni_cmprng_dat8(const void *a, const void *b); /* for bsearch/qsort */
-/** Return the value associated with \p cp in a \ref uni_chrrng_dat8_t table.
+int uni_cmprng_dat<<@sz>>(const void *a, const void *b);
+@
+
+<<[[uni_chrrng_dat]](@sz) Prototype>>=
+/** Return the value associated with \p cp in a \ref uni_chrrng_dat<<@sz>>_t table.
   * If \p cp is not covered by any range, \p def is returned.  The 
-  * table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat8.
+  * table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat<<@sz>>.
   * If there are overlapping ranges in the array, results are undefined */
-uint32_t uni_chrrng_dat8(uint32_t cp, const uni_chrrng_dat8_t *tab,
-                         uint32_t tab_len, uint32_t def);
+uint<<@sz>>_t uni_chrrng_dat<<@sz>>(uint32_t cp, const uni_chrrng_dat<<@sz>>_t *tab,
+                         uint32_t tab_len, uint<<@sz>>_t def);
 @
 
 <<Known Data Types>>=
@@ -5043,48 +5050,56 @@ uni_chrrng_dat8_t,%
 @
 
 <<Unicode property functions for generator>>=
-int uni_cmprng_dat8(const void *a, const void *b)
-{
-    const uni_chrrng_dat8_t *_a = a, *_b = b;
+<<[[uni_cmprng_dat]][[8]]>>
+<<[[uni_chrrng_dat]][[8]]>>
+@
 
-    if(_a->high < _b->low)
+<<[[uni_cmprng_dat]](@sz)>>=
+int uni_cmprng_dat<<@sz>>(const void *a, const void *b)
+{
+    const uni_chrrng_dat<<@sz>>_t *_a = a, *_b = b;
+    uint32_t ahigh = uni_chrrng_high<<@sz>>(*_a),
+             bhigh = uni_chrrng_high<<@sz>>(*_b);
+
+    if(ahigh < _b->low)
         return -1;
-    else if(_b->high < _a->low)
+    else if(bhigh < _a->low)
         return 1;
     else
         return 0;
 }
+@
 
-uint32_t uni_chrrng_dat8(uint32_t cp, const uni_chrrng_dat8_t *tab,
-                         uint32_t tab_len, uint32_t def)
+<<[[uni_chrrng_dat]](@sz)>>=
+uint<<@sz>>_t uni_chrrng_dat<<@sz>>(uint32_t cp, const uni_chrrng_dat<<@sz>>_t *tab,
+                         uint32_t tab_len, uint<<@sz>>_t def)
 {
 #if 0
-  uni_chrrng_dat8_t cr = {cp, cp}, *tab_el;
-  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat8_t), uni_cmprng_dat8);
-  return tab_el ? tab_el->dat : def;
+  uni_chrrng_dat<<@sz>>_t cr = {cp, cp}, *tab_el;
+  tab_el = bsearch(&cr, tab, tab_len, sizeof(*tab), uni_cmprng_dat<<@sz>>);
+  return tab_el ? uni_chrrng_dat<<@sz>>(*tab_el) : def;
 #else /* twice as fast! */
   int l = 0, h = tab_len - 1;
   while(l <= h) {
     int j = (l + h) / 2;
     if(cp < tab[j].low)
       h = j - 1;
-    else if(cp > tab[j].high)
+    else if(cp > uni_chrrng_high<<@sz>>(tab[j]))
       l = j + 1;
     else
-      return tab[j].dat;
+      return uni_chrrng_dat<<@sz>>_val(tab[j]);
   }
   return def;
 #endif
 }
 @
 
-While no enumeration requires more than 8 bits, there may be other
-data types which require more.  For these, larger types are needed.
-For 16 bits, the [[low]] field can be split as well.  For 32 bits, if
-they are unique, it is unlikely that long ranges (if any ranges at
-all) exist.  For this reason, a low+length approach is used instead;
-this splits the [[low]] field to make room for a [[len]] field
-(which is the length of the range minus one).
+Some enums, and other numeric types, require more storage.  For 16
+bits, the [[low]] field can be split as well.  For 32 bits, if they
+are unique, it is unlikely that long ranges (if any ranges at all)
+exist.  For this reason, a low+length approach is used instead; this
+splits the [[low]] field to make room for a [[len]] field (which is
+the length of the range minus one).
 
 <<[[uni_chrrng_dat16_t]]>>=
 /** A simple 64-bit range structure with room for 16 bits of data */
@@ -5094,6 +5109,13 @@ typedef struct {
 	     high:24, /**< High end of range */
 	     dath:8; /**< High half of 16-bit data assigned to range */
 } uni_chrrng_dat16_t;
+#define uni_chrrng_dat16_val(x) ((x).datl + ((x).dath << 8))
+#define uni_set_chrrng_dat16_val(x, v) do { \
+  uint16_t _v = v; \
+  (x).datl = _v & 0xff; \
+  (x).dath = _v >> 8; \
+} while(0)
+#define uni_chrrng_high16(x) (x).high
 @
 
 <<[[uni_chrrng_dat32_t]]>>=
@@ -5103,103 +5125,29 @@ typedef struct {
              len:8, /**< Size of range - 1 (high = low + len) */
 	     dat; /* 32-bit data assigned to range */
 } uni_chrrng_dat32_t;
+#define uni_chrrng_dat32_val(x) (x).dat
+#define uni_set_chrrng_dat32_val(x, v) (x).dat = v
+#define uni_chrrng_high32(x) ((x).low + (x).len)
+@
+
+<<Unicode property exports for generator>>=
+<<[[uni_chrrng_dat16_t]]>>
+<<[[uni_cmprng_dat]][[16]] Prototype>>
+<<[[uni_chrrng_dat]][[16]] Prototype>>
+<<[[uni_chrrng_dat32_t]]>>
+<<[[uni_cmprng_dat]][[32]] Prototype>>
+<<[[uni_chrrng_dat]][[32]] Prototype>>
 @
 
 <<Known Data Types>>=
 uni_chrrng_dat16_t,uni_chrrng_dat32_t,%
 @
 
-<<Unicode property exports for generator>>=
-<<[[uni_chrrng_dat16_t]]>>
-<<[[uni_chrrng_dat32_t]]>>
-/** Compare \ref uni_chrrng_dat16_t code point ranges pointed to by \p a and \p b.
-  * Intended for use with qsort and bsearch */
-int uni_cmprng_dat16(const void *a, const void *b); /* for bsearch/qsort */
-/** Return the value associated with \p cp in a \ref uni_chrrng_dat16_t table.
-  * If \p cp is not covered by any range, zero is returned.  The 
-  * table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat16.
-  * If there are overlapping ranges in the array, results are undefined */
-uint16_t uni_chrrng_dat16(uint32_t cp, const uni_chrrng_dat16_t *tab,
-                          uint32_t tab_len);
-/** Compare \ref uni_chrrng_dat32_t code point ranges pointed to by \p a and \p b.
-  * Intended for use with qsort and bsearch */
-int uni_cmprng_dat32(const void *a, const void *b); /* for bsearch/qsort */
-/** Return the value associated with \p cp in a \ref uni_chrrng_dat32_t table.
-  * If \p cp is not covered by any range, zero is returned.  The 
-  * table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat32.
-  * If there are overlapping ranges in the array, results are undefined */
-uint32_t uni_chrrng_dat32(uint32_t cp, const uni_chrrng_dat32_t *tab,
-                          uint32_t tab_len);
-@
-
 <<Unicode property functions for generator>>=
-int uni_cmprng_dat16(const void *a, const void *b)
-{
-    const uni_chrrng_dat16_t *_a = a, *_b = b;
-
-    if(_a->high < _b->low)
-        return -1;
-    else if(_b->high < _a->low)
-        return 1;
-    else
-        return 0;
-}
-
-int uni_cmprng_dat32(const void *a, const void *b)
-{
-    const uni_chrrng_dat32_t *_a = a, *_b = b;
-
-    if(_a->low + _a->len < _b->low)
-        return -1;
-    else if(_b->low + _b->len < _a->low)
-        return 1;
-    else
-        return 0;
-}
-
-uint16_t uni_chrrng_dat16(uint32_t cp, const uni_chrrng_dat16_t *tab,
-                          uint32_t tab_len)
-{
-#if 0
-  uni_chrrng_dat16_t cr = {cp, cp}, *tab_el;
-  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat16_t), uni_cmprng_dat16);
-  return tab_el ? (tab_el->dath << 8) + tab_el->datl : 0;
-#else /* twice as fast! */
-  int l = 0, h = tab_len - 1;
-  while(l <= h) {
-    int j = (l + h) / 2;
-    if(cp < tab[j].low)
-      h = j - 1;
-    else if(cp > tab[j].high)
-      l = j + 1;
-    else
-      return (tab[j].dath << 8) + tab[j].datl;
-  }
-  return 0;
-#endif
-}
-
-uint32_t uni_chrrng_dat32(uint32_t cp, const uni_chrrng_dat32_t *tab,
-                          uint32_t tab_len)
-{
-#if 0
-  uni_chrrng_dat32_t cr = {cp, cp}, *tab_el;
-  tab_el = bsearch(&cr, tab, tab_len, sizeof(uni_chrrng_dat32_t), uni_cmprng_dat32);
-  return tab_el ? tab_el->dat : 0;
-#else /* twice as fast! */
-  int l = 0, h = tab_len - 1;
-  while(l <= h) {
-    int j = (l + h) / 2;
-    if(cp < tab[j].low)
-      h = j - 1;
-    else if(cp > tab[j].low + tab[j].len)
-      l = j + 1;
-    else
-      return tab[j].dat;
-  }
-  return 0;
-#endif
-}
+<<[[uni_cmprng_dat]][[16]]>>
+<<[[uni_chrrng_dat]][[16]]>>
+<<[[uni_cmprng_dat]][[32]]>>
+<<[[uni_chrrng_dat]][[32]]>>
 @
 
 For the \emph{name} and \emph{alias} operations, a simple lookup table
@@ -5629,13 +5577,13 @@ void uni_enum_name_strip(char *n)
   * Otherwise, \p def is returned.  Note that since this routine always
   * duplicates and strips \p n, this may not be the most efficient way to
   * perform such lookups. */
-uint8_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
-                             uint8_t def);
+uint32_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
+                              uint32_t def);
 @
 
 <<Unicode property functions>>=
-uint8_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
-                             uint8_t def)
+uint32_t uni_x_valueof_approx(const char *n, const uni_valueof_t *tab, int len,
+                              uint32_t def)
 {
   /* yuck - strdup on every call */
   char *s = strdup(n);
@@ -5705,8 +5653,8 @@ fprintf(gen_h, "/** Look up \\ref uni_%s_t value for name \\p x using loose\n"
 	       pn, pn, pn, enum_vals_len[i]);
 @
 
-There is still one nagging issue:  the gc aliases include some that
-are actually combinations of the others.  Since each value can only
+There is still one nagging issue:  the gc aliases include some that are
+actually combinations of the others.  Since each [[uni_valueof_t]] can only 
 hold one value, this is not going to work.  To support this, an extra
 table is generated which translates a value into a 64-bit mask that
 includes all base values.  For the base values themselves, only their
@@ -5787,7 +5735,10 @@ typedef enum {
   UNI_PROP_TYPE_BOOL,
   /** Enumeration; range table is \ref uni_chrrng_dat8_t and multi-level
    ** is 1 byte per code point */
-  UNI_PROP_TYPE_ENUM
+  UNI_PROP_TYPE_ENUM,
+  /** Enumeration; range table is \ref uni_chrrng_dat16_t and multi-level
+   ** is 2 bytes per code point */
+  UNI_PROP_TYPE_ENUM2
 } uni_prop_type_t;
 <<[[uni_propdesc_t]]>>
 @
@@ -5928,24 +5879,36 @@ when finished.
 
 <<Property parsed contents>>=
 uni_chrrng_dat8_t *rng_dat8;
-uint8_t def;
+uni_chrrng_dat16_t *rng_dat16;
+uint32_t def;
 @
 
 <<UCD parser local functions>>=
-static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
+<<[[add_enum_rng]][[8]]>>
+<<[[add_enum_rng]][[16]]>>
+#define add_enum_rng(p, l, h, v) do { \
+  if(num_val_aliases[p] >= 256) \
+    add_enum_rng16(&parsed_props[p], l, h, v); \
+  else \
+    add_enum_rng8(&parsed_props[p], l, h, v); \
+} while(0)
+@
+
+<<[[add_enum_rng]](@sz)>>=
+static void add_enum_rng<<@sz>>(prop_t *p, uint32_t low, uint32_t high, uint<<@sz>>_t val)
 {
   if(p->def == val)
     return;
   if(!p->max_len)
-    inisize(p->rng_dat8, (p->max_len = 8));
-  if(p->len && p->rng_dat8[p->len - 1].high == low - 1 &&
-     p->rng_dat8[p->len - 1].dat == val)
-    p->rng_dat8[p->len - 1].high = high;
+    inisize(p->rng_dat<<@sz>>, (p->max_len = 8));
+  if(p->len && p->rng_dat<<@sz>>[p->len - 1].high == low - 1 &&
+     uni_chrrng_dat<<@sz>>_val(p->rng_dat<<@sz>>[p->len - 1]) == val)
+    p->rng_dat<<@sz>>[p->len - 1].high = high;
   else {
-    check_size(p->rng_dat8, p->max_len, p->len + 1);
-    p->rng_dat8[p->len].low = low;
-    p->rng_dat8[p->len].high = high;
-    p->rng_dat8[p->len].dat = val;
+    check_size(p->rng_dat<<@sz>>, p->max_len, p->len + 1);
+    p->rng_dat<<@sz>>[p->len].low = low;
+    p->rng_dat<<@sz>>[p->len].high = high;
+    uni_set_chrrng_dat<<@sz>>_val(p->rng_dat<<@sz>>[p->len], val);
     ++p->len;
   }
 }
@@ -5954,10 +5917,12 @@ static void add_enum_rng(prop_t *p, uint32_t low, uint32_t high, uint8_t val)
 <<Set prop type for export>>=
 if(parsed_props[i].rng_dat8)
   t = UNI_PROP_TYPE_ENUM;
+if(parsed_props[i].rng_dat16)
+  t = UNI_PROP_TYPE_ENUM2;
 @
 
 <<Additional property structure members>>=
-uint8_t def; /**< The default value for enumeration types */
+uint32_t def; /**< The default value for enumeration types */
 const uni_alias_t *nameof; /**< The names and aliases for enumeration constants */
 /** Name-to-value lookup tables for enumeration constants */
 const uni_valueof_t *valueof, *valueof_approx;
@@ -5966,7 +5931,7 @@ uint32_t nameof_len, valueof_len;  /**< The length of the above three tables */
 
 <<Print additional property structure members>>=
 fprintf(pnf, ", %d", (int)parsed_props[i].def);
-if(t == UNI_PROP_TYPE_ENUM && enum_vals[i]) {
+if((t == UNI_PROP_TYPE_ENUM || t == UNI_PROP_TYPE_ENUM2) && enum_vals[i]) {
   fprintf(pnf, ", uni_%s_nameof, uni_%s_valueof, uni_%s_valueof_approx,\n"
                "\t\tUNI_NUM_%s, uni_%s_valueof_len",
                name, name, name, name, name);
@@ -6016,13 +5981,13 @@ static uint32_t enum_val(int pno, const char *v)
     parsed_props[prop_##n].def = def_##n ? enum_val(prop_##n, def_##n) : 0; \
   } \
   if(*v) \
-    add_enum_rng(&parsed_props[prop_##n], low, high, enum_val(prop_##n, v)); \
+    add_enum_rng(prop_##n, low, high, enum_val(prop_##n, v)); \
 } while(0)
 #define add_int(n, val) do { \
   if(prop_##n < 0) \
     prop_##n = add_prop(#n); \
   if(isdigit(*val)) \
-    add_enum_rng(&parsed_props[prop_##n], low, high, strtol(val, NULL, 0)); \
+    add_enum_rng(prop_##n, low, high, strtol(val, NULL, 0)); \
   else \
     add_enum(n, val); \
 } while(0)
@@ -6034,10 +5999,14 @@ To test the table implementations, a different, but nearly identical,
 set of routines is used compared to the ones one for booleans.
 
 <<Functions to help test generated tables>>=
-#define dat8(x, d) doit_dat8(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab, d)
+<<[[dat]][[8]] test>>
+@
 
-static void doit_dat8(const char *name, const uni_chrrng_dat8_t *rng, uint32_t nent,
-                      const uint32_t *mtab, uint8_t def)
+<<[[dat]](@sz) test>>=
+#define dat<<@sz>>(x, d) doit_dat<<@sz>>(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab, d)
+
+static void doit_dat<<@sz>>(const char *name, const uni_chrrng_dat<<@sz>>_t *rng, uint32_t nent,
+                       const uint32_t *mtab, uint<<@sz>>_t def)
 {
     uint32_t i;
 
@@ -6048,8 +6017,8 @@ static void doit_dat8(const char *name, const uni_chrrng_dat8_t *rng, uint32_t n
     print_mtab_info(mtab, nent * 8);
     /* check integrity */
     for(i = 0; i < 0x110000; i++) {
-      uint8_t rv = uni_chrrng_dat8(i, rng, nent, def);
-      uint8_t mv = <<range table data for [[i]]>>;
+      uint<<@sz>>_t rv = uni_chrrng_dat<<@sz>>(i, rng, nent, def);
+      uint<<@sz>>_t mv = <<range table data for [[i]]>>;
       if(rv != mv) {
         fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, (int)rv, (int)mv);
 	exit(1);
@@ -6061,7 +6030,7 @@ static void doit_dat8(const char *name, const uni_chrrng_dat8_t *rng, uint32_t n
     tstart();
     for(j = 0; j < 10; j++)
       for(i = 0; i < 0x110000; i++)
-        tres = uni_chrrng_dat8(i, rng, nent, def);
+        tres = uni_chrrng_dat<<@sz>>(i, rng, nent, def);
     tr = tend();
     tstart();
     for(j = 0; j < 10; j++)
@@ -6231,6 +6200,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+Note that the E\_Base, E\_Modifier, Glue\_After\_Zwj and E\_Base\_GAZ
+Grapheme Break properties introduced in 9.0.0 are artifiicial, and are
+based on Emoji properites.  There is no convenient file from which to
+pull them.  They are also removed in 11.0.0, so no attempt will be
+made to support them.
+
 <<Parse UCD files>>=
 open_f("auxiliary/GraphemeBreakProperty.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
@@ -6259,7 +6234,8 @@ fclose(f);
 @
 
 <<Parse UCD files>>=
-open_f("EastAsianWidth.txt");
+/* EastAsianWidth.txt has a complex default */
+open_f("extracted/DerivedEastAsianWidth.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
   add_enum(ea, fields[1]);
@@ -6281,7 +6257,7 @@ And there is one file that has two properties per line:
 \footnote{Actually, [[ArabicShaping.txt]] has three values per line,
 but field 2 (descriptive name) is informative and will not be read in
 as a property unless I find a use.}%
-.  However, like the bc property, the jt
+.  However, like the bc and ea properties, the jt
 property's default value is not a single value.  For that reason, it
 is read from the derived file instead%
 \footnote{see footnote \ref{fn:extracted} on page \pageref{fn:extracted}.}%
@@ -6308,6 +6284,41 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
 fclose(f);
 @
 
+There are several more enumerated properties that I don't use, but
+it's easier to add and ignore than to implement later.
+
+<<Initialize UCD files>>=
+decl_enum(InSC, "Other");
+decl_enum(InPC, "NA"); // was InMC before 8.0.0
+decl_enum(vo, "R");
+@
+
+<<Parse UCD files>>=
+open_f("IndicSyllabicCategory.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(InSC, fields[1]);
+}
+fclose(f);
+open_f("IndicPositionalCategory.txt"); // was IndicMatraCategory.txt before 8
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(InPC, fields[1]);
+}
+fclose(f);
+open_f("VerticalOrientation.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_enum(vo, fields[1]);
+}
+fclose(f);
+@
+
+\lstset{language=txt}
+<<FIXME>>=
+Unihan_IRGSources.txt: (cj)kIICore - no propvalaliases
+@
+
 \subsection{Generating the Static Data}
 
 Once finished, the tables can be dumped.  Just as with boolean
@@ -6315,30 +6326,46 @@ properties, only range tables have been built, so it's time to
 generate the multi-level table, assuming that the range data is
 correct.  Since the way that the automatic enumerations are generated
 does not guarantee that zero is the default value, and zero is stored
-more efficiently than any other value, all values are incremented by
-one and the default value is aliased to zero as well.  The default
-value itself is never stored in the table; it is supplied in the
-lookup function as well.  The actual multi-level table data is just
-the adjusted enumeration value, one byte per entry.
+more efficiently than any other value, all values below the default
+are incremented by one and the default value is aliased to zero as
+well.  The default value itself is never stored in the table; it is
+supplied in the lookup function as well.  The actual multi-level table
+data is just the adjusted enumeration value, one byte per entry.  For
+larger values, it is the adjusted value in raw native-endian form.
 
+\lstset{language=C}
 <<Unicode property exports for generator>>=
-/** Convert a range table with 8-bit data to a multi-level table.
-  * The range table \p tab/\p len must be sorted as per \ref uni_cmprng_dat8,
+<<[[uni_rng_dat]][[8]][[to_multi]] Prototype>>
+<<[[uni_rng_dat]][[16]][[to_multi]] Prototype>>
+<<[[uni_rng_dat]][[32]][[to_multi]] Prototype>>
+@
+
+<<[[uni_rng_dat]](@sz)[[to_multi]] Prototype>>=
+/** Convert a range table with <<@sz>>-bit data to a multi-level table.
+  * The range table \p tab/\p len must be sorted as per \ref uni_cmprng_dat<<@sz>>,
   * with no duplicate ranges.  All values outside of the range, as well as
   * values matching the default (\p def) are converted to zeroes, and the
-  * non-default values are incremented by one.  The resulting table is
-  * returned, and its length is returned in \p ml_len if not NULL */
-uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
-                                uint32_t *ml_len, uint8_t def);
+  * non-default values are incremented by one if \p def is non-zero.  The resulting
+  * table is returned, and its length is returned in \p ml_len if not NULL */
+uint32_t *uni_rng_dat<<@sz>>_to_multi(const uni_chrrng_dat<<@sz>>_t *tab,
+                                  uint32_t tab_len, uint32_t *ml_len,
+				  uint<<@sz>>_t def);
 @
 
 <<Unicode property functions for generator>>=
-uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
-                                uint32_t *ml_len, uint8_t def)
+<<[[uni_rng_dat]][[8]][[to_multi]]>>
+<<[[uni_rng_dat]][[16]][[to_multi]]>>
+<<[[uni_rng_dat]][[32]][[to_multi]]>>
+@
+
+<<[[uni_rng_dat]](@sz)[[to_multi]]>>=
+uint32_t *uni_rng_dat<<@sz>>_to_multi(const uni_chrrng_dat<<@sz>>_t *tab,
+                                  uint32_t tab_len, uint32_t *ml_len,
+				  uint<<@sz>>_t def)
 {
   uint32_t low, high, len, i;
   uint32_t *ml;
-  uint8_t *bits;
+  uint<<@sz>>_t *bits;
 
   /* degenerate case:  always out-of-range */
   if(!tab_len) {
@@ -6346,11 +6373,11 @@ uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
     return ml;
   }
   for(i = tab_len; i > 0; i--)
-    if(tab[i - 1].dat != def)
+    if(uni_chrrng_dat<<@sz>>_val(tab[i - 1]) != def)
       break;
-  high = tab[i - 1].high;
+  high = uni_chrrng_high<<@sz>>(tab[i - 1]);
   for(i = 0; i < tab_len; i++)
-    if(tab[i].dat != def)
+    if(uni_chrrng_dat<<@sz>>_val(tab[i]) != def)
       break;
   low = tab[i].low;
   len = high - low + 1;
@@ -6358,141 +6385,78 @@ uint32_t *uni_rng_dat8_to_multi(const uni_chrrng_dat8_t *tab, uint32_t tab_len,
   /* Optimize(maybe): only set def on unspecified ranges; may be faster */
   clearbuf(bits, len);
   for(; i < tab_len; i++)
-    if(tab[i].dat != def)
-      memset(bits + tab[i].low - low, tab[i].dat + 1, tab[i].high - tab[i].low + 1);
-  uni_bits_to_multi(bits, len, low, high, 0, 0, &ml, ml_len);
+    if(uni_chrrng_dat<<@sz>>_val(tab[i]) != def)
+      for(uint<<@sz>>_t *p = bits + tab[i].low - low;
+          p < bits + uni_chrrng_high<<@sz>>(tab[i]) - tab[i].low + 1; p++)
+	*p = uni_chrrng_dat<<@sz>>_val(tab[i]) + !!def;
+  const int bytes = <<@sz>> / 8;
+  uni_bits_to_multi((uint8_t *)bits, len * bytes, low * bytes, high * bytes,
+                    0, 0, &ml, ml_len);
   free(bits);
   return ml;
 }
 @
 
 <<UCD parser local functions>>=
-static void fixup_rng_dat8(prop_t *p)
+<<fixup_rng_dat[[8]]>>
+<<fixup_rng_dat[[16]]>>
+<<fixup_rng_dat[[32]]>>
+@
+
+<<fixup_rng_dat(@sz)>>=
+static void fixup_rng_dat<<@sz>>(prop_t *p)
 {
   uint32_t i;
-  qsort(p->rng_dat8, p->len, sizeof(uni_chrrng_dat8_t), uni_cmprng_dat8);
+  qsort(p->rng_dat<<@sz>>, p->len, sizeof(uni_chrrng_dat<<@sz>>_t), uni_cmprng_dat<<@sz>>);
   /* starting at top means only optimized entries are memmove'd */
   for(i = p->len - 1; i > 0; i--) {
     uint32_t j = i;
-    while(i > 0 && p->rng_dat8[i - 1].high == p->rng_dat8[i].low - 1 &&
-          p->rng_dat8[i - 1].dat == p->rng_dat8[i].dat)
+    while(i > 0 &&
+          p->rng_dat<<@sz>>[i].low ==
+	     uni_chrrng_high<<@sz>>(p->rng_dat<<@sz>>[i - 1]) + 1 &&
+	  uni_chrrng_dat<<@sz>>_val(p->rng_dat<<@sz>>[i]) ==
+	     uni_chrrng_dat<<@sz>>_val(p->rng_dat<<@sz>>[i - 1]))
       i--;
     if(i == j)
       continue;
-    p->rng_dat8[i].high = p->rng_dat8[j].high;
-    if(j < p->len - 1)
-        movebuf(p->rng_dat8 + i + 1, p->rng_dat8 + j + 1, p->len - (j + 1));
-    p->len -= j - i;
+    uint32_t k = i;
+    <<Adjust [[p->rng_dat]][[<<@sz>>]] range [[k]] to range[[j]]>>
+    if(k != j && j < p->len - 1)
+        movebuf(p->rng_dat<<@sz>> + k + 1, p->rng_dat<<@sz>> + j + 1,
+	        p->len - (j + 1));
+    p->len -= j - k;
     if(!i)
       break;
   }
 }
 @
 
+<<Adjust [[p->rng_dat]](@sz) range [[k]] to range[[j]]>>=
+p->rng_dat<<@sz>>[k].high = p->rng_dat<<@sz>>[j].high;
+@
+
+<<Adjust [[p->rng_dat]][[32]] range [[k]] to range[[j]]>>=
+uint32_t len = p->rng_dat32[j].low - p->rng_dat32[i].low + p->rng_dat32[j].len;
+while(len >= 256) {
+  p->rng_dat32[k++].len = 255;
+  p->rng_dat32[k].low = p->rng_dat32[k - 1].low + 256;
+}
+p->rng_dat32[k].len = len;
+@
+
 <<Post-process property data>>=
+<<Post-process [[p->rng_dat]][[8]]>>
+<<Post-process [[p->rng_dat]][[16]]>>
+<<Post-process [[p->rng_dat]][[32]]>>
+@
+
+<<Post-process [[p->rng_dat]](@sz)>>=
 for(i = 0; i < nparsed; i++)
-  if(parsed_props[i].rng_dat8) {
-    fixup_rng_dat8(&parsed_props[i]);
-    parsed_props[i].mt = uni_rng_dat8_to_multi(parsed_props[i].rng_dat8,
-                                               parsed_props[i].len,
-                                               &ml_len, parsed_props[i].def);
-}
-@
-
-There are no 16-bit and 32-bit values to store yet, but here is a good
-a place as any to write the multi-tab conversion functions.  Since
-these are not for enumerations, no special handling is provided for
-the default value:  it is always assumed to be zero.  Therefore the
-multi-level table data is just the raw native-endian 16-bit or 32-bit
-data.
-
-<<Unicode property exports for generator>>=
-/** Convert a range table with 16-bit data to a multi-level table.
-  * The range table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat16,
-  * with no duplicate ranges.  The default is assumed to be zero.  The
-  * resulting table is returned, and its length is returned in \p ml_len
-  * if not NULL */
-uint32_t *uni_rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
-                                 uint32_t *ml_len);
-@
-
-<<Unicode property functions for generator>>=
-uint32_t *uni_rng_dat16_to_multi(const uni_chrrng_dat16_t *tab, uint32_t tab_len,
-                                 uint32_t *ml_len)
-{
-  uint32_t low, high, len, i, j;
-  uint32_t *ml;
-  uint16_t *bits;
-
-  /* degenerate case:  always out-of-range */
-  if(!tab_len) {
-    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
-    return ml;
-  }
-  for(i = tab_len; i > 0; i--)
-    if(tab[i - 1].datl || tab[i - 1].dath)
-      break;
-  high = tab[i - 1].high;
-  for(i = 0; i < tab_len; i++)
-    if(tab[i].datl || tab[i].dath)
-      break;
-  low = tab[i].low;
-  len = high - low + 1;
-  inisize(bits, len);
-  /* Optimize(maybe): only set def on unspecified ranges; may be faster */
-  clearbuf(bits, len);
-  for(; i < tab_len; i++)
-    if(tab[i].datl || tab[i].dath)
-      for(j = tab[i].low; j <= tab[i].high; j++)
-        bits[j - low] = (tab[i].dath << 8) + tab[i].datl;
-  uni_bits_to_multi((uint8_t *)bits, len * 2, low * 2, high * 2, 0, 0, &ml, ml_len);
-  free(bits);
-  return ml;
-}
-@
-
-<<Unicode property exports for generator>>=
-/** Convert a range table with 32-bit data to a multi-level table.
-  * The range table \p tab/\p tab_len must be sorted as per \ref uni_cmprng_dat32,
-  * with no duplicate ranges.  The default is assumed to be zero.  The
-  * resulting table is returned, and its length is returned in \p ml_len
-  * if not NULL */
-uint32_t *uni_rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
-                                 uint32_t *ml_len);
-@
-
-<<Unicode property functions for generator>>=
-uint32_t *uni_rng_dat32_to_multi(const uni_chrrng_dat32_t *tab, uint32_t tab_len,
-                                 uint32_t *ml_len)
-{
-  uint32_t low, high, len, i, j;
-  uint32_t *ml;
-  uint32_t *bits;
-
-  /* degenerate case:  always out-of-range */
-  if(!tab_len) {
-    uni_bits_to_multi(NULL, 0, 1, 0, 0, 0, &ml, ml_len);
-    return ml;
-  }
-  for(i = tab_len; i > 0; i--)
-    if(tab[i - 1].dat)
-      break;
-  high = tab[i - 1].low + tab[i - 1].len;
-  for(i = 0; i < tab_len; i++)
-    if(tab[i].dat)
-      break;
-  low = tab[i].low;
-  len = high - low + 1;
-  inisize(bits, len);
-  /* Optimize(maybe): only set def on unspecified ranges; may be faster */
-  clearbuf(bits, len);
-  for(; i < tab_len; i++)
-    if(tab[i].dat)
-      for(j = 0; j <= tab[i].len; j++)
-        bits[tab[i].low - low + j] = tab[i].dat;
-  uni_bits_to_multi((uint8_t *)bits, len * 4, low * 4, high * 4, 0, 0, &ml, ml_len);
-  free(bits);
-  return ml;
+  if(parsed_props[i].rng_dat<<@sz>>) {
+    fixup_rng_dat<<@sz>>(&parsed_props[i]);
+    parsed_props[i].mt = uni_rng_dat<<@sz>>_to_multi(parsed_props[i].rng_dat<<@sz>>,
+                                                  parsed_props[i].len,
+                                                  &ml_len, parsed_props[i].def);
 }
 @
 
@@ -6502,8 +6466,14 @@ table.  The test cases are printed as well, and added to the boolean
 tests.
 
 <<Dump character information as C code>>=
-for(i = 0; i < nparsed; i++) {
-  if(parsed_props[i].rng_dat8) {
+<<Dump [[parsed_props[i].rng_dat]][[8]]>>
+<<Dump [[parsed_props[i].rng_dat]][[16]]>>
+<<Dump [[parsed_props[i].rng_dat]][[32]]>>
+@
+
+<<Dump [[parsed_props[i].rng_dat]](@sz)>>=
+for(i = 0; i < nparsed; i++)
+  if(parsed_props[i].rng_dat<<@sz>>) {
     const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
                                               parsed_props[i].name;
     const char *lname = i < num_prop_aliases ? prop_aliases[i].long_name :
@@ -6512,85 +6482,133 @@ for(i = 0; i < nparsed; i++) {
     sprintf(nbuf, "uni_%s_rng.gen.c", name);
     open_wf(of, nbuf);
     fprintf(of, "#include \"uni_prop.h\"\n\n"
-		"const uni_chrrng_dat8_t uni_%s_rng[] = {\n", name);
+		"const uni_chrrng_dat<<@sz>>_t uni_%s_rng[] = {\n", name);
     for(j = 0; j < parsed_props[i].len; j++) {
-      uint32_t val = parsed_props[i].rng_dat8[j].dat;
-      uni_alias_t *aliases = val_aliases[i];
-      fprintf(of, "\t{ 0x%04X, 0x%04X, ",
-                  parsed_props[i].rng_dat8[j].low,
-	          parsed_props[i].rng_dat8[j].high);
-      if(!aliases || (isdigit(aliases[0].short_name[0]) &&
-                      !strchr(aliases[0].short_name, '.')))
-        fprintf(of, "%d", (int)val);
-      else {
-        const uni_alias_t *alias = &aliases[val];
-	const char *val_name = alias->short_name;
-        if(isdigit(val_name[0]))
-	  val_name = alias->long_name;
-	if(strchr(val_name, '-')) {
-	  const char *np;
-	  /* slow, but necessary with e.g. ID_Restrict_Type */
-	  fprintf(of, "UNI_%s_", name);
-	  for(np = val_name; *np; np++)
-	    putc(*np == '-' ? '_' : *np, of);
-	} else
-	  fprintf(of, "UNI_%s_%s", name, val_name);
-      }
+      fprintf(of, "\t{ 0x%04x, ", parsed_props[i].rng_dat<<@sz>>[j].low);
+      <<Dump [[parsed_props[i].rng_dat]][[<<@sz>>]][j]>>
       fprintf(of, " }%s\n", j < parsed_props[i].len - 1 ? "," : "");
     }
     fputs("};\n", of);
     fclose(of);
-    fprintf(gen_h, "/** Sorted range table for Unicode enumerated %s property */\n" 
-                   "extern const uni_chrrng_dat8_t uni_%s_rng[];\n"
-		   "/** Length of \\ref uni_%s_rng */\n"
-		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
-		   "/** Retrieve value of enumerated %s property */\n",
-		   lname, name, name, name, parsed_props[i].len,
-		   lg2(parsed_props[i].len + 1), lname);
-    if(enum_vals[i])
-      fprintf(gen_h, "#define uni_%s_of(x) "
-                                   "(uni_%s_t)uni_x_of(x, uni_%s_mtab, %d)\n",
-		     name, name, name, parsed_props[i].def);
+@
+
+<<Dump [[parsed_props[i].rng_dat]][[8]][j]>>=
+fprintf(of, "0x%04X, ", parsed_props[i].rng_dat8[j].high);
+uint32_t val = parsed_props[i].rng_dat8[j].dat;
+<<Print alias [[val]] if avail>>
+else
+  fprintf(of, "%d", (int)val);
+@
+
+<<Dump [[parsed_props[i].rng_dat]][[16]][j]>>=
+uint32_t val = parsed_props[i].rng_dat16[j].datl + 
+               ((uint32_t)parsed_props[i].rng_dat16[j].dath << 8);
+{
+  <<Print alias [[val]] if avail>>
+  else
+    fprintf(of, "%d", (int)val);
+}
+fprintf(of, ">>8, 0x%04X, ", parsed_props[i].rng_dat16[j].high);
+{
+  <<Print alias [[val]] if avail>>
+  else
+    fprintf(of, "%d", (int)val);
+  fputs("&0xFF", of);
+}
+@
+
+<<Dump [[parsed_props[i].rng_dat]][[32]][j]>>=
+fprintf(of, "%d, ", parsed_props[i].rng_dat32[j].len);
+uint32_t val = parsed_props[i].rng_dat32[j].dat;
+<<Print alias [[val]] if avail>>
+else
+  fprintf(of, "0x%06X", (int)val);
+@
+
+<<Print alias [[val]] if avail>>=
+uni_alias_t *aliases = val_aliases[i];
+
+if(aliases && (!isdigit(aliases[0].short_name[0]) ||
+               strchr(aliases[0].short_name, '.'))) {
+  const uni_alias_t *alias = &aliases[val];
+  const char *val_name = alias->short_name;
+  if(isdigit(val_name[0]))
+    val_name = alias->long_name;
+  /* slow, but necessary with e.g. ID_Restrict_Type */
+  fprintf(of, "UNI_%s_", name);
+  for(const char *np = val_name; *np; np++) {
+    if(isalnum(*np))
+      putc(*np, of);
+    else if(*np == ' ' || *np == '-' || *np == '_')
+      putc('_', of);
     else
-      fprintf(gen_h, "#define uni_%s_of(x) uni_x_of(x, uni_%s_mtab, %d)\n",
-		     name, name, parsed_props[i].def);
-    print_mtab(name, lname, parsed_props[i].mt, gen_h);
-    fprintf(tstf, "dat8(%s, %d);\n", name, parsed_props[i].def);
+      fprintf(of, "_%02X", (int)(uint8_t)*np);
   }
 }
 @
 
+<<Dump [[parsed_props[i].rng_dat]](@sz)>>=
+    fprintf(gen_h, "/** Sorted range table for Unicode%s %s property */\n" 
+                   "extern const uni_chrrng_dat<<@sz>>_t uni_%s_rng[];\n"
+	           "/** Length of \\ref uni_%s_rng */\n"
+	           "#define uni_%s_rng_len %d /* %d lookups max */\n"
+	           "/** Retrieve value of%s %s property */\n",
+	           enum_vals[i] ? " enumerated" : "",
+	           lname, name, name, name, parsed_props[i].len,
+	           lg2(parsed_props[i].len + 1),
+	           enum_vals[i] ? " enumerated" : "", lname);
+    if(enum_vals[i])
+      fprintf(gen_h, "#define uni_%s_of(x) "
+                       "(uni_%s_t)uni_x<<@sz>>_of(x, uni_%s_mtab, %d)\n",
+		     name, name, name, (int)parsed_props[i].def);
+    else
+      fprintf(gen_h, "#define uni_%s_of(x) uni_x<<@sz>>_of(x, uni_%s_mtab, %d)\n",
+		     name, name, parsed_props[i].def);
+    print_mtab(name, lname, parsed_props[i].mt, gen_h);
+    if(parsed_props[i].mt)
+      fprintf(tstf, "dat<<@sz>>(%s, %d);\n", name, parsed_props[i].def);
+  }
+@
+
 <<Unicode property exports>>=
-/** Look up an 8-bit value in a multi-level table.
+<<uni_x[[8]]_of Prototype>>
+<<uni_x[[16]]_of Prototype>>
+<<uni_x[[32]]_of Prototype>>
+@
+
+<<uni_x(@sz)_of Prototype>>=
+/** Look up a <<@sz>>-bit value in a multi-level table.
   * The value associated with \p cp is looked up in \p tab, which is assumed
-  * to follow the conventions of \ref uni_rng_dat8_to_multi.  That is, zeroes
+  * to follow the conventions of \ref uni_rng_dat*_to_multi.  That is, zeroes
   * (and lookup failures) are converted to \p def, and non-zero values
-  * are decremented by one */ 
-int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def);
+  * are decremented by one if \p def is non-zero */ 
+int uni_x<<@sz>>_of(uint32_t cp, const uint32_t *tab, uint<<@sz>>_t def);
 @
 
 <<Unicode property functions>>=
-int uni_x_of(uint32_t cp, const uint32_t *tab, uint8_t def)
+<<uni_x[[8]]_of>>
+<<uni_x[[16]]_of>>
+<<uni_x[[32]]_of>>
+@
+
+<<uni_x(@sz)_of>>=
+int uni_x<<@sz>>_of(uint32_t cp, const uint32_t *tab, uint<<@sz>>_t def)
 {
   const uint8_t *mr;
-  uint8_t mv = uni_multi_tab_lookup(tab, cp, &mr, 0);
+  uint<<@sz>>_t mv = uni_multi_tab_lookup(tab, cp * (<<@sz>>/8), &mr, 0);
   if(mr)
-    mv = *mr;
+    mv = *(uint<<@sz>>_t *)mr;
   if(!mv)
     return def;
-  else
+  else if(def)
     return mv - 1;
+  else
+    return mv;
 }
 @
 
 <<range table data for [[i]]>>=
-uni_x_of(i, mtab, def)
-@
-
-\lstset{language=txt}
-<<FIXME>>=
-IndicSyllabicCategory.txt: field 2 == InSC (default = Other)
-IndicMatraCategory.txt: field 2 == InMC (default = NA)
+uni_x<<@sz>>_of(i, mtab, def)
 @
 
 \subsection{Support}
@@ -6607,7 +6625,7 @@ single displayed glyph.  While the standard allows for locale-specific
 tailoring of this algorithm, the CLDR provides no such tailoring at
 present, so no support is provided.
 
-UAX~\#18 (Regular Expressions), RL3.2 does provide tailoring, by
+UTS~\#18 (Regular Expressions), RL3.2 does provide tailoring, by
 calling all multi-character collation elements grapheme clusters.
 However, I prefer calling them multi-character collation elements,
 since some common examples (like ll and ch) appear as multiple
@@ -6624,7 +6642,7 @@ determination function does a switch on the first character, for those
 rules that have a first character, and then on any failed rules, the
 second character is checked.  The rules are not repeated here; look
 them up in the standard.  Instead, the implementation of each rule is
-labeled with the rule number (for UAX~\#29, revision 23).  While the
+labeled with the rule number (for UAX~\#29, revision 37).  While the
 CLDR root locale has this in a machine-readable format, it expects
 regular expressions to be used for checks.  It is better to just
 update the routine if the standard ever changes.
@@ -6633,6 +6651,25 @@ In order to avoid looking up GCB for all middle characters twice, the
 next character's GCB property is returned, and expected to be passed
 in the next time around.  Speaking of the GCB property, its use pulls
 in a property table, so the function is in its own object file.
+
+Unicode-9.0.0 broke the abiliity (promised in prior versions, at
+least) to determine the boundary using only two adjacent code points. 
+Before, breaks were not permitted at all between Regional Indicators
+(GB8a). As of 9.0.0, a break is allowed after an even number of
+Regional Indicators (GB12-GB13).  Also, GB10 (and in Unicode-11.0.0,
+GB11, when GB10 was dropped) requires a break dependent on an
+arbitrarily long prefix that starts with a specific character class.
+
+Unicode-9.0.0 and later also require emoji-related character
+properties in addition to just the GCB property.  In versions 9 and
+10, these where not even part of the UCD, and required additional
+processing to determine from the CLDR data, so this is only computed
+for versions 11 and up.
+
+\lstset{language=txt}
+<<FIXME>>=
+CLDR changes since 27: ??
+@
 
 <<Library [[uni]] Members>>=
 gcbrk.o
@@ -6650,9 +6687,16 @@ gcbrk.o
   * \p prev and \p next are in different grapheme clusters. Unicode
   * defines two types of grapheme clusters:  legacy and extended.  To
   * select the legacy form, set \p legacy to true.  Passing values other
-  * that zero to \p prevret is optional and purely for performance: this
+  * that zero to \p prevret is optional except when prev is a REGIONAL
+  * INDICATOR SYMBOL LETTER (1F1E6..1F1FF) or there are any Extended
+  * Pictographic code points and Zero Width Joiners (200D) earlier in
+  * the string.  In the former case, a potential break between two
+  * such symbols may not be detected, and in the latter case, a break
+  * between a Zero Width Joiner and an Extended Pictographic may be
+  * incorrectly indicated.  Otherwise, it is purely for performance: this
   * function will return accurate results at random input locations by
-  * passing zero for \p prevret */
+  * passing zero for \p prevret.
+  */
 int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy);
 @
 
@@ -6660,6 +6704,11 @@ int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy);
 <<Common C Header>>
 #include "uni_prop.h"
 
+/* for GB11 */
+#define UNI_GCB_EX_EP UNI_NUM_GCB
+#define UNI_GCB_ZWJ_EP (UNI_GCB_EX_EP + 1)
+
+/* GB1 and GB2 are covered in the explanatory text */
 int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy)
 {
   uni_GCB_t pgcb = !prevret ? uni_GCB_of(prev) : prevret < 0 ? -prevret - 1 :
@@ -6690,7 +6739,7 @@ int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy)
       break;
     case UNI_GCB_RI:
       if(ngcb == UNI_GCB_RI)
-        return -(ngcb + 1);
+        return prevret == ngcb + 1 ? -(ngcb + 1) : ngcb + 1; /* GB12-GB13 */
       break;
     case UNI_GCB_PP:
       if(!legacy)
@@ -6699,19 +6748,31 @@ int uni_gc_brk(uint32_t prev, uint32_t next, int prevret, int legacy)
     default:
       break;
   }
+  if(uni_is_ExtPict(prev)) { /* GB11, mixed w/ GB9 */
+    if(ngcb == UNI_GCB_EX)
+      return -(UNI_GCB_EX_EP + 1);
+    if(ngcb == UNI_GCB_ZWJ)
+      return -(UNI_GCB_ZWJ_EP + 1);
+  }
+  if(prevret == -(UNI_GCB_ZWJ_EP + 1) && uni_is_ExtPict(next))
+    return -(ngcb + 1);
   if(ngcb == UNI_GCB_CR || ngcb == UNI_GCB_LF || ngcb == UNI_GCB_CN)
     return ngcb + 1; /* GB5 */
   if(ngcb == UNI_GCB_EX || /* GB9 */
-     (ngcb == UNI_GCB_SM && !legacy)) /* GB9b */
+     ngcb == UNI_GCB_ZWJ ||
+     (ngcb == UNI_GCB_SM && !legacy)) { /* GB9b */
+    if(prevret == -(UNI_GCB_EX_EP + 1)) /* GB11 */
+      return ngcb == -((UNI_GCB_ZWJ ? UNI_GCB_ZWJ_EP : UNI_GCB_EX_EP) + 1);
     return -(ngcb + 1);
-  return ngcb + 1; /* GB10 */
+  }
+  return ngcb + 1; /* GB999 */
 }
 @
 
 The next larger element of text that is useful to extract is a word.
 One way to do this is to simply assign a boolean property to each
 character which makes it part of or not part of a word, and assign
-word boundaries after any contiguous group.  UAX~\#18, RL1.4 defines
+word boundaries after any contiguous group.  UTS~\#18, RL1.4 defines
 such a class.  The only complication is that non-spacing marks inherit
 their class from their preceding character.  This is reflected in a
 special return value.  Once again, a property table or two is pulled
@@ -6767,7 +6828,7 @@ Once again the first two rules are ignored, as they simply express
 that words cannot extend past text boundaries.  The rest of the rules
 are implemented in a switch and post-switch check, just like the
 grapheme cluster check.  In addition to using rules from UAX~\#29,
-revision 23, the CLDR overrides from CLDR version 22.1 are
+revision 37, the CLDR overrides from CLDR version 27 are
 implemented.  Note that the CLDR does not implement full Unicode 6.3
 rules as of version 24, but the rule changes for 6.3 are not
 incompatible with the CLDR overrides.
@@ -6783,6 +6844,11 @@ may become a break).
 
 As with the other functions, a different property table is pulled in,
 so the function gets its own object file.
+
+<<FIXME>>=
+CLDR changes since 27: ??
+Fix doc above regarding versions, since I no longer support multiple versions
+@
 
 <<Unicode property exports>>=
 /** Perform full Unicode word boundary detection.
@@ -6813,20 +6879,11 @@ wbrk.o
 
 <<Unicode property exports>>=
 /** \addtogroup uni_prop_ext Enumeration Property Extensions
-  * Extra enumeration literals for locale and compatibility */
+  * Extra enumeration literals for locale */
 /** @{ */
-/* < 6.3 compat */
-#if UNI_UCD_VER < 630
-#define UNI_WB_SQ UNI_WB_MB /**< New symbol introduced in Unicode 6.3 */
-#define UNI_WB_DQ UNI_WB_XX /**< New symbol introduced in Unicode 6.3 */
-#define UNI_WB_HL UNI_WB_LE /**< New symbol introduced in Unicode 6.3 */
-#endif
-
 /* extra WB values for ja locale */
 #define UNI_WB_HI UNI_NUM_WB /**< Hiragana characters (locale extension) */
 #define UNI_WB_ID (UNI_WB_HI + 1) /**< CJK Ideographs (locale extension) */
-/* extra WB value for 6.3 */
-#define UNI_WB_SQ2 (UNI_WB_HI + 2) /**< Support for Unicode 6.3 algorithm */
 /** @} */
 @
 
@@ -6834,11 +6891,15 @@ wbrk.o
 <<Common C Header>>
 #include "uni_prop.h"
 
+/* extra WB value for 6.3, WB7/WB7a */
+#define UNI_WB_SQ2 (UNI_WB_HI + 2)
+
+/* WB1 and WB2 are covered in the explanatory text */
 int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
 {
   if(!tab)
     tab = uni_WB_mtab;
-#define get_WB(x) uni_x_of(x, tab, UNI_WB_XX)
+#define get_WB(x) uni_x8_of(x, tab, UNI_WB_XX)
   uni_WB_t pwb, nwb = get_WB(next);
   if(prevret > 1)
     pwb = prevret - 2;
@@ -6859,22 +6920,22 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
     default:
       break;
   }
-  if(nwb == UNI_WB_Extend || nwb == UNI_WB_FO) /* WB4 */
+  if(nwb == UNI_WB_Extend || nwb == UNI_WB_FO /* WB4 */
+     || nwb == UNI_WB_ZWJ
+     )
     return prevret && prevret <= 1 ? prevret : -(pwb + 2);
   if(prevret == 1
-#if UNI_UCD_VER >= 630
      && get_WB(prev) != UNI_WB_DQ
-#endif
      ) /* WB5, WB6 */
     return nwb != UNI_WB_LE && nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
+  else if((prevret == -(UNI_GCB_ZWJ + 2) ||
+      (prevret == -1 && get_WB(prev) == UNI_GCB_ZWJ)) && uni_is_ExtPict(next))
+    return prevret == -1 ? prevret : -(nwb + 2);
   else if(prevret == -1) /* WB11, WB12 */
     return nwb != UNI_WB_NU ? nwb + 2 : -(nwb + 2);
-#if UNI_UCD_VER >= 630
   else if(prevret == 1) /* WB7b, WB7c */
     return nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
-#endif
   switch((int)pwb) { /* cast is to allow UNI_WB_ID w/o warning */
-#if UNI_UCD_VER >= 630
     case UNI_WB_SQ2: /* WB7/WB7a */
       return nwb != UNI_WB_LE && nwb != UNI_WB_HL ? nwb + 2 : -(nwb + 2);
     case UNI_WB_HL:
@@ -6883,20 +6944,15 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
       else if(nwb == UNI_WB_SQ)
         return -(UNI_WB_SQ2 + 2); /* WB7a */
       /* fall through */
-#endif
     case UNI_WB_LE:
       switch(nwb) {
         case UNI_WB_LE: /* WB5 */
-#if UNI_UCD_VER >= 630
 	case UNI_WB_HL:
-#endif
 	case UNI_WB_NU: /* WB9 */
 	  return -(nwb + 2);
 	case UNI_WB_ML: /* WB6/WB7 */
 	case UNI_WB_MB:
-#if UNI_UCD_VER >= 630
 	case UNI_WB_SQ:
-#endif
 	  return 1;
 	case UNI_WB_EX: /* WB13a */
 	  return -(nwb + 2);
@@ -6908,15 +6964,11 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
       switch(nwb) {
         case UNI_WB_NU: /* WB8 */
 	case UNI_WB_LE: /* WB10 */
-#if UNI_UCD_VER >= 630
 	case UNI_WB_HL:
-#endif
 	  return -(nwb + 2);
 	case UNI_WB_MN: /* WB11/WB12 */
 	case UNI_WB_MB:
-#if UNI_UCD_VER >= 630
 	case UNI_WB_SQ:
-#endif
 	  return -1;
 	case UNI_WB_EX: /* WB13a */
 	  return -(nwb + 2);
@@ -6944,9 +6996,10 @@ int uni_word_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
         return -(nwb + 2);
       break;
     case UNI_WB_RI:
-      if(nwb == UNI_WB_RI) /* WB13c */
-        return -(nwb + 2);
+      if(nwb == UNI_WB_RI)
+        return prevret == nwb + 2 ? -(nwb + 2) : nwb + 2; /* WB15-WB16 */
       break;
+   /* FIXME: WB3c (just skip 9/10's WB3c & WB14 */
     default:
       break;
   }
@@ -6965,6 +7018,10 @@ additional locales.  To support this, the routine does dead-simple
 matching.  No case folding, normalization, word boundary detection, or
 anything else is done.  The matching algorithm is also suboptimal, but
 good enough given that sentence boundary detection is pretty awful.
+
+<<FIXME>>=
+CLDR changes since 27: ??
+@
 
 <<Unicode property exports>>=
 <<[[uni_sb_locale_t]]>>
@@ -6995,10 +7052,10 @@ separate paragraphs.  SB10 and SB9 simply force all optional matches
 in SB11 to match maximally.  SB6 is easy to implement with only one
 pair.  SB8a is just a few extra terms to match with SB11. SB7 and SB8
 are the difficult ones.  SB7 needs to remember if an ATerm was
-preceded by an Upper.  SB8 requires backtracking in a similar manner
-to the word boundary, and can be done by emitting a token where a
-split might happen, and converting that to a split if the SB8 pattern
-does not match.
+preceded by an Upper (or Lower as of Unicode 8).  SB8 requires
+backtracking in a similar manner to the word boundary, and can be done
+by emitting a token where a split might happen, and converting that to
+a split if the SB8 pattern does not match.
 
 <<Unicode property exports>>=
 /** Perform full Unicode sentence boundary detection.
@@ -7050,11 +7107,13 @@ enum sb_state {
   sb_st_ST, sb_st_ST_CL, sb_st_ST_CL_SP, /* SB8a-SB11 */
   sb_st_CR, sb_st_end /* SB9-SB11 */
 };
+
+/* SB1 and SB2 are covered in the explanatory text */
 int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
                      const uni_sb_locale_t *locale, uint32_t *sup_state)
 {
   const uint32_t *tab = locale && locale->tab ? locale->tab : uni_SB_mtab;
-#define get_SB(x) uni_x_of(x, tab, UNI_SB_XX)
+#define get_SB(x) uni_x8_of(x, tab, UNI_SB_XX)
   uni_SB_t psb, nsb = get_SB(next);
   if(prevret == 1 || prevret == -1)  {
     <<Adjust [[prevret]] at end of [[sb_st_AT_CL_SP_X]]>>
@@ -7102,7 +7161,7 @@ int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
         return -sb_st_UP_AT; /* SB7... */
       break;
     case sb_st_UP_AT:
-      if(nsb == UNI_SB_UP)
+      if(nsb == UNI_SB_UP || nsb == UNI_SB_LO)
         return -sb_st_UP; /* SB7 */
       /* fall through */
     case sb_st_AT:
@@ -7130,7 +7189,7 @@ int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
 	case UNI_SB_AT:
 	  break;
 	case UNI_SB_LO:
-	  return -sb_st_none; /* SB8 */
+	  return -prevret; /* SB7, SB8 */
 	case UNI_SB_SC:
 	  return -sb_st_AT_CL_SP_X; /* SB8/SB8a */
 	default:
@@ -7155,7 +7214,7 @@ int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
           /* return -sb_st_AT; */
 	  return -prevret; /* SB8a/SB11 */
         case UNI_SB_LO:
-          return -sb_st_none; /* SB8 */
+	  return -prevret;
         default:
 	  return prevret; /* SB8 */
       }
@@ -7188,13 +7247,14 @@ int uni_sentence_brk(uint32_t prev, uint32_t next, int prevret,
         case UNI_SB_LF:
           return -sb_st_end; /* SB10 */
         case UNI_SB_UP:
+        case UNI_SB_LO:
           return sb_st_UP; /* SB11/SB7 */
         default:
           return sb_st_none; /* SB11 */
       }
       /* NOTREACHED */
   }
-  /* SB12 */
+  /* SB998 */
   <<Set default sentence state>>
   return -prevret;
 }
@@ -7209,6 +7269,7 @@ switch(nsb) {
     prevret = sb_st_ST;
     break;
   case UNI_SB_UP:
+  case UNI_SB_LO:
     prevret = sb_st_UP;
     break;
   default:
@@ -7223,13 +7284,13 @@ switch(nsb) {
 psb = get_SB(prev);
 switch(psb) {
   case UNI_SB_UP:
+  case UNI_SB_LO:
     prevret = sb_st_UP;
     break;
   case UNI_SB_LE:
   case UNI_SB_SE:
   case UNI_SB_CR:
   case UNI_SB_LF:
-  /* case UNI_SB_LO: */ /* LO already mapped to sb_st_none */
     prevret = sb_st_none;
     break;
   case UNI_SB_ST:
@@ -7358,7 +7419,7 @@ application that would benefit from the algorithm without the addition
 of a hyphenation dictionary is a plain text formatter, such as the
 automatic wrapping mode in a plain text editor.  Nonetheless, the
 following function implements the algorithm specified in UAX~\#14,
-revision 32.
+revision 45.
 
 Like the boundary determination algorithms, locale-specific tailoring
 should be supported.  Once again, the CLDR does not provide tailorings
@@ -7391,19 +7452,40 @@ requires backtracking, but so do some of the routines above), is
 remarked as getting better results, and is required in any case for
 the test to work.
 
+<<FIXME>>=
+LBA changes since 32 (6.3.0):
+  35 (8.0.0):
+    LB22:  add EX x IN
+    LB21b (new):  SY x HL
+  37 (9.0.0):
+    LB8a (new):  ZWJ x (ID|EB|EM)
+    LB9. LB10:  CM -> (CM|ZWJ)
+    LB30a: RI x RI -> allow break on even # of RIs, as with GCB & WB
+    LB30b (new): EB x EM
+  41 (11.0.0):
+    LB8a:  changed to just ZWJ x
+  45 (13.0.0):
+    LB30: exclude ea{F,W,H} from OP and CP
+    LB22: removed lhs and simplified to   xIN
+  47 (14.0.0):
+    LB27: removed (JL|JV|JT|H2|H3) x IN (made redundant by 45-LB22)
+    LB30b: added Extended_Pictographic&Cn x EM
+CLDR changes since 27: ??
+@
+
 <<Unicode property exports>>=
 /** Perform full Unicode line break opportunity detection.
-  * The beginning and end of a string are always line break opportunities.
-  * Otherwise, they happen between code points; that is what this function
-  * detects.  The code points to check between (\p prev, \p next) must be
-  * accompanied by the previous return value (zero initially).  If the
-  * return value is less than -1, no simple break is possible.  If it is
-  * greater than 1, a simple break is possible.  If it is zero, a break is
-  * mandatory.  If it is -1 or 1, the first one in a group matches the
-  * next one outside of the -1 to 1 range, and all others in the group are
-  * no break, unless otherwise indicated by a sign change.  If the
-  * sign changes (i.e., -1 to 1 or 1 to -1), a break occured between the
-  * \a prior pair, but the first 1 or -1 in the group is not yet resolved.
+  * The beginning of a string is never a line break opportuniyt, and the end
+  * is a mandatory one.  Otherwise, they happen between code points; that is
+  * what this function detects.  The code points to check between (\p prev,
+  * \p next) must be accompanied by the previous return value (zero
+  * initially).  If the return value is less than -1, no simple break is
+  * possible.  If it is greater than 1, a simple break is possible.  If it
+  * is zero, a break is mandatory.  If it is -1 or 1, the first one in a
+  * group matches the next one outside of the -1 to 1 range, and all others
+  * in the group are no break, unless otherwise indicated by a sign change.
+  * If the sign changes (i.e., -1 to 1 or 1 to -1), a break occured between
+  * the \a prior pair, but the first 1 or -1 in the group is not yet resolved.
   * If the string ends before resolution, the sign of the original 1 or -1
   * determines whether or not there is a break.
   * FIXME: correct above explanation and add example.
@@ -7450,11 +7532,12 @@ typedef enum {
   lb_num_st
 } lb_state_t;
 
+/* LB2, LB3 taken care of in description */
 int uni_line_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
 {
   if(!tab)
     tab = uni_lb_mtab;
-#define get_lb(x) uni_x_of(x, tab, UNI_lb_XX)
+#define get_lb(x) uni_x8_of(x, tab, UNI_lb_XX)
   uni_lb_t plb, nlb = get_lb(next);
   if(prevret == -lb_st_PRO_OP) {
     /* ret was just negated; fix it to a real value */
@@ -7646,8 +7729,11 @@ int uni_line_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
 	return -(lb_num_st + nlb);
       break;
     case lb_num_st + UNI_lb_ID:
+    case lb_num_st + UNI_lb_EX:
+    case lb_num_st + UNI_lb_EB:
+    case lb_num_st + UNI_lb_EM:
       if(nlb == UNI_lb_IN || /* LB22 */
-         nlb == UNI_lb_PO) /* LB23 */
+         nlb == UNI_lb_PO) /* LB23a */
 	return -(lb_num_st + nlb);
       break;
     case lb_num_st + UNI_lb_NU:
@@ -7689,7 +7775,8 @@ int uni_line_brk(uint32_t prev, uint32_t next, int prevret, const uint32_t *tab)
         goto finish_IS;
       break; /* SY is always handled as default */
     case lb_num_st + UNI_lb_PR:
-      if(nlb == UNI_lb_ID || nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB24 */
+      if(nlb == UNI_lb_AL || nlb == UNI_lb_HL || /* LB24 */
+         nlb == UNI_lb_ID || nlb == UNI_lb_EB || nlb == UNI_lb_EM || /* LB23a */
 	 nlb == UNI_lb_AI || nlb == UNI_lb_SG || nlb == UNI_lb_XX || /* LB1 */
 	 nlb == UNI_lb_JL || nlb == UNI_lb_JV || nlb == UNI_lb_JT ||
 	 nlb == UNI_lb_H2 || nlb == UNI_lb_H3) /* LB27 */
@@ -7808,6 +7895,7 @@ http://www.w3.org/TR/css3-text/#line-break-property
          № U+2116 and all currency symbols (Unicode general category
          Sc) other than ¢ U+00A2 and ￠ U+FFE0
 @
+
 }
 
 \subsection{Support Testing}
@@ -8006,7 +8094,7 @@ uni_frac_t,%
 void uni_chrrng_val(uint32_t cp, const uni_chrrng_dat32_t *tab,
                     uint32_t tab_len, int32_t *num, uint8_t *denom)
 {
-  uint32_t res = uni_chrrng_dat32(cp, tab, tab_len);
+  uint32_t res = uni_chrrng_dat32(cp, tab, tab_len, 0);
   uni_frac_t *f = (uni_frac_t *)&res;
   if(!f->num)
     f->denom = 1;
@@ -8143,8 +8231,8 @@ if(*fields[8]) {
 }
 @
 
-An optional numeric property comes from
-[[Unihan_RadicalStrokeCounts.txt]]: cjkRSUnicode%
+An optional numeric property comes from [[Unihan_IRGSources.txt]]:
+cjkRSUnicode%
 \footnote{Listed in UniHan as Informative, but still needed for regex.}%
 .  It is, like all unihan files, a tab-separated file, with the single
 code point in U+ notation in field 1.  Note that the actual optional
@@ -8153,24 +8241,10 @@ cjkRSUnicode. However, I will not add a non-normative alias
 (especially considering that the library currently only supports four
 names, and there are already four names for this property).
 
-Technically, this file also includes a number of other stroke count
-properties (kRSAdobe\_Japan1\_6, kRSJapanese, kRSKangXi, kRSKanWa,
-kRSKorean)%
-\footnote{Listed in UniHan as Provisional}%
-.  These are not required for regular expressions, so I will
-not be provided as a property until I find a use for them.  Most of
-them would be trivial to add, though, since they are the same format
-as kRSUnicode.  However, kRSAdobe\_Japan1\_6 has additional
-information that would turn it into a string property.
-
 There is another, related file ([[CJKRadicals.txt]]) which provides
 additional interpretation for the radical numbers returned by this
 property.  Since this file's values have no property label, I will not
 provide them as a property for now.
-
-Version 7 has moved the cjkRSUnicode property to the
-[[Unihan_IRGSources]] file.  For now, I will read from both files, and
-whichever has the property will fill in the values.
 
 <<UCD parser local functions>>=
 static void split_line_tab(char *buf)
@@ -8203,12 +8277,6 @@ decl_num(cjkRSUnicode);
 @
 
 <<Parse Unihan files>>=
-open_f("Unihan_RadicalStrokeCounts.txt");
-while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
-  <<Parse Unihan cp>>
-  <<Parse [[kRSUnicode]] property>>
-}
-fclose(f);
 open_f("Unihan_IRGSources.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse Unihan cp>>
@@ -8284,13 +8352,47 @@ void uni_cjkRSUnicode_val2(int32_t num, uint8_t denom, uint8_t &l,
                            int8_t &r);
 @
 
+Another property is the Equivalent\_Unified\_Ideograph property, which
+lists unified CJK codes that look approximately like a CJK radical or
+stroke.  While the value could fit in the 24-bit numerator, it's
+stored in a full 32-bit word, instead.
+
+<<Initialize UCD files>>=
+decl_num(EqUIdeo);
+@
+
+<<Parse UCD files>>=
+open_f("EquivalentUnifiedIdeograph.txt");
+while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+  <<Parse dotted cp>>
+  add_num32(EqUIdeo, fields[1]);
+}
+fclose(f);
+@
+
+<<UCD parser local definitions>>=
+#define add_num32(n, v) do { \
+  if(prop_##n < 0) \
+    prop_##n = add_prop(#n); \
+  add_dat32_rng(&parsed_props[prop_##n], low, high, atol(v)); \
+} while(0)
+@
+
 \lstset{language=txt}
 <<FIXME>>=
+other properties from IRGSources?  RadicalStrokeCounts?
 CJKRadicals.txt:
   field 1 = radical # (index); may include ' (maps to !?)
   field 2 = CJK Radical character
   field 3 = CJK Unified Ideograph character
  2 & 3 are always 1 16-bit char, so could store as 32-bit value per index
+TangutSources.txt, NushuSources.txt:
+  field 1 = U+-cp
+  field 2 = tag (includig kRSTUnicode)
+  field 3 = value
+EmojiSources.txt:
+  field 1 = cp sequence
+  field 2-4 = shift-JIS code for various phone companies.  Who cares?
 @
 
 The only other numeric property currently supported is age, which
@@ -8299,105 +8401,28 @@ added as an enumeration.
 
 \subsection{Generating the Static Data}
 
-Once finished, the tables can be dumped.  Just as with other
-properties, only range tables have been built, so it's time to
-generate the multi-level table, assuming that the range data is correct.
-
-\lstset{language=C}
-<<UCD parser local functions>>=
-static void fixup_rng_dat32(prop_t *p)
-{
-  uint32_t i;
-  qsort(p->rng_dat32, p->len, sizeof(uni_chrrng_dat32_t), uni_cmprng_dat32);
-  /* starting at top means only optimized entries are memmove'd */
-  for(i = p->len - 1; i > 0; i--) {
-    uint32_t j = i, len = p->rng_dat32[i].len, k;
-    while(i > 0 &&
-          p->rng_dat32[i - 1].low + p->rng_dat32[i - 1].len == p->rng_dat32[i].low - 1 &&
-          p->rng_dat32[i - 1].dat == p->rng_dat32[i].dat) {
-      i--;
-      len += p->rng_dat32[i].len;
-    }
-    if(i == j)
-      continue;
-    k = i;
-    while(len >= 256) {
-      p->rng_dat32[k++].len = 255;
-      p->rng_dat32[k].low = p->rng_dat32[k - 1].low + 256;
-    }
-    p->rng_dat32[k].len = len;
-    if(k != j) {
-      if(j < p->len - 1)
-          movebuf(p->rng_dat32 + k + 1, p->rng_dat32 + j + 1, p->len - (j + 1));
-      p->len -= j - k;
-    }
-    if(!i)
-      break;
-  }
-}
-@
-
-<<Post-process property data>>=
-for(i = 0; i < nparsed; i++)
-  if(parsed_props[i].rng_dat32) {
-    fixup_rng_dat32(&parsed_props[i]);
-    parsed_props[i].mt = uni_rng_dat32_to_multi(parsed_props[i].rng_dat32,
-                                                parsed_props[i].len,
-                                                &ml_len);
-}
-@
-
-In addition to the property tables, a simple query function is
-printed.  This calls a generic search function using the multi-level
-table.
+The tables have alreaady been dumped above.  In addition to the
+property tables, a simple query function for fractions is provided.
 
 <<Dump character information as C code>>=
 for(i = 0; i < nparsed; i++) {
-  if(parsed_props[i].rng_dat32) {
+  if(parsed_props[i].rng_dat32 && parsed_props[i].rng_num) {
     const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
                                               parsed_props[i].name;
     const char *lname = i < num_prop_aliases ? prop_aliases[i].long_name :
                                                parsed_props[i].name;
-    char nbuf[64];
-    sprintf(nbuf, "uni_%s_rng.gen.c", name);
-    open_wf(of, nbuf);
-    fprintf(of, "#include \"uni_prop.h\"\n\n"
-                "const uni_chrrng_dat32_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].len; j++)
-      fprintf(of, "\t{ 0x%04X, %d, 0x%08x }%s\n",
-                  parsed_props[i].rng_dat32[j].low,
-	          parsed_props[i].rng_dat32[j].len,
-	          parsed_props[i].rng_dat32[j].dat,
-		  j < parsed_props[i].len - 1 ? "," : "");
-    fputs("};\n", of);
-    fclose(of);
-    fprintf(gen_h, "/** Sorted range table for Unicode %s property */\n" 
-                   "extern const uni_chrrng_dat32_t uni_%s_rng[];\n"
-		   "/** Length of \\ref uni_%s_rng */\n"
-		   "#define uni_%s_rng_len %d /* %d lookups max */\n",
-		   lname, name, name, name, parsed_props[i].len,
-		   lg2(parsed_props[i].len + 1));
-    <<Print special 32-bit range table stuff>>
-    print_mtab(name, lname, parsed_props[i].mt, gen_h);
+    fprintf(gen_h, "/** Retrieve value of numeric %s property \\p x.\n"
+                   "  * \\p *n is set to the numerator, and \\p *d is set\n"
+		   "  * to the denominator */\n", lname);
+    fprintf(gen_h, "#undef uni_%s_of\n", name); /* set by 32-bit export */
+    fprintf(gen_h, "#define uni_%s_of(x, n, d) uni_x_val(x, uni_%s_mtab, n, d)\n",
+	         name, name);
+    fprintf(tstf, "num(%s);\n", name);
   }
 }
 @
 
-<<Print special 32-bit range table stuff>>=
-if(parsed_props[i].rng_num) {
-  fprintf(gen_h, "/** Retrieve value of numeric %s property \\p x.\n"
-                 "  * \\p *n is set to the numerator, and \\p *d is set\n"
-		 "  * to the denominator */", lname);
-  fprintf(gen_h, "#define uni_%s_of(x, n, d) uni_x_val(x, uni_%s_mtab, n, d)\n",
-	         name, name);
-  fprintf(tstf, "num(%s);\n", name);
-}
-@
-
 <<Unicode property exports>>=
-/** Retrieve 32-bit value associated with \p cp in multi-level \p tab.
-  * The default is assumed to be zero. */
-uint32_t uni_x_dat32(uint32_t cp, const uint32_t *tab);
 /** Look up rational number in a mutli-level table
   * The numerator (\p num) and denominator (\p denom) of a rational
   * number stored in \p tab for \p cp is returned.  The 32-bit
@@ -8406,13 +8431,6 @@ void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom);
 @
 
 <<Unicode property functions>>=
-uint32_t uni_x_dat32(uint32_t cp, const uint32_t *tab)
-{
-  const uint8_t *mr;
-  int r = uni_multi_tab_lookup(tab, cp * 4, &mr, 0);
-  return mr ? *(uint32_t *)mr : r ? ~0 : 0;
-}
-
 void uni_x_val(uint32_t cp, const uint32_t *tab, int32_t *num, uint8_t *denom)
 {
   const uint8_t *mr;
@@ -8442,6 +8460,10 @@ UNI_PROP_TYPE_NUM,
 <<Set prop type for export>>=
 if(parsed_props[i].rng_num)
   t = UNI_PROP_TYPE_NUM;
+@
+
+<<Functions to help test generated tables>>=
+<<[[dat]][[32]] test>>
 @
 
 \lstset{language=txt}
@@ -8625,7 +8647,7 @@ decomposition directly.
 <<Process a line of [[UnicodeData.txt]]>>=
 if(low == 0xAC00) {
   /* hangul syllables */
-  add_enum_rng(&parsed_props[prop_dt], low, high, enum_val(prop_dt, "can"));
+  add_enum_rng(prop_dt, low, high, enum_val(prop_dt, "can"));
   add_str_rng(&parsed_props[prop_dm], low, high, NULL, 0);
 }
 @
@@ -9000,14 +9022,14 @@ static int cmp_cp_flg(const void *a, const void *b)
 /** A 64-bit structure for associating a code point with a string descriptor */
 typedef struct {
   uint32_t cp; /**< The code point */
-  uint16_t off, /**< Offset into bulk string */ len; /**< String length */
+  uint32_t off:20, /**< Offset into bulk string */ len:12; /**< String length */
 } uni_str_arr_t;
 @
 
 <<[[uni_str_ptr_t]]>>=
 /** A 32-bit string descriptor */
 typedef struct {
-  uint16_t off, /**< Offset into bulk string */ len; /**< String length */
+  uint32_t off:20, /**< Offset into bulk string */ len:12; /**< String length */
 } uni_str_ptr_t;
 @
 
@@ -9125,13 +9147,13 @@ for(i = curent = 0; i < dmf_prop->len; i++, curent++) {
   dec[curent].off = cur->off;
   dec[curent].len = cur->len;
   if(cur->flags & 1)
-    dec[curent].len |= 0x8000;
+    dec[curent].off |= 0x800000;
   /* could be canon/compat followed by dm */
   if(i < dmf_prop->len - 1 && cur->cp == cur[1].cp)
     ++i;
-  fprintf(kf, "{ 0x%04X, %d, %d%s }%s",
-              (int)cur->cp, (int)cur->off, (int)cur->len,
-	      (cur->flags & 1) ? " | 0x8000" : "",
+  fprintf(kf, "{ 0x%04X, %d%s, %d }%s",
+              (int)cur->cp, (int)cur->off,
+	      (cur->flags & 1) ? " | 0x80000" : "",  (int)cur->len,
 	      i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
 }
 fclose(kf);
@@ -9170,10 +9192,10 @@ for(i = curent = 0; i < dmf_prop->len; i++) {
   dec[curent].off = cur->off;
   dec[curent].len = cur->len;
   if(cur->flags & 1)
-    dec[curent].len |= 0x8000;
-  fprintf(dm, "{ 0x%04X, %d, %d%s }%s", (int)cur->cp, (int)cur->off,
+    dec[curent].off |= 0x800000;
+  fprintf(dm, "{ 0x%04X, %d%s, %d }%s", (int)cur->cp, (int)cur->off,
+				        (cur->flags & 1) ? " | 0x80000" : "",
                                         (int)cur->len,
-				        (cur->flags & 1) ? " | 0x8000" : "",
 				        i < dmf_prop->len - 1 ? ",\n\t" : "\n};\n");
   curent++;
 }
@@ -9323,10 +9345,10 @@ void uni_x_dec(uint32_t cp, const uint32_t *tab, int16_t *off, uint8_t *len,
       if(compat)
         *compat = 0;
     } else {
-      *off = v->off;
-      *len = v->len & 0x7fff;
+      *off = v->off & 0x7ffff;
+      *len = v->len;
       if(compat)
-        *compat = v->len >> 15;
+        *compat = v->off >> 19;
     }
   }
 }
@@ -9356,12 +9378,14 @@ static void doit_str(const char *name, const uni_str_arr_t *rng, uint32_t nent,
     uni_str_arr_t *r;
     for(i = 0; i < 0x110000; i++) {
       r = bsearch(&i, rng, nent, sizeof(*rng), uni_cmp_cp);
-      rs = r ? (uni_str_ptr_t *)&r->off : &z;
+      // bit field offsets unavailable, so make this unportable:
+      // rs = r ? (uni_str_ptr_t *)&r->off : &z;
+      rs = r ? (uni_str_ptr_t *)((uint32_t *)r + 1) : &z;
       ms = uni_x_str_of(i, mtab);
       if(cmpbuf(ms, rs, 1)) {
         fprintf(stderr, "mismatch %s@%d %d/%d/%d %d/%d/%d\n", name, i,
-	                (int)rs->off, (int)rs->len & 0x7fff, (int)rs->len >> 15,
-			(int)ms->off, (int)ms->len & 0x7fff, (int)ms->len >> 15);
+	                (int)rs->off & 0x7ffff, (int)rs->len, (int)rs->len >> 19,
+			(int)ms->off & 0x7ffff, (int)ms->len, (int)ms->len >> 19);
 	exit(1);
       }
     }
@@ -9771,7 +9795,7 @@ void uni_find_canon_comp(uint32_t cp, int16_t *off, uint8_t *len);
   * is the result of composition.  Note that multiple secondary lookups
   * can be performed after a single \ref uni_find_canon_comp lookup.
   * This is a preprocessor macro */
-uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint16_t off, uint8_t len);
+uint32_t uni_canon_comp(uint32_t cpa, uint32_t cpb, uint32_t off, uint8_t len);
 #define uni_canon_comp(cpa, cpb, off, len) \
   ((len) > 0 ? uni_lookup_compent(cpb, uni_canon_comp_strs + (off), len) : \
                uni_hangul_syllable_comp(cpa, cpb))
@@ -10973,7 +10997,10 @@ if(!<<@ab>>rlen) {
   unsigned int clen;
   <<Get case conversion result for next character using [[<<@stab>>]]>>
   if(clen > <<@ab>>len)
+#pragma GCC diagnostic push /* STFU GCC */
+#pragma GCC diagnostic ignored "-Wtautological-compare"
     return a == <<@ab>> ? 2 : -2; /* invalid input always mismatches */
+#pragma GCC diagnostic pop
   <<@ab>>len -= clen;
   <<@ab>> += clen;
 }
@@ -11601,6 +11628,8 @@ if(<<@ab>>buf_ptr == <<@ab>>buf_len) {
 	if(!<<@ab>>buf_more || !<<@ab>>ccc_more) {
 	  /* no way to indicate mem errors; just return mismatch */
 	  <<Free normalization buffers, if allocated>>
+#pragma GCC diagnostic push /* STFU GCC */
+#pragma GCC diagnostic ignored "-Wtautological-compare"
 	  return a == <<@ab>> ? 3 : -3;
 	}
 	memcpy(<<@ab>>buf_more, <<@ab>>buf, sizeof(<<@ab>>buf));
@@ -11617,6 +11646,7 @@ if(<<@ab>>buf_ptr == <<@ab>>buf_len) {
 	if(!t) {
 	  <<Free normalization buffers, if allocated>>
 	  return a == <<@ab>> ? 3 : -3;
+#pragma GCC diagnostic pop
 	}
 	<<@ab>>ccc_more = t;
       }
@@ -11662,7 +11692,7 @@ if(<<@ab>>buf_ptr != <<@ab>>buf_len) {
 [[DerivedNormalizationProps.txt]] contains the final case folding
 method%
 \footnote{The FC\_NFKC property is related to case folding, but is
-deprecated and therefore not provided as a property.}%
+deprecated since 6.0.0 and therefore not provided as a property.}%
 .  The main difference between it and the other methods is that
 it applies multiple transformations simultaneously.  In addition to
 case folding, it also removes default ignorable code points and
@@ -12321,6 +12351,17 @@ if(!p->off && !p->len) {
 <<FIXME>>=
 add NFD_CF and NFKD_CF as generic normalization routines?
 What about NFC_CF and NFKC_CF w/o ignorable removal?
+Add strchr and strstr equivalents, or return special values if at
+  end-of-string (since I crop to 1/-1, just return 10/-10 at end-of-string)
+    thus an inefficient strcasestr could be something like:
+      while(1) {
+        int ret = uni_NFKC_CF_strcmp@sz(a, alen, b, blen);
+	if(ret == -10)
+	  return NULL;
+	if(ret == 10 || !ret)
+	  return a;
+	/* advance to next fjkc_cf char in a & adjust alen */
+      }
 @
 
 \subsection{Generic Normalized Unicode Input}
@@ -12720,8 +12761,7 @@ the na property, the last property to be retrieved from
 so they will not be read in as a property unless I find a use for
 them.  na1 was useful prior to 6.2, since it contained names for
 control characters, but those are now officially aliases.}%
-.  This includes the Name\_Alias property (from
-[[NameAliases.txt]]%
+.  This includes the Name\_Alias property (from [[NameAliases.txt]]%
 \footnote{The third field of [[NameAliases.txt]] (Type) is
 informative, and will not be read in as a property unless I find a use.}%
 ), as well.
@@ -13028,6 +13068,11 @@ dump_str_tabs(na_seq, "named sequences", gen_h, tstf);
 
 <<Parse UCD files>>=
 enable_str_mt_p(prop_na_seq);
+@
+
+<<FIXME>>=
+emoji-variation-sequences.txt = strseq
+emoji-sequences.txt, emoji-zwj-sequences.txt - non-UCD strseq
 @
 
 The string tables are much too large for 16-bit offsets (509,515 bytes
@@ -14896,7 +14941,7 @@ endif
 @
 
 <<Clean temporary files>>=
-rm -f cmph_in_na.gen{,.mph}
+rm -f cmph_in_na.gen{,.mph} cmph_rev_{,x}na.c
 @
 
 \lstset{language=C}
@@ -15495,6 +15540,13 @@ would not save much, but the blk checks are just single ranges each
 assumes that the ranges will never change in the future, which is
 actually a pretty safe bet.
 
+Unicode 9.0.0 introduces an entry in [[allkeys.txt]] for all but the
+UIdeo ones:  [[@implicitweights]].  This would allow new synthesis
+entries without having to recode.  However, they only include the
+value for the first synthetic element, not the second (which is OK if
+the second just subtracts the start of the range, but that is not the
+case for Tangut Supplement, added in 13.0.0).
+
 The UCA standard used to give no hints on how to set the secondary
 value; presumably any non-zero number will work, because the primaries
 will always differ.  The most common value (0020) is chosen for this.
@@ -15525,9 +15577,31 @@ if(k < len - 4 && str[k] == uca_synth1(dc) && str[k + 1] == 0x20 &&
 static uint32_t uca_synth1(uint32_t c)
 {
   uint32_t ret = c >> 15;
+#if 0
+  uni_blk_t blk = uni_blk_of(c);
+#endif
+
+#if 0
+  if(blk == UNI_blk_Tangut || blk == UNI_blk_Tangut_Components ||
+     blk == UNI_blk_Tangut_Sup)
+#else
+  if((c >= 0x17000 && c <= 0x18AFF) || (c >= 0x18D00 && c <= 0x18D8F))
+#endif
+    return 0xFB00;
+#if 0
+  if(blk == UNI_blk_Nushu)
+#else
+  if(c >= 0x1B170 && c <= 0x1B2FF)
+#endif
+    return 0xFB01;
+#if 0
+  if(blk == UNI_blk_Khitan_Small_Script)
+#else
+  if(c >= 0x18B00 && c <= 0x18CFF)
+#endif
+    return 0xFB02;
   if(uni_is_UIdeo(c)) {
 #if 0
-    uni_blk_t blk = uni_blk_of(c);
     if(blk == UNI_blk_CJK || blk == UNI_blk_CJK_Compat_Ideographs)
 #else
     if((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF))
@@ -15539,7 +15613,14 @@ static uint32_t uca_synth1(uint32_t c)
     ret += 0xFBC0;
   return ret;
 }
-#define uca_synth2(c)   (((c) & 0x7fff) | 0x8000)
+#define uca_synth2(c) \
+  (((c) >= 0x17000 && (c) <= 0x18AFF) || ((c) >= 0x18D00 && (c) <= 0x18D8F) ? \
+    (c) - 0x17000 + 0x8000 : \
+   (c) >= 0x1B170 && (c) <= 0x1B2FF ? \
+    (c) - 0x1B170 + 0x8000 : \
+   (c) >= 0x18B00 && (c) <= 0x18CFF ? \
+    (c) - 0x18B00 + 0x8000 : \
+    (((c) & 0x7fff) | 0x8000))
 @
 
 <<DUCET parser globals>>=
@@ -17355,10 +17436,6 @@ or a bug in the CLDR DUCET or what.}%
 each full canonical decomposition.  Since this property is not
 provided directly in any other way, it is generated here.
 
-<<Property parsed contents>>=
-uni_chrrng_dat16_t *rng_dat16;
-@
-
 <<Initialize UCD files>>=
 decl_num(FCD);
 @
@@ -17437,132 +17514,11 @@ for(i = 0; i < dmf_prop->len; i++) {
 }
 @
 
-Like the 8-bit and 32-bit data, a post-processing step fixes up the
-tables, generates multi-level tables, and prints everything.  The
-table testing program can ensure that the two representations are
-equal, as well.
-
-<<UCD parser local functions>>=
-static void fixup_rng_dat16(prop_t *p)
-{
-  uint32_t i;
-  qsort(p->rng_dat16, p->len, sizeof(uni_chrrng_dat16_t), uni_cmprng_dat16);
-  /* starting at top means only optimized entries are memmove'd */
-  for(i = p->len - 1; i > 0; i--) {
-    uint32_t j = i;
-    while(i > 0 && p->rng_dat16[i - 1].high == p->rng_dat16[i].low - 1 &&
-          p->rng_dat16[i - 1].dath == p->rng_dat16[i].dath &&
-          p->rng_dat16[i - 1].datl == p->rng_dat16[i].datl)
-      i--;
-    if(i == j)
-      continue;
-    p->rng_dat16[i].high = p->rng_dat16[j].high;
-    if(j < p->len - 1)
-        movebuf(p->rng_dat16 + i + 1, p->rng_dat16 + j + 1, p->len - (j + 1));
-    p->len -= j - i;
-    if(!i)
-      break;
-  }
-}
-@
-
-<<Post-process property data>>=
-for(i = 0; i < nparsed; i++)
-  if(parsed_props[i].rng_dat16) {
-    fixup_rng_dat16(&parsed_props[i]);
-    parsed_props[i].mt = uni_rng_dat16_to_multi(parsed_props[i].rng_dat16,
-                                                parsed_props[i].len,
-                                                &ml_len);
-}
-@
-
-<<Dump character information as C code>>=
-for(i = 0; i < nparsed; i++) {
-  if(parsed_props[i].rng_dat16) {
-    const char *name = i < num_prop_aliases ? prop_aliases[i].short_name :
-                                              parsed_props[i].name;
-    const char *lname = i < num_prop_aliases ? prop_aliases[i].long_name :
-                                               parsed_props[i].name;
-    char nbuf[64];
-    sprintf(nbuf, "uni_%s_rng.gen.c", name);
-    open_wf(of, nbuf);
-    fprintf(of, "#include \"uni_prop.h\"\n\n"
-                "const uni_chrrng_dat16_t uni_%s_rng[] = {\n", name);
-    for(j = 0; j < parsed_props[i].len; j++)
-      fprintf(of, "\t{ 0x%04X, 0x%02X, 0x%04X, 0x%02X }%s\n",
-                  parsed_props[i].rng_dat16[j].low,
-                  parsed_props[i].rng_dat16[j].datl,
-	          parsed_props[i].rng_dat16[j].high,
-	          parsed_props[i].rng_dat16[j].dath,
-		  j < parsed_props[i].len - 1 ? "," : "");
-    fputs("};\n", of);
-    fclose(of);
-    fprintf(gen_h, "/** Sorted range table for Unicode %s property */"
-                   "extern const uni_chrrng_dat16_t uni_%s_rng[];\n"
-		   "/** Length of \\ref uni_%s_rng */"
-		   "#define uni_%s_rng_len %d /* %d lookups max */\n"
-		   "/** 16-bit data associated with \\p x for %s property */\n"
-		   "#define uni_%s_of(x) uni_x_dat16(x, uni_%s_mtab)\n",
-		   lname, name, name, name, parsed_props[i].len,
-		   lg2(parsed_props[i].len + 1), lname, name, name);
-    print_mtab(name, lname, parsed_props[i].mt, gen_h);
-    fprintf(tstf, "dat16(%s);\n", name);
-  }
-}
-@
-
-<<Unicode property exports>>=
-/** Retrieve 16-bit value associated with \p cp in multi-level \p tab.
-  * The default is assumed to be zero. */
-uint16_t uni_x_dat16(uint32_t cp, const uint32_t *tab);
-@
-
-<<Unicode property functions>>=
-uint16_t uni_x_dat16(uint32_t cp, const uint32_t *tab)
-{
-  const uint8_t *mr;
-  uni_multi_tab_lookup(tab, cp * 2, &mr, 0);
-  return mr ? *(uint16_t *)mr : 0;
-}
-@
+The tables were already dumped above.  The table testing program can
+ensure that the two representations are equal, as well.
 
 <<Functions to help test generated tables>>=
-#define dat16(x) doit_dat16(#x, uni_##x##_rng, uni_##x##_rng_len, uni_##x##_mtab)
-
-static void doit_dat16(const char *name, const uni_chrrng_dat16_t *rng, uint32_t nent,
-                       const uint32_t *mtab)
-{
-    uint32_t i;
-
-    /* print stats */
-    printf("%s:\n"
-           "  rng: %d entries (%d bytes; %d lookups max)\n",
-           name, nent, nent * 8, lg2(nent + 1));
-    print_mtab_info(mtab, nent * 8);
-    /* check integrity */
-    for(i = 0; i < 0x110000; i++) {
-      uint16_t r = uni_chrrng_dat16(i, rng, nent);
-      uint16_t m = uni_x_dat16(i, mtab);
-      if(r != m) {
-        fprintf(stderr, "mismatch %s@%d %d %d\n", name, i, (int)r, (int)m);
-	exit(1);
-      }
-    }
-    /* check performance */
-    int j;
-    double tr, tt;
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        uni_chrrng_dat16(i, rng, nent);
-    tr = tend();
-    tstart();
-    for(j = 0; j < 10; j++)
-      for(i = 0; i < 0x110000; i++)
-        uni_x_dat16(i, mtab);
-    tt = tend();
-    printf("  r%.0f t%.0f %.2fx\n", tr, tt, tr / tt);
-}
+<<[[dat]][[16]] test>>
 @
 
 <<Additional property type names>>=
@@ -17637,22 +17593,11 @@ variable mode shifted.
 tstuca \
 @
 
-<<makefile.vars>>=
-# this would be nice, but GNU make doesn't support it
-#ifge ($(UCD_VER),630)
-# so use shell instead:
-CLDR_UCA_TESTS=$(shell if [ $(UCD_VER) -ge 630 ]; then \
-                          echo $(CLDR_LOC)/common/uca; \
-		       else \
-		          echo $(UCD_LOC)/CollationAuxiliary; \
-		       fi)
-@
-
 <<Additional Tests>>=
 ./tstuca <$(UCD_LOC)/CollationTest/CollationTest_NON_IGNORABLE.txt
 ./tstuca -s <$(UCD_LOC)/CollationTest/CollationTest_SHIFTED.txt
-./tstuca -c <$(CLDR_UCA_TESTS)/CollationTest_CLDR_NON_IGNORABLE.txt
-./tstuca -cs <$(CLDR_UCA_TESTS)/CollationTest_CLDR_SHIFTED.txt
+./tstuca -c <$(CLDR_LOC)/common/uca/CollationTest_CLDR_NON_IGNORABLE.txt
+./tstuca -cs <$(CLDR_LOC)/common/uca/CollationTest_CLDR_SHIFTED.txt
 @
 
 \lstset{language=C}
@@ -17972,6 +17917,7 @@ demark	demark	demark	demark	demark
 ♡sad	♡sad	♡sad	♡sad	♡sad
 				
 @
+
 }
 
 To make the above table appear correctly, this document needs to
@@ -18056,6 +18002,7 @@ demark
 ♡happy
 ♡sad
 @
+
 }
 
 One aspect of the data that is lost with such a simple return value is
@@ -18734,14 +18681,11 @@ the existence of the first property to provide the third value.
 Instead, it's treated as a plain enumeration.
 
 <<Initialize UCD files>>=
-#if UCD_VER >= 630
 decl_num(bpb);
 decl_enum(bpt, "n");
-#endif
 @
 
 <<Parse UCD files>>=
-#if UCD_VER >= 630
 open_f("BidiBrackets.txt");
 while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   <<Parse dotted cp>>
@@ -18749,7 +18693,6 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
   add_enum(bpt, fields[2]);
 }
 fclose(f);
-#endif
 @
 
 While scx is officially an ``Other'' property, it can be treated just
@@ -18815,7 +18758,7 @@ EmojiSources.txt
 StandardizedVariants.txt
   Field 2: English descriptive text; probably not really useful for computers
   Field 3 could be enumerated, but is useless w/o field 2
-USourceData.txt: [note: uses cr for line termination]
+USourceData.txt: [note: used to use cr for line termination]
   Hard to say if it's useful outside of IRG.  Index is U-source ID,
   not Unicode code point (UTC-x or UCI-x).  See tr45.
 @
@@ -19011,17 +18954,24 @@ decl_str(ID_Restrict_Type);
 @
 
 <<Parse UCD files>>=
-if((f = fopen("xidmodifications.txt", "r")) ||
-   (f = fopen("security/xidmodifications.txt", "r")) ||
-   (f = fopen("../security/xidmodifications.txt", "r"))) {
+if((f = fopen("IdentifierStatus.txt", "r")) ||
+   (f = fopen("security/IdentifierStatus.txt", "r")) ||
+   (f = fopen("../security/IdentifierStatus.txt", "r"))) {
   while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
     <<Parse dotted cp>>
     add_str8(ID_Restrict_Status, fields[1]);
-    if(num_fields > 2)
-      add_str8(ID_Restrict_Type, fields[2]);
   }
   fclose(f);
   str_to_enum(&parsed_props[prop_ID_Restrict_Status], "restricted");
+}
+if((f = fopen("IdentifierType.txt", "r")) ||
+   (f = fopen("security/IdentifierType.txt", "r")) ||
+   (f = fopen("../security/IdentifierType.txt", "r"))) {
+  while(mfgets(&lbuf, &lbuflen, &llen, 0, f)) {
+    <<Parse dotted cp>>
+    add_str8(ID_Restrict_Type, fields[1]);
+  }
+  fclose(f);
   str_to_enum(&parsed_props[prop_ID_Restrict_Type], "not-chars");
 }
 @
@@ -19032,6 +18982,12 @@ security/intentional.txt: could be numeric (char-to-char mapping) (propname?)
 security/confusables.txt: propname? 4 props or field 3 as part of value?
 security/confusablesWholeScript.txt: propname?
   could be plain 32-bit value: <from><to><type>, but there are dup indices
+As of version 9.0:
+status -> IdentiiferStatus.txt; now just allowed/restricted, so it's a boolean
+type -> IdentifierType.txt; is now "set" of values like script-ex,
+        although few unique sets, so could just convert space to underscore
+	and make it one enum value
+	or it could be set of named flags (16-bit)
 @
 
 <<FIXME>>=
@@ -19044,6 +19000,7 @@ preprocessor symbol and a constant variable.  The latter is in case
 the library is used as a shared object, and is later linked at
 run-time to a version that is compiled with a different set of data.
 
+\lstset{language=C}
 <<Dump character information as C code>>=
 fprintf(gen_h, "/** The version of the UCD data files this library was generated with */\n"
                "#define UNI_UCD_VER %d\n"
@@ -19065,7 +19022,10 @@ extern const unsigned int uni_ucd_version,
 
 <<FIXME>>=
 Versions of all other files used.
-  UAX versions (always advance in sync with UCD)
+  UAX/UTS versions (normally synced w/ UCD)
+    UTS-18 not synced with UCD, but not implemented here (only mentioned)
+    UTS-37 not synced with UCD, and unused here
+    UTS-35 included with/synced to CLDR
   Unihan (same as UCD version)
   idna (same as UCD version)
   UCA (same as UCD version)
@@ -20127,7 +20087,159 @@ a language subtag, followed by an optional script subtag, followed by
 an optional territory subtag, followed by optional variant subtags,
 followed by optional extensions.  These are all case-insensitive, and
 are separated by either hyphens or underscores.  The supported
-language identifier tags are listed in the supplemental metadata.
+language identifier tags are listed in the validity supplemental
+information.
+
+<<Parse CLDR files>>=
+force_chdir("common/validity");
+int lang = parse_validity("language.xml");
+int scr = parse_validity("script.xml");
+int ter = parse_validity("region.xml");
+int var = parse_validity("variant.xml");
+force_chdir("../..");
+@
+
+
+<<UCD parser local functions>>=
+static int parse_validity(const char *fname)
+{
+  int pno = -1;
+  xmlDocPtr doc = xmlReadFile(fname, NULL, xml_opts_dtd);
+  if(!doc) {
+    perror(fname);
+    exit(1);
+  }
+  <<Parse CLDR validity [[doc]]>>
+  xmlFreeDoc(doc);
+  return pno;
+}
+@
+
+The data we're looking for is under [[supplementalData]],
+[[idValidity]], [[id]].  The latter's [[type]] tag is the property
+name, and its raw text is the list of values, in a semi-compressed
+form.  The [[idStatus]] tag will be ignored for now.
+
+<<Parse CLDR validity [[doc]]>>=
+for(xmlNodePtr n = doc->children; n; n = n->next) {
+  if(n->children && xml_isname(n, "supplementalData")) {
+    for(n = n->children; n; n = n->next) {
+      if(!n->children || !xml_isname(n, "idValidity"))
+        continue;
+      for(n = n->children; n; n = n->next) {
+        if(!n->children || !xml_isname(n, "id"))
+	  continue;
+        <<Parse validity string list in [[n]]>>
+      }
+      prop_t *prop = &parsed_props[pno];
+      if(!strcmp(prop->name, "CLDR_language")) {
+        /* some time after CLDR 27, it lost "root" as a language */
+	const char buf[] = "root";
+	add_str_rng(prop, prop->len, prop->len, (uint32_t *)buf, 1);
+      } else if(!strcmp(prop->name, "CLDR_variant")) {
+        /* some time after CLDR 27, it lost "posix" as a variant */
+	const char buf[8] = "posix";
+	add_str_rng(prop, prop->len, prop->len, (uint32_t *)buf, 2);
+      }
+      str_to_enum(&parsed_props[pno], NULL);
+      free(parsed_props[pno].rng_dat8);
+      parsed_props[pno].rng_dat8 = NULL;
+      break;
+    }
+    break;
+  }
+}
+@
+
+<<Parse validity string list in [[n]]>>=
+char *t = xml_prop(n, "type");
+if(!n->children || !n->children->content || !t || /* should never happen */
+   /* I guess linear search is good enough here */
+   (strcmp(t, "language") &&
+    strcmp(t, "region") &&
+    strcmp(t, "script") &&
+    strcmp(t, "variant"))) {
+  xmlprop_free(t);
+  continue;
+}
+char *name;
+inisize(name, strlen(t) + 5 + 1);
+memcpy(name, "CLDR_", 5);
+strcpy(name + 5, t);
+xmlprop_free(t);
+pno = add_prop(name);
+free(name);
+for(xmlNodePtr c = n->children; c; c = c->next) {
+  if(c->type != XML_TEXT_NODE)
+    continue;
+  char *s;
+  for(s = (char *)c->content; isspace(*s); s++);
+  while(*s) {
+    <<Add CLDR compressed string [[s]] to [[parsed_props[pno]]]>>
+    while(isspace(*s))
+      s++;
+  }
+}
+@
+
+Since matching is case-insensitive, and the capitalized name is not
+used anywhere (and can be capitalized according to canonical
+capitialization if desired), all names are converted to lower-case
+while adding.  Technically this breaks the compressed string format,
+but there should never be a case mismatch for the range, as it would
+include non-alphabetic characters.
+
+<<Add CLDR compressed string [[s]] to [[parsed_props[pno]]]>>=
+/* FIXME:  may be UTF-8 */
+char str[64], var[8], beg[8], *p = str, *v = 0;
+while(!isspace(*s) && *s) {
+  if(*s == '~') {
+    *p = 0;
+    v = p = var;
+    s++;
+  } else
+    *p++ = tolower(*s++);
+}
+int vlen = v ? p - var : 0, slen = v ? strlen(str) : (int)(p - str), j;
+if(slen < vlen) {
+  fputs("Invalid CLDR compressed string", stderr);
+  exit(1);
+}
+if(slen % 4)
+  memset((char *)str + slen, 0, 4 - (slen % 4));
+memcpy(beg, (char *)str + slen - vlen, vlen);
+do {
+  prop_t *prop = &parsed_props[pno];
+  add_str_rng(prop, prop->len, prop->len, (uint32_t *)str, (slen + 3) / 4);
+  for(j = 0; j < vlen; j++) {
+    if(str[slen - j - 1] != var[vlen - j - 1]) {
+      str[slen - j - 1]++;
+      break;
+    }
+    str[slen - j - 1] = beg[vlen - j - 1];
+  }
+} while(j < vlen);
+@
+
+<<Ignore unimplemented enums>>=
+/* ignore auto-generated enums for obsolete properties */
+if(!parsed_props[i].rng_dat8 && !parsed_props[i].rng_dat16 &&
+   i < num_prop_aliases)
+  continue;
+@
+
+In addition, some ISO language codes are treated differently within
+Unicode and the CLDR.  These translations are under the alias tag, in
+languageAlias elements.  Similarly, script, territory, and variants
+may have aliases as well.  All of these aliases are in the
+supplemental metadata file.  The above code should have read in all of
+the properties, but a quick check is made to verify this before using
+them.
+
+All properties are mostly handled the same way, so a function is used
+for this.  The main difference is that languages may include scripts
+or regions, and territories have special behavior with multiple
+replacements.
 
 <<Parse CLDR files>>=
 doc = xmlReadFile("common/supplemental/supplementalMetadata.xml",
@@ -20136,17 +20248,15 @@ if(!doc) {
   perror("supplementalMetadata.xml");
   exit(1);
 }
-int lang = -1, scr = -1, ter = -1, var = -1;
 for(n = doc->children; n; n = n->next) {
   if(n->children && xml_isname(n, "supplementalData")) {
     for(n = n->children; n; n = n->next) {
-      /* ignore version, generation, cldrVersion */
       if(!n->children || !xml_isname(n, "metadata"))
         continue;
       for(n = n->children; n; n = n->next) {
-        if(!n->children)
+        if(!n->children || !xml_isname(n, "alias"))
 	  continue;
-        <<Parse CLDR supplemental metadata>>
+        <<Parse CLDR bcp47 aliases in [[n]]>>
       }
       break;
     }
@@ -20156,124 +20266,24 @@ for(n = doc->children; n; n = n->next) {
 xmlFreeDoc(doc);
 @
 
-The data we're looking for is under the validity tag.  Each set is
-listed as a ``variable'' whose value is the whitespace-separated list
-of names.  Technically, their definition in [[attributeValues]] is
-used, but for those which have large lists, the value is just an
-expansion of one of these variables.  In fact, one could make an
-argument that all of the variables of type choice are useful to add as
-enumerations.  The main argument against this is that some of the
-lists are rather long, and the enumerations' use of binary searching
-(rather than, say, hash tables) may be slow.  It also violates my
-mandate of only including UCD localization information.
-
-Since matching is case-insensitive, and the capitalized name is not
-used anywhere (and can be capitalized according to canonical
-capitialization if desired), all names are converted to lower-case
-while adding.
-
-<<Parse CLDR supplemental metadata>>=
-else if(xml_isname(n, "validity")) {
-  for(c = n->children; c; c = c->next) {
-    if(c->type != XML_ELEMENT_NODE)
-      continue;
-    <<Parse CLDR validity entries>>
-  }
+<<Parse CLDR bcp47 aliases in [[n]]>>=
+if(!num_val_aliases[lang] || !num_val_aliases[scr] ||
+   !num_val_aliases[ter] || !num_val_aliases[var]) {
+  fputs("variable defs do not precede aliases!\n", stderr);
+  exit(1);
 }
-@
-
-<<Parse CLDR validity entries>>=
-else if(xml_isname(c, "variable") || xml_isname(c, "attributeValues")) {
-  char *t = xml_prop(c, "type");
-  if(t && !strcmp(t, "choice")) {
-    char *v = xml_prop(c, "id");
-    if(!v)
-      v = xml_prop(c, "elements");
-    if(!c->children || !c->children->content || !v || /* should never happpen */
-       /* I guess linear search is good enough here */
-       (strcmp(v, "$language") &&
-        strcmp(v, "$territory") &&
-        strcmp(v, "$script") &&
-        strcmp(v, "$variant"))) {
-      xmlprop_free(v);
-      xmlprop_free(t);
-      continue;
-    }
-    char *name;
-    inisize(name, strlen(v) + 5 + 1);
-    memcpy(name, "CLDR_", 5);
-    strcpy(name + 5, v + 1);
-    xmlprop_free(v);
-    int pno = add_prop(name);
-    free(name);
-    uint32_t str[64];
-    for(s = (char *)c->children->content; isspace(*s); s++);
-    for(i = 0; *s; i++) {
-      char *p = (char *)str;
-      while(!isspace(*s) && *s)
-        *p++ = tolower(*s++);
-      while((p - (char *)str) % 4)
-        *p++ = 0;
-      add_str_rng(&parsed_props[pno], i, i, str, (p - (char *)str) / 4);
-      while(isspace(*s))
-        s++;
-    }
-    str_to_enum(&parsed_props[pno], NULL);
-    free(parsed_props[pno].rng_dat8);
-    parsed_props[pno].rng_dat8 = NULL;
-  }
-  xmlprop_free(t);
+for(c = n->children; c; c = c->next) {
+  if(c->type != XML_ELEMENT_NODE)
+    continue;
+  else if(xml_isname(c, "languageAlias"))
+    do_attr_alias(c, lang, scr, ter, var);
+  else if(xml_isname(c, "scriptAlias"))
+    do_attr_alias(c, scr, 0, 0, 0);
+  else if(xml_isname(c, "territoryAlias"))
+    do_attr_alias(c, ter, 0, 0, 0);
+  else if(xml_isname(c, "variantAlias"))
+    do_attr_alias(c, var, 0, 0, 0);
 }
-@
-
-<<Ignore unimplemented enums>>=
-/* ignore auto-generated enums for obsolete properties */
-if(!parsed_props[i].rng_dat8 && i < num_prop_aliases)
-  continue;
-@
-
-In addition, some ISO language codes are treated differently within
-Unicode and the CLDR.  These translations are under the alias tag, in
-languageAlias elements. Similarly, script, territory, and variants may
-have aliases as well.  In order to process the aliases, the lists
-generated from the validity tag need to already be finished.  The DTD
-places the alias tag after the validity tag, so it is probably safe to
-assume this is true.  A check is made just in case it isn't, as that
-will require rewriting this code into a separate loop.
-
-<<Parse CLDR supplemental metadata>>=
-else if(xml_isname(n, "alias")) {
-  lang = add_prop("CLDR_language");
-  scr = add_prop("CLDR_script");
-  ter = add_prop("CLDR_territory");
-  var = add_prop("CLDR_variant");
-  if(!num_val_aliases[lang] || !num_val_aliases[scr] ||
-     !num_val_aliases[ter] || !num_val_aliases[var]) {
-    fputs("variable defs do not precede aliases!\n", stderr);
-    exit(1);
-  }
-  for(c = n->children; c; c = c->next) {
-    if(c->type != XML_ELEMENT_NODE)
-      continue;
-    <<Parse CLDR bcp47 alias entries>>
-  }
-}
-@
-
-All properties are mostly handled the same way, so a function is used
-for this.  The main difference is that languages may include scripts
-or regions, and territories have special behavior with multiple
-replacements.
-
-<<Parse CLDR bcp47 alias entries>>=
-else if(xml_isname(c, "languageAlias"))
-  do_attr_alias(c, lang, scr, ter);
-else if(xml_isname(c, "scriptAlias"))
-  do_attr_alias(c, scr, 0, 0);
-else if(xml_isname(c, "territoryAlias"))
-  do_attr_alias(c, ter, 0, 0);
-else if(xml_isname(c, "variantAlias"))
-  do_attr_alias(c, var, 0, 0);
 @
 
 The easy way to do this would be to look up the value to be aliased
@@ -20367,7 +20377,7 @@ static uni_valueof_t *add_enum_lit(int prop, const char *s)
 @
 
 <<UCD parser local functions>>=
-static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
+static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter, int var)
 {
   char *from = xml_prop(alias, "type"), *to = xml_prop(alias, "replacement"), *s;
   uni_valueof_t me, *fp, *tp;
@@ -20376,7 +20386,7 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
   /* some aliases have no to.  just ignore. */
   /* deprecated names have moved to deprecated/deprecatedItems in CLDR 27 */
   if(!to) {
-    /* this doesn't happen in CLDR 27 */
+    /* this doesn't happen in CLDR 27 .. 39 */
     fprintf(stderr, "Invalid %s alias %s (no target)\n",
                     parsed_props[prop].name, from);
     xmlprop_free(from);
@@ -20394,15 +20404,14 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
   if(!tp) {
     /* this has been observed in following conditions: */
     /*  - target language ID has non-language tags (e.g. sr_Latn) */
-    /*    observed values are always scr/ter, never var */
-    if((scr || ter) && (s = strchr(to, '_'))) {
-      uint32_t sc = ~0, tc = ~0;
+    if((scr || ter || var) && (s = strchr(to, '_'))) {
+      uint32_t sc = ~0, tc = ~0, vc = ~0;
       /* if lookup fails, ignore, but spit out message */
       *s = 0;
       tp = bsearch(&me, enum_vals[prop], enum_vals_len[prop], sizeof(me),
                    uni_cmp_valueof);
       if(!tp) {
-        /* this doesn't happen in CLDR 27 */
+        /* this doesn't happen in CLDR 27 .. 39 */
         fprintf(stderr, "Unknown target for %s alias %s->*%s*_%s\n",
 	                parsed_props[prop].name, from, to, s + 1);
         xmlprop_free(from);
@@ -20419,23 +20428,38 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
 	            uni_cmp_valueof);
       if(sub) {
         sc = sub->val;
-        if(n) {
-	  *n++ = '_';
-	  me.name = n;
-	  sub = bsearch(&me, enum_vals[ter], enum_vals_len[ter], sizeof(me),
-	                uni_cmp_valueof);
-          if(sub)
-	    tc = sub->val;
-        }
-      } else if(!n) {
+	if((s = n)) {
+	  *s++ = '_';
+	  n = strchr(s, '_');
+	  if(n)
+	    *n = 0;
+	}
+      }
+      if(s) {
+	me.name = s;
 	sub = bsearch(&me, enum_vals[ter], enum_vals_len[ter], sizeof(me),
 	              uni_cmp_valueof);
-        if(sub)
+        if(sub) {
 	  tc = sub->val;
-      } else
+	  if((s = n))
+	    *s++ = '_';
+        }
+      }
+      if(s && !n) {
+        me.name = s;
+	sub = bsearch(&me, enum_vals[var], enum_vals_len[var], sizeof(me),
+	              uni_cmp_valueof);
+        if(sub)
+	  vc = sub->val;
+      } else if(n)
         *n = '_';
       if(!sub) {
         /* this doesn't happen in CLDR 27 */
+	/* In CLDR 39, these are the only errors:
+	    i_default->en_x_i_default
+	    i_enochian->und_x_i_enochian
+	    i_mingo->see_x_i_mingo
+	    zh_min->nan_x_zh_min */
         fprintf(stderr, "Unknown target subtag for %s alias %s->%s\n",
 	                parsed_props[prop].name, from, to);
         xmlprop_free(from);
@@ -20444,7 +20468,11 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
       }
       uint8_t buf[1 + strlen(to) + 1];
       /* setting buf[0] forces sorting to bottom, at least */
-      buf[0] = sc == (uint32_t)~0 ? 2 : tc == (uint32_t)~0 ? 1 : 3;
+      buf[0] = sc != (uint32_t)~0;
+      if(tc != (uint32_t)~0)
+        buf[0] |= 2;
+      if(vc != (uint32_t)~0)
+        buf[0] |= 4;
       strcpy((char *)buf + 1, to);
       tp = add_enum_lit(prop, (char *)buf);
     /*  - target territory is a space-separated list */
@@ -20462,7 +20490,7 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
 	              uni_cmp_valueof);
         if(!sub)
 	/* if lookup fails, spit out message, and drop failed lookup */
-	  /* this doesn't happen in CLDR 27 */
+	  /* this doesn't happen in CLDR 27 .. 39 */
 	  fprintf(stderr, "Unknown list element %s for %s alias %s->%s %s\n",
 	                  n, parsed_props[prop].name, from, to, s ? s + 1 : "");
         ++buf[0]; /* actually, don't drop until 2nd lookup below */
@@ -20479,6 +20507,7 @@ static void do_attr_alias(xmlNodePtr alias, int prop, int scr, int ter)
       tp = add_enum_lit(prop, (char *)buf);
     /*  - target language or whatever does not exist (e.g. ami) */
     /* in CLDR 27, these are: 1 variant, 12 languages, 76 territories */
+    /* all fixed in CLDR 39 */
     } else {
       /* ignore these, but spit out a message */
       fprintf(stderr, "Unknown target for %s alias %s->%s\n",
@@ -20658,14 +20687,14 @@ it is absent.
 #define uni_locale_triplet(l, s, t) \
   (((l) >= UNI_NUM_CLDR_language ? 0 : ((l) + 1) << 17) + \
    ((s) >= UNI_NUM_CLDR_script ? 0 : ((s) + 1) << 9) + \
-   ((t) >= UNI_NUM_CLDR_territory ? 0 : (t) + 1))
+   ((t) >= UNI_NUM_CLDR_region ? 0 : (t) + 1))
 #define uni_locale_check_tripletid_(x, max) ((x) ? (x) - 1 : (max))
 #define uni_locale_extract_language(x) \
    uni_locale_check_tripletid_(((x) >> 17) & 0x3ff, UNI_NUM_CLDR_language)
 #define uni_locale_extract_script(x) \
    uni_locale_check_tripletid_(((x) >> 9) & 0xff, UNI_NUM_CLDR_script)
 #define uni_locale_extract_territory(x) \
-   uni_locale_check_tripletid_((x) & 0x1ff, UNI_NUM_CLDR_territory)
+   uni_locale_check_tripletid_((x) & 0x1ff, UNI_NUM_CLDR_region)
 #define uni_locale_set_language(t, l) \
    uni_locale_triplet(l, uni_locale_extract_script(t), \
                       uni_locale_extract_territory(t))
@@ -20695,6 +20724,10 @@ it is absent.
 #endif /* UNI_LOCALE_H */
 @
 
+<<makefile.rules>>=
+uni_locale.h: uni_prop.h
+@
+
 <<Headers to Install>>=
 uni/uni_locale.h \
 @
@@ -20704,7 +20737,7 @@ uni/uni_locale.h \
   * Generates triplet word from \p l, \p s and \p t into locale triplet.
   * This is a preprocessor macro.  */
 uint32_t uni_locale_triplet(uni_CLDR_language_t l, uni_CLDR_script_t s,
-                            uni_CLDR_territory_t t);
+                            uni_CLDR_region_t t);
 /** Extract language from locale triplet word.
   * This is a preprocessor macro.  */
 uni_CLDR_language_t uni_locale_extract_language(uint32_t x);
@@ -20713,7 +20746,7 @@ uni_CLDR_language_t uni_locale_extract_language(uint32_t x);
 uni_CLDR_script_t uni_locale_extract_script(uint32_t x);
 /** Extract territory from locale triplet word.
   * This is a preprocessor macro.  */
-uni_CLDR_territory_t uni_locale_extract_territory(uint32_t x);
+uni_CLDR_region_t uni_locale_extract_territory(uint32_t x);
 /** Replace language component of locale triplet word.
   * This is a preprocessor macro.  */
 uint32_t uni_locale_set_language(uint32_t t, uni_CLDR_language_t l);
@@ -20722,7 +20755,7 @@ uint32_t uni_locale_set_language(uint32_t t, uni_CLDR_language_t l);
 uint32_t uni_locale_set_script(uint32_t t, uni_CLDR_script_t s);
 /** Replace territory component of locale triplet word.
   * This is a preprocessor macro.  */
-uint32_t uni_locale_set_territory(uint32_t t, uni_CLDR_territory_t r);
+uint32_t uni_locale_set_territory(uint32_t t, uni_CLDR_region_t r);
 <<Locale triplet support macros>>
 @
 
@@ -20730,7 +20763,7 @@ uint32_t uni_locale_set_territory(uint32_t t, uni_CLDR_territory_t r);
 /* fake numbers to make macros work */
 #define UNI_NUM_CLDR_language ~0
 #define UNI_NUM_CLDR_script ~0
-#define UNI_NUM_CLDR_territory ~0
+#define UNI_NUM_CLDR_region ~0
 <<Locale triplet support macros>>
 @
 
@@ -20741,7 +20774,7 @@ static int parse_locale_triplet(const char *txt)
   if(lang < 0) {
     lang = add_prop("CLDR_language");
     scr = add_prop("CLDR_script");
-    ter = add_prop("CLDR_territory");
+    ter = add_prop("CLDR_region");
     if(lang < 0 || scr < 0 || ter < 0)
       exit(1);
   }
@@ -21209,7 +21242,7 @@ if(*ls == '-' || *ls == '_')
     *s++ = tolower(*ls);
 while(tl == 3) {
   me.name = s - tl;
-  v = bsearch(&me, uni_CLDR_territory_valueof, uni_CLDR_territory_valueof_len,
+  v = bsearch(&me, uni_CLDR_region_valueof, uni_CLDR_region_valueof_len,
               sizeof(me), uni_cmp_valueof);
   if(v)
     break;
@@ -21392,16 +21425,16 @@ territory tag, since that overrides this.  There is no need to discard
 the variant; it will be discarded later due to lookup failure.
 
 <<Parse CLDR/Unicode Locale string>>=
-if(vtag && ter != UNI_CLDR_territory_ax) {
+if(vtag && ter != UNI_CLDR_region_ax) {
   if(!strcmp(vtag, "aaland"))
-    ter = UNI_CLDR_territory_ax;
+    ter = UNI_CLDR_region_ax;
   else if(tl >= 4) { /* more variant tags */
     const char *ols = ls;
     char *os = s;
     int otl = tl;
     do {
       if(!strcmp(s - tl, "aaland")) {
-        ter = UNI_CLDR_territory_ax;
+        ter = UNI_CLDR_region_ax;
 	break;
       }
       <<Advance to next locale tag>>
@@ -21424,11 +21457,11 @@ entries keyed on variant, so that is ignored.
 <<Parse CLDR/Unicode Locale string>>=
 if(ttag) {
   me.name = ttag;
-  v = bsearch(&me, uni_CLDR_territory_valueof, uni_CLDR_territory_valueof_len,
+  v = bsearch(&me, uni_CLDR_region_valueof, uni_CLDR_region_valueof_len,
               sizeof(me), uni_cmp_valueof);
   if(v) {
     ter = v->val;
-    uint8_t b0 = (uint8_t)uni_CLDR_territory_nameof[ter].short_name[0];
+    uint8_t b0 = (uint8_t)uni_CLDR_region_nameof[ter].short_name[0];
     if(b0 < '0') {
       /* multiple choice; pick most popular answer */
       /* first by lang+script (or just lang if script == ~0) */
@@ -21440,7 +21473,7 @@ if(ttag) {
 	likely = lookup_likely(ch);
       }
       const uint8_t *p =
-	(const uint8_t *)uni_CLDR_territory_nameof[ter].short_name + 1;
+	(const uint8_t *)uni_CLDR_region_nameof[ter].short_name + 1;
       if(likely) {
         uint32_t lt = uni_locale_extract_territory(likely->val);
 	unsigned int cl;
@@ -21455,7 +21488,7 @@ if(ttag) {
 	}
 	if(!b0) {
           /* or, if most popular not available, pick first */
-	  p = (const uint8_t *)uni_CLDR_territory_nameof[lang].short_name + 1;
+	  p = (const uint8_t *)uni_CLDR_region_nameof[lang].short_name + 1;
 	  ter = uni_valid_utf8_decode(p, NULL) - 1;
 	}
       } else
@@ -21474,6 +21507,9 @@ if(ttag) {
 
 Variants are complicated by the fact that there may be more than one.
 Also, the [[POSIX]] variant must be converted into [[u-va-posix]].
+However, some time after CLDR 27 (not sure when), [[POSIX]] was
+removed from the variant list.  For now, I'll keep the code but define
+the enum constant to something invalid.
 
 <<Parse CLDR/Unicode Locale string>>=
 uint32_t *exts = NULL, exts_len = 0, had_posix = 0;
@@ -21502,7 +21538,7 @@ if(had_posix) {
 
 <<Additional doxymentation for [[uni_parse_locale]]>>=
 /** Variant tags are \ref uni_CLDR_variant_t enumeration values with
-  * thier high bit set. */
+  * their high bit set. */
 @
 
 Now that the main tags have been parsed, the locale extensions can be
@@ -22072,7 +22108,7 @@ uint32_t uni_locale_triplet_strip(uint32_t triplet, int force)
   triplet = uni_locale_triplet_fill(triplet, force);
   uni_CLDR_language_t l = uni_locale_extract_language(triplet);
   uni_CLDR_script_t s = uni_locale_extract_script(triplet);
-  uni_CLDR_territory_t t = uni_locale_extract_territory(triplet);
+  uni_CLDR_region_t t = uni_locale_extract_territory(triplet);
   if(l == UNI_CLDR_language_root)
     return triplet;
   /* try just language first */
@@ -22107,19 +22143,19 @@ uint32_t uni_locale_triplet_fill(uint32_t triplet, int force)
 {
   uni_CLDR_language_t l = uni_locale_extract_language(triplet);
   uni_CLDR_script_t s = uni_locale_extract_script(triplet);
-  uni_CLDR_territory_t t = uni_locale_extract_territory(triplet);
+  uni_CLDR_region_t t = uni_locale_extract_territory(triplet);
   if(l == UNI_CLDR_language_root) /* root has no script or territory */
     return uni_locale_triplet(l, ~0, ~0);
   if(force && s == UNI_CLDR_script_zzzz)
     s = UNI_NUM_CLDR_script;
-  if(force && t == UNI_CLDR_territory_zz)
-    t = UNI_NUM_CLDR_territory;
+  if(force && t == UNI_CLDR_region_zz)
+    t = UNI_NUM_CLDR_region;
   if(force && l == UNI_CLDR_language_und)
     l = UNI_NUM_CLDR_language;
   triplet = uni_locale_triplet(l, s, t);
   /* if nothing to do, just return as is */
   if(l != UNI_NUM_CLDR_language && s != UNI_NUM_CLDR_script &&
-     t != UNI_NUM_CLDR_territory)
+     t != UNI_NUM_CLDR_region)
     return triplet;
   /* try filling the blanks direcly */
   uni_cp_val_t *v = lookup_likely(triplet);
@@ -22135,12 +22171,12 @@ uint32_t uni_locale_triplet_fill(uint32_t triplet, int force)
       return v->val;
   }
   /* next, try language only if script or territory missing */
-  if((t == UNI_NUM_CLDR_territory && s != UNI_NUM_CLDR_script) ||
-     (t != UNI_NUM_CLDR_territory && s == UNI_NUM_CLDR_script)) {
+  if((t == UNI_NUM_CLDR_region && s != UNI_NUM_CLDR_script) ||
+     (t != UNI_NUM_CLDR_region && s == UNI_NUM_CLDR_script)) {
     triplet = uni_locale_triplet(l, ~0, ~0);
     v = lookup_likely(triplet);
     if(v) {
-      if(t == UNI_NUM_CLDR_territory)
+      if(t == UNI_NUM_CLDR_region)
         t = uni_locale_extract_territory(v->val);
       else
         s = uni_locale_extract_script(v->val);
@@ -22149,8 +22185,8 @@ uint32_t uni_locale_triplet_fill(uint32_t triplet, int force)
   /* otherwise, no clue; just fill in with undefineds */
   if(s == UNI_NUM_CLDR_script)
     s = UNI_CLDR_script_zzzz;
-  if(t == UNI_NUM_CLDR_territory)
-    t = UNI_CLDR_territory_zz;
+  if(t == UNI_NUM_CLDR_region)
+    t = UNI_CLDR_region_zz;
   return uni_locale_triplet(l, s, t);
 }
 @
@@ -22384,7 +22420,7 @@ locations are also set correctly in the config file.
 
 \begin{itemize}
 \item The Unicode Character Database; this library was tested using
-versions 6.0.0, 6.2.0, 6.3.0 and 7.0.0.\\
+version 14.0.0.\\
 \url{http://www.unicode.org/Public/zipped/}\emph{version}/UCD.zip
 \item The Unicode Han Database; this should match the UCD version.\\
 \url{http://www.unicode.org/Public/zipped/}\emph{version}/Unihan.zip
@@ -22964,7 +23000,7 @@ or zero.  Otherwise it returns the stored value, minus one.  This way,
 the default value is stored most efficiently (as a zero), and the rest
 only require minor adjustment on return.
 
-% uni_x_of prototype
+% uni_x8_of prototype
 
 A function is provided to convert a [[uni_chrrng_dat8_t]] sorted range
 list to an offsetted multi-level byte array.  However, no inverse
@@ -22981,9 +23017,9 @@ supported.  Both lookup and conversion from a [[uni_chrrng_dat16_t]]
 type or a [[uni_chrrng_dat32_t]] type may be performed.  However, the
 inverse conversion is not supported.
 
-% uni_x_dat16 prototype
+% uni_x16_of prototype
+% uni_x32_of prototype
 % uni_rng_dat16_to_multi prototype
-% uni_x_dat32 prototype
 % uni_rng_dat32_to_multi prototype
 
 Another implementation is to store the numerator and denominator of a
@@ -23041,10 +23077,10 @@ tables:
 
 \begin{itemize}
 \item [[UNI_PROP_TYPE_BOOL]]: Boolean Properties
-\item [[UNI_PROP_TYPE_ENUM]]: Enumeration Properties; in addition, the
-name translation tables are in [[nameof]], [[valueof]],
-[[valueof_approx]], [[nameof_len]], and [[valueof_len]].  The default
-is in [[def]].
+\item [[UNI_PROP_TYPE_ENUM]] and [[UNI_PROP_TYPE_ENUM2]]: Enumeration
+Properties (8-bit and 16-bit, respectively); in addition, the name
+translation tables are in [[nameof]], [[valueof]], [[valueof_approx]],
+[[nameof_len]], and [[valueof_len]].  The default is in [[def]].
 \item [[UNI_PROP_TYPE_NUM]]: Numeric Properties
 \item [[UNI_PROP_TYPE_STR]]: String Properties; in addition, the
 length of the string table is [[strs_len]], and the string table is in
@@ -23323,9 +23359,13 @@ character (glyph).  The following function can tell you if a grapheme
 cluster boundary exists between any two characters.  For improved
 performance, the return value can be passed in to [[prevret]] when
 scanning a sequential string; that is, when [[next]] from the previous
-call is passed in as [[prev]].  However, other than improved
-performance, there is no reason not to pass zero for this parameter
-every time:  the function retains and requires no state.
+call is passed in as [[prev]].  Prior versions of this function
+required no state, but as of Unicode-9.0.0, state is required to
+determine breaks between consecutive Regional Indicator Symbol Letters
+(1F1E6..1F1FF) and between a Zero Width Joiner (200D) and an Extended
+Pictographic code pint ([[uni_is_ExtPict]]).  In the former case, lack
+of state may lose a break point, and in the latter case, lack of state
+may give a break point where none should be.
 
 Unicode defines two types of grapheme cluster:  legacy and extended.
 By default the extended form is detected.  Setting [[legacy]] to
@@ -24637,7 +24677,7 @@ flags.
 A locale is identified by language, script, territory, and variant.  
 These are represented numerically via the partial enumeration
 properties [[uni_CLDR_language]], [[uni_CLDR_script]],
-[[uni_CLDR_territory]] and [[uni_CLDR_variant]], respectively.  These
+[[uni_CLDR_region]] and [[uni_CLDR_variant]], respectively.  These
 have enumeration types and literals and name and value arrays like
 enumerated properties, but do not have range or multi-level tables, as
 they are not associated with code points.  A more compact form is a
@@ -24859,10 +24899,20 @@ Doxyfile \
 \input{begin-hidden.tex} %%% doc
 Completely untouched & undocumented files:
   IDNA:
-    IdnaTest.txt (IDNA algorithm not implemented, so no testing)
+    IdnaTestV2.txt (IDNA algorithm not implemented, so no testing)
 
   IVD: (doesn't seem all that useful except to the supported vendors)
     IVD_Collections.txt
     IVD_Sequences.txt
     IVD_Stats.txt
+
+  extracted:
+    Seems duplicate of UnicodeData.txt w/ no added value:
+      DerivedGeneralCategory.txt (3)
+      DerivedCombiningClass.txt (4)
+      DerivedDecompositionType.txt (6)
+      DerivedBinaryProperties.txt (10)
+    DerivedJoiningGroup.txt seems duplicate of ArabicShaping.txt, field 4
+    DerivedLineBreak.txt doesn't add value to LineBreak.txt
+    DerivedName includes synthesized names, but I synthesize instead
 \input{end-hidden.tex} %%% doc

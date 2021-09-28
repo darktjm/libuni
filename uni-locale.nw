@@ -33,6 +33,7 @@ $Id$
 <<Common noweb Warning>>=
 # $Id$
 @
+
 \fi
 \begin{rawhtml}
 <-->
@@ -46,16 +47,8 @@ locale support for the basic Unicode support library described in
 
 \vspace{0.75in}
 
-This document is \copyright{} 2015 Thomas J. Moore.  This
-document is licensed under the Apache License, Version 2.0 (the
-``License''); you may not use this document except in compliance with
-the License. You may obtain a copy of the License at
-\url{http://www.apache.org/licenses/LICENSE-2.0}.  Unless required by
-applicable law or agreed to in writing, software distributed under the
-License is distributed on an ``AS IS'' BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for
-the specific language governing permissions and limitations under the
-License. 
+This document, its prior versions by the same author, and its products
+are granted to the Public Domain by Thomas J. Moore in 2021.
 
 \vspace{0.25in}
 
@@ -160,30 +153,23 @@ primary identity.
 
 \lstset{language=C}
 <<LDML parser local functions>>=
-static void parse_ldml(const char *name, const char *cwd)
+static void parse_ldml(xmlDocPtr doc, const char *cwd)
 {
-  /* ignore special tags everywhere, since it's undefined */
-  xmlDocPtr doc = xmlReadFile(name, NULL, xml_opts_dtd);
-  if(!doc) {
-    perror(name);
-    exit(1);
-  }
-  xmlNodePtr n, c;
-  <<LDML parser globals>>
-  for(n = doc->children; n; n = n->next)
-    /* not sure why 1st entry is always empty ldml */
-    if(n->children && xml_isname(n, "ldml")) {
+  xmlNodePtr sd, n, c;
+  for(sd = doc->children; sd; sd = sd->next)
+    if(sd->children && xml_isname(sd, "ldml")) {
+      <<LDML parser globals>>
+      char *name = xml_prop(sd, "fname");
       /* ignore draft attribute */
       /* ignore deprecated fallback tag */
-      for(n = n->children; n; n = n->next) {
+      for(n = sd->children; n; n = n->next) {
 	if(!n->children)
 	  continue;
 	<<Parse ldml sections>>
       }
-      break;
+      xmlprop_free(name);
+      <<LDML parser globals cleanup>>
     }
-  xmlFreeDoc(doc);
-  <<LDML parser globals cleanup>>
 }
 @
 
@@ -529,23 +515,50 @@ static void replace_range_dat8(uni_chrrng_dat8_t **rng, unsigned int *max,
 @
 
 The only part of the rules that can be parsed and put into a file are
-the sentence break supression rules.
+the sentence break supression rules.  All segmentation files are read
+into one XML tree for slightly more rapid alias processing.  Or should
+I read as separate docs, paired with the file name, sorted by name?  I
+can convert source into an attribute query in the path if needed.
+
+<<LDML parser local functions>>=
+/* changes directory to dir */
+static xmlDocPtr read_xml_dir(const char *dir)
+{
+  xmlDocPtr ret = xmlNewDoc((const xmlChar *)"1.0");
+  struct dirent *de;
+  DIR *d = opendir(dir);
+  if(!ret || !d) {
+    perror(dir);
+    exit(1);
+  }
+  force_chdir(dir);
+  while((de = readdir(d))) {
+    if(de->d_name[0] == '.')
+      continue;
+    xmlDocPtr subdoc = xmlReadFile(de->d_name, NULL, xml_opts_dtd);
+    if(!subdoc) {
+      perror(de->d_name);
+      exit(1);
+    }
+    xmlNodePtr n;
+    /* roundabout way of removing DTD reference */
+    for(n = subdoc->children; n; n = n->next) {
+      if(n->type != XML_ELEMENT_NODE)
+        continue;
+      xmlNodePtr c = xmlAddChild((xmlNodePtr)ret, xmlDocCopyNode(n, ret, 1));
+      xmlNewProp(c, (const xmlChar *)"fname", (const xmlChar *)de->d_name);
+    }
+    xmlFreeDoc(subdoc);
+  }
+  return ret;
+}
+@
 
 <<Parse LDML files>>=
 /* segments: line, word, sentence breaks */
-struct dirent *de;
-DIR *d = opendir("common/segments");
-if(!d) {
-  perror("LDML segmentation");
-  exit(1);
-}
-force_chdir("common/segments");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name, cwd);
-}
-closedir(d);
+xmlDocPtr doc = read_xml_dir("common/segments");
+parse_ldml(doc, cwd);
+xmlFreeDoc(doc);
 force_chdir(cwd);
 force_chdir(CLDR_LOC);
 @
@@ -605,18 +618,9 @@ changes.
 
 <<Parse LDML files>>=
 /* collation: locale-specific collation rules */
-d = opendir("common/collation");
-if(!d) {
-  perror("LDML collation");
-  exit(1);
-}
-force_chdir("common/collation");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name, cwd);
-}
-closedir(d);
+doc = read_xml_dir("common/collation");
+parse_ldml(doc, cwd);
+xmlFreeDoc(doc);
 force_chdir(cwd);
 force_chdir(CLDR_LOC);
 @
@@ -823,18 +827,9 @@ parameters.  The only one we're interested in is the
 
 <<Parse LDML files>>=
 /* main: "other" rules */
-d = opendir("common/main");
-if(!d) {
-  perror("LDML main");
-  exit(1);
-}
-force_chdir("common/main");
-while((de = readdir(d))) {
-  if(de->d_name[0] == '.')
-    continue;
-  parse_ldml(de->d_name, cwd);
-}
-closedir(d);
+doc = read_xml_dir("common/main");
+parse_ldml(doc, cwd);
+xmlFreeDoc(doc);
 force_chdir(cwd);
 force_chdir(CLDR_LOC);
 @
