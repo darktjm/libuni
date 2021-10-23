@@ -156,10 +156,11 @@ the blk property exceeding 8 bits as of 9.0.0, and the cjkRSUnicode
 property switching files in 7.0.0.}
 This package was tested against CLDR version 39; I recommend always
 getting the latest version available.  In particular, care must be
-taken that the CLDR and UCD versions are compatible.  Some CLDR
-changes require modification of algorithms, so you may need to wait
-for an update in this library before full support for a later version
-is present.
+taken that the CLDR and UCD versions are compatible (in fact, CLDR 39
+is for Unicode 13, so it fails some UCA tests that CLDR 40 Alpha 3
+doesn't).  Some CLDR changes require modification of algorithms, so
+you may need to wait for an update in this library before full support
+for a later version is present.
 
 Originally, I didn't care what version of the UCD was used, but 6.3.0
 introduced some incompatible algorithm changes.  My original solution
@@ -17686,15 +17687,21 @@ uint32_t var_top = st->var_top;
 /* plus some other random ignorables */
 if(shifted) {
   if(!l123)
-    l4 = 0;
-  else if(!(l123 & UNI_DUCET_LEV1_MASK)) {
+    l4 = 0; /* L1, L2, L3 = 0 */
+  else if(!(l123 & UNI_DUCET_LEV1_MASK)) { /* L1 = 0, L3 ≠ 0 */
     if(st->in_var)
-      l4 = l123 = 0;
+      l4 = l123 = 0; /* following a variable */
     else
-      l4 = 0xffff;
-  } else {
+      l4 = 0xffff; /* not following a variable */
+  } else { /* L1 ≠ 0 */
     st->in_var = 0;
-    l4 = 0xffff;
+    l4 = 0xffff; /* set to L1 below if SHIFTED */
+    /* actually, 2nd synth should always be 0 */
+    /* if(did_synth2) */
+    /* but impossible to detect if synth2 explicitly in DUCET */
+    /* maybe just detect l2, l3 = 0?  Seems to pass tests. */
+    if(!(l123 & (UNI_DUCET_LEV2_MASK | UNI_DUCET_LEV3_MASK)))
+      l4 = 0;
   }
 } else if(blanked && st->in_var) {
   if(!(l123 & UNI_DUCET_LEV1_MASK))
@@ -19188,12 +19195,14 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
   buf_len = uni_NFD32(NULL, buf_len, &buf, 0, &max_buf);
   key = uni_str_uca_raw32(buf, buf_len, &opts, &key_len, NULL);
   if(fcd && (fcd_len != key_len || cmpbuf(fcd, key, fcd_len))) {
-    fprintf(stderr, "key/fcd mismatch\n%s\n", lbuf);
+    fprintf(stderr, "key/fcd mismatch\n%s", lbuf);
     s = build_kbuf1234(kbuf, fcd, fcd_len, opts.max_level > 3);
     strcpy(s, "]\n");
+    fputs("fcd: ", stderr);
     fputs(kbuf, stderr);
     s = build_kbuf1234(kbuf, key, key_len, opts.max_level > 3);
     strcpy(s, "]\n");
+    fputs("nfd: ", stderr);
     fputs(kbuf, stderr);
     /* CLDR data does not conform! */
     /* main data no longer conforms; has one screwy entry */
@@ -19219,11 +19228,16 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
     s = strrchr(lbuf, '[');
     strrchr(s, ']')[1] = 0;
     if(strcmp(s, kbuf)) {
-      fputs("comment mismatch\n", stderr);
-      for(i = 0; i < key_len; i++)
-        fprintf(stderr, "%08X ", key[i]);
-      fprintf(stderr, "%s %s\n%s", kbuf, s, lbuf);
-      exit(1);
+      fprintf(stderr, "comment mismatch\n%.*s\n%s\n%s\n", (int)(s - lbuf), lbuf,
+              s, kbuf);
+      for(i = 0; i < key_len; i += 1 + (opts.max_level > 3))
+        fprintf(stderr, " %04X.%03X.%02X.%04X",
+	        (key[i] & UNI_DUCET_LEV1_MASK) >> UNI_DUCET_LEV1_SHIFT,
+		(key[i] & UNI_DUCET_LEV2_MASK) >> UNI_DUCET_LEV2_SHIFT,
+		(key[i] & UNI_DUCET_LEV3_MASK) >> UNI_DUCET_LEV3_SHIFT,
+		opts.max_level > 3 ? key[i+1] : 0);
+      putc('\n', stderr);
+      /* exit(1); */
     }
   }
 #endif
@@ -19235,12 +19249,12 @@ while(mfgets(&lbuf, &lbuflen, &llen, 0, stdin)) {
     if(c > 0) {
       fflush(stdout);
       fprintf(stderr, "keys are out of order at %s\n", lbuf);
-      exit(1);
+      continue; /* keep using last good one */
     }
     if(uni_uca_strcmp32(prev_buf, prev_buf_len, buf, buf_len, &opts) > 0) {
       fflush(stdout);
       fprintf(stderr, "strcmp error at %s\n", lbuf);
-      exit(1);
+      continue; /* keep using last good one */
     }
     free(prev_key);
     free(prev_buf);
@@ -19395,7 +19409,8 @@ int main(int argc, const char **argv)
 
 There is a table titled ``Comparison of Variable Ordering'' in the
 standard; it is a good start.  It looks very similar to this (headers
-have been shortened for formatting):
+have been shortened for formatting; IgnoreSP was dropped in 6.3 and
+Shifted (CLDR) is handled elsewhere):
 
 \lstset{language=txt}
 {\let\Tt\unimono

@@ -221,6 +221,70 @@ else if(*s == 'c') {
 ./tstuca -cs <$(CLDR_LOC)/common/uca/CollationTest_CLDR_SHIFTED.txt
 @
 
+There is also an extra column in the ``Comparison of Variable Ordering''
+table in the standard for Shifted using the CLDR, so [[tstucavar]]
+must be run again, but with the CLDR DUCET and variable top.
+Unfortunately, the CLDR DUCET also modifies other columns:  all of the
+happy/sad tests return the same result for the same reason that the
+shifted test returns the same result as non-ignorable.
+
+\lstset{language=txt}
+{\let\Tt\unimono
+<<varordtab_cldr.txt>>=
+non-Ign	Blanked	Shifted	IgnSP	Shft-Tr
+de luge	death	death	death	death
+de Luge	de luge	de luge	de luge	deluge
+de-luge	de-luge	de-luge	de-luge	de luge
+de-Luge	deluge	de‐luge	de‐luge	de-luge
+de‐luge	de‐luge	deluge	deluge	de‐luge
+de‐Luge	de Luge	de Luge	de Luge	deLuge
+death	de-Luge	de-Luge	de-Luge	de Luge
+deluge	deLuge	de‐Luge	de‐Luge	de-Luge
+deLuge	de‐Luge	deLuge	deLuge	de‐Luge
+demark	demark	demark	demark	demark
+				
+☠happy	☠happy	☠happy	☠happy	☠happy
+☠sad	☠sad	☠sad	☠sad	☠sad
+♡happy	♡happy	♡happy	♡happy	♡happy
+♡sad	♡sad	♡sad	♡sad	♡sad
+				
+@
+
+}
+
+\lstset{language=make}
+<<Plain Build Files>>=
+varordtab_cldr.txt \
+@
+
+<<makefile.vars>>=
+varordtab_cldr.txt: NOTANGLE_OPTS=-t8
+@
+
+<<makefile.rules>>=
+test: varordtab_cldr.txt
+@
+
+<<C Test Support Executables>>=
+tstucavar_cldr \
+@
+
+<<makefile.rules>>=
+tstucavar_cldr.c: tstucavar.c
+	sed -e '/max_level/a \\\
+	   opts.var_top = uni_DUCET_CLDR_var_top;\\\
+	   opts.tab = uni_DUCET_CLDR_mtab;\\\
+	   opts.strs = uni_DUCET_CLDR_strs;' $< > $@
+@
+
+<<Additional Tests>>=
+mkdir /tmp/tstucavartab.$$$$ && trap "rm -rf /tmp/tstucavartab.$$$$" 0 && \
+ln -s "$$PWD"/tstucavar_cldr /tmp/tstucavartab.$$$$/tstucavar && \
+ln -s "$$PWD"/{varord*.txt,tstucavartab} /tmp/tstucavartab.$$$$ && \
+cd /tmp/tstucavartab.$$$$ && \
+./tstucavartab varord[12].txt | diff - varordtab_cldr.txt
+@
+
 \section{The Locale Name}
 
 The first thing necessary for localization is to determine what locale
@@ -235,6 +299,7 @@ independent of the UCD, it is easiest to manage the locale name
 information as if it were standard enumerated types.  As such, the
 locale name parsing data is parsed in the UCD.
 
+\lstset{language=C}
 <<Parse character data files>>=
 force_chdir(cwd);
 force_chdir(CLDR_LOC);
