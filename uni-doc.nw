@@ -11,7 +11,7 @@
 % override with uni.nw's RCS info
 \input{uni-rcs.tex} %%% doc
 
-%%% requires uni
+%%% requires uni-locale
 %%% no-ext-ref
 
 \begin{document}
@@ -24,5 +24,7 @@
 \input{Introduction.tex} %%% doc
 
 \input{Users-Guide.tex} %%% doc
+
+\input{Users-Guide-Appendix.tex} %%% doc
 
 \end{document}

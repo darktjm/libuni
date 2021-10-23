@@ -3,8 +3,8 @@ other small Unicode-related utilities.  It was translated from two
 other projects of mine that had separate Unicode-related
 implementations.
 
-You can query a large number of properties consistently (56 boolean,
-22 enumerated, 8 numeric, 27 string at the time of this writing), and
+You can query a large number of properties consistently (64 boolean,
+25 enumerated, 9 numeric, 27 string at the time of this writing), and
 if you link statically, you will only burden your executable with the
 properties you actually use.  19 named Unicode algorithms are also
 implemented (all named algorithms in Table 3-1 of version 7.0 of the
