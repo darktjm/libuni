@@ -253,6 +253,11 @@ demark	demark	demark	demark	demark
 }
 
 \lstset{language=make}
+\lstset{language=make}
+<<makefile.vars>>=
+uni-locale.pdf uni-locale.html: NW_UTF8=1
+@
+
 <<Plain Build Files>>=
 varordtab_cldr.txt \
 @
