@@ -1024,9 +1024,7 @@ static int parse_locale_triplet(const char *txt)
   v = bsearch(&me, enum_vals[lang], enum_vals_len[lang], sizeof(me),
               uni_cmp_valueof);
   if(!v) {
-#if 0 /* too many of 'em, so just ignore */
     fprintf(stderr, "Unknown language %s\n", me.name);
-#endif
 #if 1 /* this is no time to be introducing new names */
     free(s);
     return 0;
@@ -1074,7 +1072,7 @@ static int parse_locale_triplet(const char *txt)
 
 <<Parse character data files>>=
 uni_cp_val_t *likely = NULL;
-int num_likely = 0;
+size_t num_likely = 0;
 doc = xmlReadFile("common/supplemental/likelySubtags.xml", NULL, xml_opts_dtd);
 if(!doc) {
   perror("likelySubtags.xml");
@@ -1091,12 +1089,11 @@ for(n = doc->children; n; n = n->next) {
 	  continue;
         char *from = xml_prop(n, "from");
 	char *to = xml_prop(n, "to");
-	int ft = parse_locale_triplet(from), tt = parse_locale_triplet(to);
+	uint32_t ft = parse_locale_triplet(from), tt = parse_locale_triplet(to);
 	if(ft && tt) { /* this is no time to be introducing new names */
 	  grow_size(likely, num_likely, num_likely + 1);
-	  likely[num_likely].cp = ft;
-	  likely[num_likely].val = tt;
-	  num_likely++;
+	  likely[num_likely - 1].cp = ft;
+	  likely[num_likely - 1].val = tt;
         }
 	xmlprop_free(from);
 	xmlprop_free(to);
@@ -1123,9 +1120,10 @@ xmlFreeDoc(doc);
   }
   fputs("};\n", of);
   fclose(of);
+  free(likely);
   /* FIXME: move to a locale-specific header */
   fprintf(gen_h, "/** Length of \\ref uni_CLDR_likely_subtags */\n"
-		 "#define uni_CLDR_likely_subtags_len %d\n", num_likely);
+		 "#define uni_CLDR_likely_subtags_len %d\n", (int)num_likely);
 }
 @
 
@@ -1383,6 +1381,7 @@ extern const uni_CLDR_locale_ext_desc_t uni_CLDR_locale_ext_desc[];
   }
   fputs("};\n", of);
   fclose(of);
+  free(CLDR_locale_ext_desc);
 }
 @
 
@@ -2646,11 +2645,25 @@ uni_locale_data/* \
 <<makefile.rules>>=
 misc: uni_locale_data.stamp
 uni_locale_data.stamp: parse-ldml
-	rm -rf uni_locale_data && ./parse-ldml && touch uni_locale_data.stamp
+	rm -rf uni_locale_data
+	./parse-ldml
+	# convert duplicates to soft links
+	find uni_locale_data -type f -exec md5sum {} \; > uni_locale_data.md5
+	sort uni_locale_data.md5 | uniq -w 32 -d | while read s ign; do \
+	  set -- $$(fgrep "$$s  " uni_locale_data.md5 | cut -d\  -f3-); \
+	  while [ $$# -gt 1 ]; do \
+	    f="$$1"; shift; test -h "$$f" && continue; \
+	    for f2 in "$$@"; do \
+	      test -h "$$f2" && continue; \
+	      cmp "$$f" "$$f2" >/dev/null 2>&1 && ln -sf "$${f##*/}" "$$f2"; \
+	    done; \
+	  done; \
+	done
+	touch uni_locale_data.stamp
 @
 
 <<Clean temporary files>>=
-rm -rf uni_locale_data.stamp
+rm -rf uni_locale_data.{md5,stamp}
 @
 
 <<Clean built files>>=
@@ -2821,15 +2834,29 @@ if(!langfile) {
 <<Open LDML output data file [[<<@pref>>]] without lang check>>
 @
 
+<<Build full name from (@lang) and (@pref)>>=
+char <<@lang>>_full[8 + 1 + 3 + sizeof("<<@pref>>")];
+strcpy(<<@lang>>_full, "<<@pref>>");
+strcpy(<<@lang>>_full + sizeof("<<@pref>>") - 1, <<@lang>>);
+@
+
 <<Open LDML output data file (@pref) without lang check>>=
-char langfile_full[8 + 1 + 3 + sizeof("<<@pref>>")];
-strcpy(langfile_full, "<<@pref>>");
-strcpy(langfile_full + sizeof("<<@pref>>") - 1, langfile);
+<<Build full name from [[langfile]] and [[<<@pref>>]]>>
+<<Enter locale data dir>>
+open_wf(of, langfile_full);
+wrbuf(of, magic, 4);
+<<Exit locale data dir>>
+@
+
+<<Enter locale data dir>>=
 char *od = getcwd_full();
 force_chdir(cwd);
 force_chdir("uni_locale_data");
-open_wf(of, langfile_full);
+@
+
+<<Exit locale data dir>>=
 force_chdir(od);
+free(od);
 @
 
 The segmentation exceptions modify the line, paragraph, and word
@@ -2866,10 +2893,10 @@ for(i = 0; i < uni_Ideo_rng_len; i++)
   replace_range_dat8(&dat8, &dat8_max, &dat8_len, uni_Ideo_rng[i].low,
                      uni_Ideo_rng[i].high, UNI_WBp_XX, add_WBp_ID);
 uint32_t *mtab, mtab_len;
+const char *magic = "WB00";
 mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_WB_XX);
 {
   <<Open LDML output data file [[WB]] without lang check>>
-  /* FIXME: add magic */
   wrmtab(of, mtab);
   free(mtab);
   close_wf(of);
@@ -2914,7 +2941,6 @@ replace_range_dat8(&dat8, &dat8_max, &dat8_len, '.', '.', UNI_WB_MN, NULL);
 mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_WB_XX);
 {
   <<Open LDML output data file [[WB]] without lang check>>
-  /* FIXME: add magic */
   wrmtab(of, mtab);
   free(mtab);
   close_wf(of);
@@ -2928,30 +2954,43 @@ intended by the zh locale changes, as they are marked as placeholders,
 but they are just a duplicate of the ja modifications, as of CLDR 39.
 
 <<Parse LDML files>>=
-/* JA ZH ZH_HANT locales: (ZH_HANT is covered by ZH) */
+/* JA ZH ZH_HANT locales: */
 sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_ja, ~0, ~0));
 check_size(dat8, dat8_max, dat8_len = uni_lbp_rng_len);
-cpybuf(dat8, uni_lb_rng, dat8_len);
+cpybuf(dat8, uni_lbp_rng, dat8_len);
 /* convert CJ to ID */
-/* CJ was converted to NA in lbp, so it needs to be read from lb */
+/* CJ was converted to NS in lbp, so it needs to be read from lb */
 for(i = 0; i < uni_lb_rng_len; i++)
   if(uni_lb_rng[i].dat == UNI_lb_CJ)
     replace_range_dat8(&dat8, &dat8_max, &dat8_len, uni_lb_rng[i].low,
                        uni_lb_rng[i].high, UNI_lbp_ID, NULL);
-mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_lb_XX);
+magic = "lb00";
+mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_lbp_AL);
 {
   <<Open LDML output data file [[lb]] without lang check>>
-  /* FIXME: add magic */
-  wrmtab(of, mtab);
-  close_wf(of);
-}
-sprintf(langfile, "%08X", uni_locale_triplet(UNI_CLDR_language_zh, ~0, ~0));
-{
-  <<Open LDML output data file [[lb]] without lang check>>
-  /* FIXME: add magic */
   wrmtab(of, mtab);
   free(mtab);
   close_wf(of);
+}
+char langfile2[8 + 1 + 3 + 1];
+sprintf(langfile2, "%08X", uni_locale_triplet(UNI_CLDR_language_zh, ~0, ~0));
+<<Link [[lb]] [[langfile]] to [[langfile2]]>>
+sprintf(langfile2, "%08X", uni_locale_triplet(UNI_CLDR_language_zh,
+                                              UNI_CLDR_script_hant, ~0));
+<<Link [[lb]] [[langfile]] to [[langfile2]]>>
+@
+
+<<Link (@pref) [[langfile]] to [[langfile2]]>>=
+{ 
+  <<Build full name from [[langfile]] and [[<<@pref>>]]>>
+  <<Build full name from [[langfile2]] and [[<<@pref>>]]>>
+  <<Enter locale data dir>>
+  if((remove(langfile2_full) && errno != ENOENT) ||
+     symlink(langfile_full, langfile2_full)) {
+    perror(langfile2_full);
+    exit(1);
+  }
+  <<Exit locale data dir>>
 }
 @
 
@@ -2965,10 +3004,10 @@ cpybuf(dat8, uni_SB_rng, dat8_len);
 /*  003B, 037E -> ST */
 replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x003B, 0x003B, UNI_SB_ST, NULL);
 replace_range_dat8(&dat8, &dat8_max, &dat8_len, 0x037E, 0x037E, UNI_SB_ST, NULL);
+magic = "SB00";
 mtab = uni_rng_dat8_to_multi(dat8, dat8_len, &mtab_len, UNI_SB_XX);
 {
   <<Open LDML output data file [[SB]] without lang check>>
-  /* FIXME: add magic */
   wrmtab(of, mtab);
   free(mtab);
   close_wf(of);
@@ -3023,7 +3062,8 @@ static void replace_range_dat8(uni_chrrng_dat8_t **rng, unsigned int *max,
     if((*rng)[l].high > high) {
       /* insert tail */
       check_size(*rng, *max, *len + 1);
-      movebuf(*rng + l + 1, *rng + l, *len - 1);
+      movebuf(*rng + l + 1, *rng + l, *len - l);
+      (*len)++;
       (*rng)[l].high = high;
       (*rng)[l + 1].low = high + 1;
       (*rng)[l].dat = adj ? adj(low, (*rng)[l].dat) : val;
@@ -3133,8 +3173,8 @@ else if(n->children && xml_isname(n, "segmentations")) {
 	  free(sup);
 	  if(!loc.suppression_trie)
 	    break;
+	  const char *magic = "SBs0";
 	  <<Open LDML output data file [[SBsup]]>>
-	  /* FIXME: add magic */
 	  nsup = loc.num_suppressions;
 	  wrbuf(of, &nsup, 1);
 	  uint32_t nstates = uni_trie_nstates(loc.suppression_trie);
@@ -3460,6 +3500,7 @@ else if(n->children && xml_isname(n, "characters")) {
       xmlprop_free(t);
       continue;
     }
+    const char *magic = "exe0";
     <<Open LDML output data file [[exemp]]>>
     /* store in file as :*/
     /*   <rle cp list len> */

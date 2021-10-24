@@ -8220,6 +8220,7 @@ void uni_aho_corasick_prep(uni_const_chrrng_trie_t trie, const uint32_t *trie_le
       dict_suffix[cur] = suf[cur] && suf[cur] <= nstr ?
 	                    suf[cur] : dict_suffix[suf[cur]];
   }
+  free(proc);
   if(!suffix)
     free(suf);
 }
@@ -8326,19 +8327,23 @@ int uni_utf8_suppressions(uni_sb_locale_t *locale,
   size_t nsup = 0;
   inisize(sups, nstr);
   <<Validate [[nstr]] suppressions in [[strs]] into [[sups]]/[[nsup]]>>
-  if(!nsup)
+  if(!nsup) {
+    <<Clean up suppression validation>>
     return 0;
+  }
   size_t nstates;
   uint32_t *trie_lens;
   uni_chrrng_trie_t rtrie = uni_utf8_strings_to_trie(sups, NULL, nsup,
                                                      &trie_lens, &nstates);
   if(!rtrie) {
     free(sups);
+    <<Clean up suppression validation>>
     return 0;
   }
   if(nstates > 0x7fff) { /* need room for flag */
     uni_free_chrrng_trie(rtrie, trie_lens, nstates);
     free(sups);
+    <<Clean up suppression validation>>
     return 0;
   }
   locale->suppression_trie =
@@ -8353,6 +8358,7 @@ int uni_utf8_suppressions(uni_sb_locale_t *locale,
   uni_free_chrrng_trie(rtrie, trie_lens, nstates);
   <<Validate/adjust suppressions in [[locale]]>>
   free(sups);
+  <<Clean up suppression validation>>
   return 1;
 }
 @
@@ -8447,6 +8453,13 @@ for(int i = 0; i < nstr; i++) {
 }
 @
 
+<<Clean up suppression validation>>=
+for(int i = 0; i < nstr; i++)
+  if(breaks[i])
+    free(breaks[i]);
+free(breaks);
+@
+
 In order to take care of backtracking case \ref{item:suppartfail},
 any suffix link which shifts the start point past the first SB11 break
 in the string being matched must be treated like a full match failure.
@@ -8509,6 +8522,7 @@ for(int i = 0; i < nstr; i++) {
 	locale->suppression_trie = NULL;
 	locale->num_suppressions = 0;
 	locale->suppression_suffix = NULL;
+	<<Clean up suppression validation>>
 	return 0;
       } else if(warn && didpass)
 	fprintf(stderr, "%s: warning: [%s] passes break in [%s]\n",
