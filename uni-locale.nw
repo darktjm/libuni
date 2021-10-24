@@ -11,6 +11,8 @@
 
 %%% requires uni
 
+\input{unifonts.tex} %%% doc
+
 \begin{document}
 
 \title{Unicode Locale Support Data Files}
@@ -137,6 +139,7 @@ int main(void)
 <<XML Support Definitions>>
 @
 
+\lstset{language=make}
 <<makefile.vars>>=
 parse-ldml.o: EXTRA_CFLAGS += -DCLDR_LOC=\"$(CLDR_LOC)\" $(XML_CFLAGS)
 parse-ldml: EXTRA_LDFLAGS += $(XML_LDFLAGS)
@@ -165,6 +168,7 @@ DUCET; it can be selected manually using the locale extension
 formats, but as long as the DUCET-format file exists, it's the one
 that's parsed.
 
+\lstset{language=C}
 <<Initialize UCD files>>=
 decl_str(DUCET_CLDR);
 @
@@ -252,7 +256,6 @@ demark	demark	demark	demark	demark
 
 }
 
-\lstset{language=make}
 \lstset{language=make}
 <<makefile.vars>>=
 uni-locale.pdf uni-locale.html: NW_UTF8=1
@@ -2840,12 +2843,6 @@ special WB codes that are hard-coded into the word break algorithm
 (and are supported regardless of locale).  The only other modification
 is for the en\_US\_POSIX locale, which replaces two codes.
 
-\lstset{language=txt}
-<<FIXME>>=
-Use WBp property instead of WB, which should include HI/ID constants
-Use lbp property instead of lb
-@
-
 \lstset{language=C}
 <<Parse LDML files>>=
 uni_chrrng_dat8_t *dat8 = NULL;
@@ -3180,6 +3177,7 @@ Test suppressions by running them on the suppression strings themselves.
 The collations subdirectory contains locale-specific collation order
 changes.
 
+\lstset{language=C}x
 <<Parse LDML files>>=
 /* collation: locale-specific collation rules */
 doc = read_xml_dir("common/collation");
