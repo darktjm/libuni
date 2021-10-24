@@ -8454,9 +8454,9 @@ for(int i = 0; i < nstr; i++) {
 @
 
 <<Clean up suppression validation>>=
-for(int i = 0; i < nstr; i++)
-  if(breaks[i])
-    free(breaks[i]);
+for(int j = 0; j < nstr; j++)
+  if(breaks[j])
+    free(breaks[j]);
 free(breaks);
 @
 
@@ -21566,7 +21566,7 @@ expensive.
 % For this document, I'm making the appendix the "user documentation"
 \appendix
 
-% Begin-doc Users-Guide
+% Begin-doc Introduction
 \chapter{Building}
 
 Before starting, ensure that all prerequisites are present.  To build
@@ -21615,6 +21615,9 @@ start at [[UCD_LOC]].
 
 \input{makefile.config.tex} % make
 
+% End-doc Introduction
+
+% Begin-doc Users-Guide
 \chapter{API Documentation}
 
 The easiest way to include this library's definitions is using
@@ -23952,8 +23955,8 @@ normalization.}
 \end{table}
 
 % End-doc Users-Guide
-% Begin-doc Users-Guide-Appendix
 
+% Begin-doc Introduction
 \section{Doxygen support}
 
 The header files contain comments which can be parsed by doxygen%
@@ -23965,10 +23968,13 @@ way to generate man pages.  Running doxygen is entirely manual, but I
 have included the [[Doxyfile]] I used during testing for reference.
 Just extract it ([[make misc]] will do), maybe also manually make the
 headers, and run [[doxygen]].  Note that once again, the rapid growth
-of Unicode has broken something:  doxygen can no longer create its PDF
-documentation due to too many language codes (actually, pdflatex runs
-out of memory).  I may one day decide to drop this and use some other
-in-line documentation method instead.
+of Unicode has broken something:  [[doxygen]] can no longer create its
+PDF documentation due to too many language codes (actually,
+[[pdflatex]] runs out of memory, even if its memory limits are maxed
+out).  I may one day decide to drop this and use some other in-line
+documentation method instead (although this particular issue is
+probably telling me that I shouldn't create enumerations from CLDR
+data).
 
 \lstset{language=make}
 <<Doxyfile>>=
@@ -23998,7 +24004,7 @@ LATEX_BATCHMODE        = YES
 Doxyfile \
 @
 
-% End-doc Users-Guide-Appendix
+% End-doc Introduction
 
 \end{document}
 

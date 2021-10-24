@@ -25,6 +25,4 @@
 
 \input{Users-Guide.tex} %%% doc
 
-\input{Users-Guide-Appendix.tex} %%% doc
-
 \end{document}
